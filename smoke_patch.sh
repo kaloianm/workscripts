@@ -60,7 +60,7 @@ fi
 export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
 export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 
-export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/lint lint"
+export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 
 export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --nopreallocj --log=file"
 
@@ -68,8 +68,6 @@ git clone --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
 pushd "$TESTRUNDIR/mongo"
 
 git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "src/mongo/db/modules/ninja"
-
-mkdir "./lint"
 
 #
 # TODO: Support for Enterprise builds
