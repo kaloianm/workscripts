@@ -32,7 +32,7 @@ mkdir "$TESTRUNDIR"
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/3.6.0
+export TOOLSDIR=/home/kaloianm/mongodb/3.6.2
 
 export RESMOKECMD=buildscripts/resmoke.py
 export SCONSCMD=buildscripts/scons.py
