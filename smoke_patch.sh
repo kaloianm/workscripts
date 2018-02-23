@@ -135,23 +135,12 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# 1) Execute the unit tests first to uncover early problems, before even scheduling any of the longer running JS tests
+# Execute the unit tests first to uncover early problems, before even scheduling any of the longer running JS tests
 #
 echo "Running unittests ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --suites=unittests
 if [ $? -ne 0 ]; then
     echo "unittests failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-#
-# 2) Execute core tests
-#
-echo "Running MMAP V1 dbtest,core ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=mmapv1 --suites=dbtest,core
-if [ $? -ne 0 ]; then
-    echo "MMAP V1 basic tests failed with error $?"
     kill -9 `jobs -p`
     exit 1
 fi
@@ -165,7 +154,7 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# 3) Aggregation tests
+# Aggregation tests (they run relatively quick and uncover early sharding problems)
 #
 echo "Running WT aggregation ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation
@@ -176,7 +165,7 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# 4) Auth tests
+# Auth tests
 #
 echo "Running WT auth ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth
@@ -187,7 +176,7 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# 5) Sharding jscore passthough
+# Sharding jscore passthough
 #
 echo "Running WT sharding_jscore_passthrough ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough
@@ -198,7 +187,7 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# 6) Sharding suite
+# Sharding suite
 #
 echo "Running WT sharding ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --continueOnFailure --storageEngine=wiredTiger --suites=sharding
