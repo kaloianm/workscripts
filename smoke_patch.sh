@@ -32,7 +32,7 @@ mkdir "$TESTRUNDIR"
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/3.6.2
+export TOOLSDIR=/home/kaloianm/mongodb/3.6.3
 
 export RESMOKECMD=buildscripts/resmoke.py
 export SCONSCMD=buildscripts/scons.py
@@ -86,7 +86,7 @@ if false; then
 fi
 
 echo "Applying patch file $PATCHFILE"
-git apply $PATCHFILE
+git am $PATCHFILE
 if [ $? -ne 0 ]; then
     echo "git apply failed with error $?"
     exit 1
