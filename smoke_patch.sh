@@ -37,8 +37,8 @@ export TOOLSDIR=/home/kaloianm/mongodb/3.6.3
 export RESMOKECMD=buildscripts/resmoke.py
 export SCONSCMD=buildscripts/scons.py
 
-export CPUS_FOR_BUILD=300
-export CPUS_FOR_LINT=3
+export CPUS_FOR_BUILD=500
+export CPUS_FOR_LINT=6
 export CPUS_FOR_TESTS=12
 
 export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
