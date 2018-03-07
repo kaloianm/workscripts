@@ -62,7 +62,7 @@ export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 
 export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 
-export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --nopreallocj --log=file"
+export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --continueOnFailure --log=file"
 
 git clone --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
 pushd "$TESTRUNDIR/mongo"
@@ -190,7 +190,7 @@ fi
 # Sharding suite
 #
 echo "Running WT sharding ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --continueOnFailure --storageEngine=wiredTiger --suites=sharding
+time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding
 if [ $? -ne 0 ]; then
     echo "WT sharding failed with error $?"
     kill -9 `jobs -p`
