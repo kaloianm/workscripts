@@ -70,29 +70,30 @@
         };
     }
 
-    function getBalancerStatus() {
+    function ensureBalancerStopped() {
+        // Stop the sharding balancer. This command will ensure that any active balancer rounds have
+        // completed before it returns.
+        sh.stopBalancer();
+
         var balancerStatus = assert.commandWorked(db.adminCommand({balancerStatus: 1}));
-        if (balancerStatus.mode !== 'off') {
-            throw Error('Balancer is still enabled');
-        }
-
-        return balancerStatus;
+        assert(balancerStatus.mode === 'off',
+               'Balancer is still enabled: ' + tojson(balancerStatus));
+        print('Balancer stopped. Status is: ', tojson(balancerStatus));
     }
+    ensureBalancerStopped();
 
-    // Stop the sharding balancer and make sure any current
-    sh.stopBalancer();
-    print('Balancer stopped. Status is: ', tojson(getBalancerStatus()));
-
-    // Fix all collections
+    // Fix all chunks for all collections
     configDb.collections.find({dropped: {$ne: true}}).forEach(collObj => {
         print('Fixing chunks for collection', collObj._id);
-        let nextAction = generateNextActionForChunksCollection(collObj._id);
-        if (nextAction === null) {
-            print('No illegal chunks found, moving on to next collection.');
-            return;
-        }
+        while (true) {
+            let nextAction = generateNextActionForChunksCollection(collObj._id);
+            if (nextAction === null) {
+                print('No more illegal chunks found, moving on to next collection.');
+                return;
+            }
 
-        print('Running command', tojson(nextAction));
-        assert.commandWorked(db.adminCommand(nextAction));
+            print('Running command:', tojson(nextAction));
+            assert.commandWorked(db.adminCommand(nextAction));
+        }
     });
 })();
