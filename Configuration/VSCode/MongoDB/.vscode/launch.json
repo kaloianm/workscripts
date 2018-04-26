@@ -14,7 +14,7 @@
             "name": "(Windows) Generic run",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/mongod.exe",
+            "program": "${workspaceFolder}/build/ninja/mongo/s/sharding_routing_table_test.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

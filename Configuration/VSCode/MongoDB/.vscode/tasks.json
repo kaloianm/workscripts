@@ -9,7 +9,8 @@
             "command": "buildscripts/clang_format.py format",
             "options": {
                 "cwd": "${workspaceFolder}"
-            }
+            },
+            "problemMatcher": []
         }
     ]
 }

@@ -24,6 +24,7 @@
         "xhash": "cpp",
         "xstring": "cpp",
         "xtree": "cpp",
-        "*.ipp": "cpp"
+        "*.ipp": "cpp",
+        "utility": "cpp"
     }
 }
