@@ -11,7 +11,9 @@
                 "${workspaceFolder}",
                 "${workspaceFolder}/build/ninja",
                 "${workspaceFolder}/src",
-                "${workspaceFolder}/src/third_party/boost-1.60.0"
+                "${workspaceFolder}/src/third_party/boost-1.60.0",
+                "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/pcre-8.41"
             ],
             "defines": [],
             "intelliSenseMode": "clang-x64",
@@ -25,7 +27,7 @@
                     "${workspaceFolder}"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
-                "databaseFilename": ""
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
             },
             "macFrameworkPath": [
                 "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.13.sdk/System/Library/Frameworks"
@@ -50,8 +52,8 @@
             ],
             "defines": [
                 "_DEBUG",
-                "UNICODE",
-                "_UNICODE"
+                "_UNICODE",
+                "UNICODE"
             ],
             "intelliSenseMode": "msvc-x64",
             "browse": {
@@ -60,7 +62,7 @@
                     "${workspaceFolder}"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
-                "databaseFilename": ""
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
             },
             "cStandard": "c11",
             "cppStandard": "c++17"
@@ -70,7 +72,12 @@
             "includePath": [
                 "/usr/include",
                 "/usr/local/include",
-                "${workspaceFolder}"
+                "${workspaceFolder}",
+                "${workspaceFolder}/build/ninja",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/src/third_party/boost-1.60.0",
+                "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/pcre-8.41"
             ],
             "defines": [],
             "intelliSenseMode": "clang-x64",
@@ -81,7 +88,7 @@
                     "${workspaceFolder}"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
-                "databaseFilename": ""
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
             }
         }
     ],

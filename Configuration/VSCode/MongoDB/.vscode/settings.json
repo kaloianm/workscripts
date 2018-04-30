@@ -25,6 +25,13 @@
         "xstring": "cpp",
         "xtree": "cpp",
         "*.ipp": "cpp",
-        "utility": "cpp"
+        "utility": "cpp",
+        "array": "cpp",
+        "initializer_list": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "valarray": "cpp",
+        "xutility": "cpp",
+        "*.i": "cpp"
     }
 }
