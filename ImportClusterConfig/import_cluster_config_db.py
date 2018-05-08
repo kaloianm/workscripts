@@ -59,21 +59,30 @@ def main():
     ])
 
     configDBPreprocess = MongoClient('localhost', mongodPreprocessPort).config
-
     numShards = configDBPreprocess.shards.count({})
+
+    mlaunchStartingPort = 20000
     mlaunchCommandLine = [
         'mlaunch init --replicaset --nodes 1 ', '--sharded',
         str(numShards), '--csrs --mongos 1 --port ',
-        str(20000), '--binarypath', args.binarypath, '--dir',
+        str(mlaunchStartingPort), '--binarypath', args.binarypath, '--dir',
         args.datapath + '/cluster'
     ]
-
     print('mlaunch command line:', ' '.join(mlaunchCommandLine))
     subprocess.run(' '.join(mlaunchCommandLine), shell=True, check=True)
 
+    configServerPort = mlaunchStartingPort + numShards + 1
+    subprocess.check_call([
+        mongoRestoreBinary, '--port',
+        str(configServerPort), '--numInsertionWorkersPerCollection', '32',
+        args.configdumpdir[0]
+    ])
+
+    configServerConfigDB = MongoClient('localhost', configServerPort).config
+
     existingShardIds = []
     newShardIds = []
-    shardIdCounter = 0
+    shardIdCounter = 1
     for shard in configDBPreprocess.shards.find({}):
         existingShardId = shard['_id']
         existingShardIds.append(existingShardId)
@@ -81,11 +90,23 @@ def main():
         newShardId = 'shard0' + str(shardIdCounter)
         newShardIds.append(newShardId)
 
-        print("db.databases.update({primary: '", existingShardId, "'}, {$set: {primary: '" + newShardId + "'}}, {multi: true});")
-        print("db.chunks.update({shard: '", existingShardId, "'}, {$set: {shard: '" + newShardId + "'}}, {multi: true});")
+        print("db.databases.update({primary: '" + existingShardId + "'}, {$set: {primary: '" + newShardId + "'}}, {multi: true});")
+        result = configServerConfigDB.databases.update_many({'primary': existingShardId}, {'$set': {'primary': newShardId}})
+        print(result.modified_count)
 
-    print("db.shards.remove({_id: {$not: {$in: ", list(map(str, existingShardIds)), "}}});")
+        print("db.chunks.update({shard: '" + existingShardId + "'}, {$set: {shard: '" + newShardId + "'}}, {multi: true});")
+        result = configServerConfigDB.chunks.update_many({'shard': existingShardId}, {'$set': {'shard': newShardId}})
+        print(result.modified_count)
 
+        shardIdCounter = shardIdCounter + 1
+
+    print("db.shards.remove({_id: {$not: {$in: ", list(map(str, newShardIds)), "}}});")
+    result = configServerConfigDB.shards.delete_many({'_id': {'$not': {'$in': list(map(str, newShardIds))}}})
+    print(result.deleted_count)
+
+    mlaunchRestartCommandLine = ['mlaunch restart --dir', args.datapath + '/cluster']
+    print('mlaunch restart command line:', ' '.join(mlaunchRestartCommandLine))
+    subprocess.run(' '.join(mlaunchRestartCommandLine), shell=True, check=True)
 
 if __name__ == "__main__":
     main()
