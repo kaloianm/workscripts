@@ -147,9 +147,9 @@ def main():
     # TODO: Construct the sharded indexes on all shard nodes
 
     # Restart the cluster so it picks up the new configuration cleanly
-    mlaunchRestartCommandLine = ['mlaunch restart --dir', mongodClusterRootPath]
+    mlaunchRestartCommandLine = ['mlaunch', 'restart', '--dir', mongodClusterRootPath]
     print('Restarting cluster using mlaunch command line:', ' '.join(mlaunchRestartCommandLine))
-    subprocess.run(' '.join(mlaunchRestartCommandLine), shell=True, check=True)
+    subprocess.check_call(mlaunchRestartCommandLine)
 
     return 0
 
