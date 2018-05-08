@@ -27,8 +27,8 @@ def yes_no(answer):
 def main():
     argsParser = argparse.ArgumentParser(
         description=
-        'Tool to interpret a cluster config database and construct a cluster with exactly the same configuration'
-    )
+        'Tool to interpret an export of a cluster config database and construct a new cluster with'
+        'exactly the same configuration. Requires mlaunch to be installed and in the system path.')
     argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
                             metavar='binarypath', type=str, required=True)
     argsParser.add_argument(
@@ -37,7 +37,7 @@ def main():
         metavar='datapath', type=str, required=True)
     argsParser.add_argument('configdumpdir',
                             help='Directory containing a dump of the cluster config database',
-                            metavar='configdumpdir', type=str, nargs='+')
+                            metavar='configdumpdir', type=str, nargs=1)
 
     args = argsParser.parse_args()
 
