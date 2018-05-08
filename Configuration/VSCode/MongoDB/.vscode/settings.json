@@ -32,6 +32,17 @@
         "stack": "cpp",
         "valarray": "cpp",
         "xutility": "cpp",
-        "*.i": "cpp"
+        "*.i": "cpp",
+        "rope": "cpp",
+        "__hash_table": "cpp",
+        "__tree": "cpp",
+        "hash_map": "cpp",
+        "hash_set": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "ios": "cpp"
     }
 }
