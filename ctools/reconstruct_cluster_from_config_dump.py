@@ -84,6 +84,11 @@ def main():
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     configDBPreprocess = MongoClient('localhost', mongodPreprocessPort).config
     numShards = configDBPreprocess.shards.count({})
+    if (numShards > 10):
+        if (not yes_no('The imported configuration data contains large number of shards (' + str(
+                numShards) + '). Proceeding will start large number of mongod processes.\n' +
+                       'Are you sure you want to continue (yes/no)? ')):
+            return 1
 
     mlaunchStartingPort = 20000
     mlaunchCommandLine = [
