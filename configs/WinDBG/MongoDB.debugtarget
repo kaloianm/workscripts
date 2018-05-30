@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TargetConfig Name="Workspace configuration" LastUsed="2018-05-18T20:24:56.0429634Z">
+  <EngineConfig />
+  <EngineOptions>
+    <Property name="FinalBreak" value="true" />
+    <Property name="SourceDebugging" value="true" />
+    <Property name="DebugChildProcesses" value="false" />
+    <Property name="Noninvasive" value="false" />
+    <Property name="NoDebugHeap" value="false" />
+    <Property name="Verbose" value="false" />
+    <Property name="SymbolOptionsOverride" value="0" />
+    <Property name="ShouldOverrideSymbolOptions" value="false" />
+    <Property name="SymOptExactSymbols" value="false" />
+    <Property name="SymOptFailCriticalErrors" value="false" />
+    <Property name="SymOptIgnoreCvRec" value="false" />
+    <Property name="SymOptIgnoreNtSympath" value="false" />
+    <Property name="SymOptNoCpp" value="false" />
+    <Property name="SymOptNoUnqualifiedLoads" value="false" />
+    <Property name="SymOptAutoPublics" value="false" />
+    <Property name="SymOptDebug" value="false" />
+    <Property name="Elevate" value="false" />
+    <Property name="Restartable" value="true" />
+    <Property name="UseImplicitCommandLine" value="false" />
+    <Property name="EngineBitness" value="AutoDetect" />
+  </EngineOptions>
+  <TargetOptions />
+</TargetConfig>
