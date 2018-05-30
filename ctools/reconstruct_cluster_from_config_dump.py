@@ -40,11 +40,14 @@ class ToolConfiguration:
 
     # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
     def restore_config_db_to_port(self, restorePort):
-        subprocess.check_call([
+        mongorestoreCommand = [
             self.mongoRestoreBinary, '--port',
             str(restorePort), '--numInsertionWorkersPerCollection',
             str(self.mongoRestoreNumInsertionWorkers), self.configdump
-        ])
+        ]
+
+        print('Executing mongorestore command: ' + ' '.join(mongorestoreCommand))
+        subprocess.check_call(mongorestoreCommand)
 
     # Invokes the specified 'action' of mlaunch with 'dir' as the environment directory. All the
     # remaining 'args' are just appended to the thus constructed command line.
@@ -96,6 +99,7 @@ def cleanup_previous_runs(config):
         else:
             if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
                 process.kill()
+                process.wait()
 
     shutil.rmtree(config.dir)
     return True
