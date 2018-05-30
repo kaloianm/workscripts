@@ -3,10 +3,19 @@
 
 import argparse
 import os
+import psutil
+import shutil
 import subprocess
+import sys
 
 from bson.codec_options import CodecOptions
 from pymongo import MongoClient
+
+
+def exe_name(name):
+    if (sys.platform == 'win32'):
+        return name + '.exe'
+    return name
 
 
 # Class to abstract the tool's command line parameters configuration
@@ -18,8 +27,7 @@ class ToolConfiguration:
         self.dir = args.dir
         self.configdump = args.configdumpdir[0]
 
-        self.mongoDBinary = os.path.join(self.binarypath, 'mongod')
-        self.mongoRestoreBinary = os.path.join(self.binarypath, 'mongorestore')
+        self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
 
         self.clusterIntrospectMongoDPort = 19000
         self.clusterStartingPort = 20000
@@ -73,16 +81,23 @@ def yes_no(answer):
 # Performs cleanup by killing all potentially running mongodb processes and deleting any leftover
 # files. Basically leaves '--dir' empty.
 def cleanup_previous_runs(config):
-    killAllMongoDBProcessesCmd = 'killall -9 mongod mongos'
-    wipeOutDataPathCmd = 'rm -rf ' + config.dir + '/*'
-
-    if (not yes_no('The next step will kill all mongodb processes and wipe out the data path (' +
-                   killAllMongoDBProcessesCmd + '; ' + wipeOutDataPathCmd + ').' + '\n' +
+    if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n' +
                    'Proceed (yes/no)? ')):
         return False
 
-    subprocess.run(killAllMongoDBProcessesCmd, shell=True, check=False)
-    subprocess.run(wipeOutDataPathCmd, shell=True, check=False)
+    # Iterate through all processes and kill mongod and mongos
+    for process in psutil.process_iter():
+        try:
+            processExecutable = os.path.basename(process.exe())
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.AccessDenied:
+            pass
+        else:
+            if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
+                process.kill()
+
+    shutil.rmtree(config.dir)
     return True
 
 
