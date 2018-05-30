@@ -4,4 +4,5 @@
         "--style",
         "{based_on_style: pep8, indent_width: 4, column_limit: 100, indent_dictionary_value: true, split_before_named_assigns: false, join_multiple_lines: false}"
     ],
+    "python.pythonPath": "/usr/local/bin/python3",
 }
