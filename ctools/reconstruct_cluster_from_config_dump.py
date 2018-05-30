@@ -9,7 +9,53 @@ from bson.codec_options import CodecOptions
 from pymongo import MongoClient
 
 
-# Function for a Yes/No result based on the answer provided as an arguement
+# Class to abstract the tool's command line parameters configuration
+class ToolConfiguration:
+
+    # Class initialization. The 'args' parameter contains the parsed tool command line arguments.
+    def __init__(self, args):
+        self.binarypath = args.binarypath
+        self.dir = args.dir
+        self.configdump = args.configdumpdir[0]
+
+        self.mongoDBinary = os.path.join(self.binarypath, 'mongod')
+        self.mongoRestoreBinary = os.path.join(self.binarypath, 'mongorestore')
+
+        self.clusterIntrospectMongoDPort = 19000
+        self.clusterStartingPort = 20000
+
+        self.mongoRestoreNumInsertionWorkers = 16
+
+        print('Running cluster import with binaries located at: ', self.binarypath)
+        print('Data directory root at: ', self.dir)
+        print('Config dump directory at: ', self.configdump)
+
+    # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
+    def restore_config_db_to_port(self, restorePort):
+        subprocess.check_call([
+            self.mongoRestoreBinary, '--port',
+            str(restorePort), '--numInsertionWorkersPerCollection',
+            str(self.mongoRestoreNumInsertionWorkers), self.configdump
+        ])
+
+    # Invokes the specified 'action' of mlaunch with 'dir' as the environment directory. All the
+    # remaining 'args' are just appended to the thus constructed command line.
+    def mlaunch_action(self, action, dir, args=[]):
+        if (not isinstance(args, list)):
+            raise TypeError('args must be of type list.')
+
+        mlaunchPrefix = ['mlaunch', action, '--binarypath', self.binarypath, '--dir', dir]
+
+        if (set(mlaunchPrefix) & set(args)):
+            raise ValueError('args duplicates values in mlaunchPrefix')
+
+        mlaunchCommand = mlaunchPrefix + args
+
+        print('Executing mlaunch command: ' + ' '.join(mlaunchCommand))
+        subprocess.check_call(mlaunchCommand)
+
+
+# Function for a Yes/No result based on the answer provided as an argument
 def yes_no(answer):
     yes = set(['yes', 'y', 'ye', ''])
     no = set(['no', 'n'])
@@ -24,6 +70,22 @@ def yes_no(answer):
             print("Please respond with 'yes' or 'no'\n")
 
 
+# Performs cleanup by killing all potentially running mongodb processes and deleting any leftover
+# files. Basically leaves '--dir' empty.
+def cleanup_previous_runs(config):
+    killAllMongoDBProcessesCmd = 'killall -9 mongod mongos'
+    wipeOutDataPathCmd = 'rm -rf ' + config.dir + '/*'
+
+    if (not yes_no('The next step will kill all mongodb processes and wipe out the data path (' +
+                   killAllMongoDBProcessesCmd + '; ' + wipeOutDataPathCmd + ').' + '\n' +
+                   'Proceed (yes/no)? ')):
+        return False
+
+    subprocess.run(killAllMongoDBProcessesCmd, shell=True, check=False)
+    subprocess.run(wipeOutDataPathCmd, shell=True, check=False)
+    return True
+
+
 # Main entrypoint for the application
 def main():
     argsParser = argparse.ArgumentParser(
@@ -33,57 +95,33 @@ def main():
     argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
                             metavar='binarypath', type=str, required=True)
     argsParser.add_argument(
-        '--datapath',
-        help='Directory in which to place the data files (will create subdirectories)',
-        metavar='datapath', type=str, required=True)
+        '--dir', help='Directory in which to place the data files (will create subdirectories)',
+        metavar='dir', type=str, required=True)
     argsParser.add_argument('configdumpdir',
                             help='Directory containing a dump of the cluster config database',
                             metavar='configdumpdir', type=str, nargs=1)
 
-    args = argsParser.parse_args()
+    config = ToolConfiguration(argsParser.parse_args())
 
-    print('Running cluster import with binaries located at: ', args.binarypath)
-    print('Data directory root at: ', args.datapath)
-    print('Config dump directory at: ', args.configdumpdir[0])
+    if (not cleanup_previous_runs(config)):
+        return -1
 
-    # Perform cleanup by killing all potentially running mongodb processes
-    killAllMongoDBProcessesCmd = 'killall -9 mongod mongos'
-    wipeOutDataPathCmd = 'rm -rf ' + args.datapath + '/*'
-    if (not yes_no('The next step will kill all mongodb processes and wipe out the data path (' +
-                   killAllMongoDBProcessesCmd + '; ' + wipeOutDataPathCmd + ').' + '\n' +
-                   'Proceed (yes/no)? ')):
-        return 1
+    # Make the output directories
+    mongodPreprocessDataPath = os.path.join(config.dir, 'config_preprocess_instance')
+    os.makedirs(mongodPreprocessDataPath)
 
-    subprocess.run(killAllMongoDBProcessesCmd, shell=True, check=False)
-    subprocess.run(wipeOutDataPathCmd, shell=True, check=False)
-
-    # Script constants configuration
-    mongoDBinary = os.path.join(args.binarypath, 'mongod')
-    mongoRestoreBinary = os.path.join(args.binarypath, 'mongorestore')
-
-    mongodPreprocessDataPath = os.path.join(args.datapath, 'config_preprocess_instance')
-    mongodClusterRootPath = os.path.join(args.datapath, 'cluster_root')
-
-    mongoDStartingPort = 19000
-    mongoRestoreNumInsertionWorkers = 16
+    mongodClusterRootPath = os.path.join(config.dir, 'cluster_root')
+    os.makedirs(mongodClusterRootPath)
 
     # Start the instance through which to read the cluster configuration dump and restore the dump
-    mongodPreprocessPort = mongoDStartingPort
-    print('Pre-processing config dump at port ', mongodPreprocessPort)
-    os.makedirs(mongodPreprocessDataPath)
-    subprocess.check_call([
-        mongoDBinary, '--dbpath', mongodPreprocessDataPath, '--logpath',
-        os.path.join(mongodPreprocessDataPath + '/mongod.log'), '--port',
-        str(mongodPreprocessPort), '--fork'
-    ])
-    subprocess.check_call([
-        mongoRestoreBinary, '--port',
-        str(mongodPreprocessPort), '--numInsertionWorkersPerCollection',
-        str(mongoRestoreNumInsertionWorkers), args.configdumpdir[0]
-    ])
+    print('Pre-processing config dump at port ', config.clusterIntrospectMongoDPort)
+    config.mlaunch_action(
+        'init', mongodPreprocessDataPath,
+        ['--single', '--port', str(config.clusterIntrospectMongoDPort)])
+    config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
-    configDBPreprocess = MongoClient('localhost', mongodPreprocessPort).config
+    configDBPreprocess = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
     numShards = configDBPreprocess.shards.count({})
     if (numShards > 10):
         if (not yes_no('The imported configuration data contains large number of shards (' + str(
@@ -92,21 +130,14 @@ def main():
             return 1
 
     mlaunchStartingPort = 20000
-    mlaunchCommandLine = [
-        'mlaunch', 'init', '--replicaset', '--nodes', '1', '--sharded',
+    config.mlaunch_action('init', mongodClusterRootPath, [
+        '--replicaset', '--nodes', '1', '--sharded',
         str(numShards), '--csrs', '--mongos', '1', '--port',
-        str(mlaunchStartingPort), '--binarypath', args.binarypath, '--dir', mongodClusterRootPath
-    ]
-    print('Starting cluster using mlaunch command line:', ' '.join(mlaunchCommandLine))
-    os.makedirs(mongodClusterRootPath)
-    subprocess.check_call(mlaunchCommandLine)
+        str(mlaunchStartingPort)
+    ])
 
     configServerPort = mlaunchStartingPort + numShards + 1
-    subprocess.check_call([
-        mongoRestoreBinary, '--port',
-        str(configServerPort), '--numInsertionWorkersPerCollection',
-        str(mongoRestoreNumInsertionWorkers), args.configdumpdir[0]
-    ])
+    config.restore_config_db_to_port(configServerPort)
 
     configServerConnection = MongoClient('localhost', configServerPort)
     configServerConfigDB = configServerConnection.config
@@ -193,9 +224,7 @@ def main():
         shardConnection.close()
 
     # Restart the cluster so it picks up the new configuration cleanly
-    mlaunchRestartCommandLine = ['mlaunch', 'restart', '--dir', mongodClusterRootPath]
-    print('Restarting cluster using mlaunch command line:', ' '.join(mlaunchRestartCommandLine))
-    subprocess.check_call(mlaunchRestartCommandLine)
+    config.mlaunch_action('restart', mongodClusterRootPath)
 
     return 0
 
