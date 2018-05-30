@@ -5,6 +5,7 @@ import argparse
 import os
 import subprocess
 
+from bson.codec_options import CodecOptions
 from pymongo import MongoClient
 
 
@@ -107,7 +108,8 @@ def main():
         str(mongoRestoreNumInsertionWorkers), args.configdumpdir[0]
     ])
 
-    configServerConfigDB = MongoClient('localhost', configServerPort).config
+    configServerConnection = MongoClient('localhost', configServerPort)
+    configServerConfigDB = configServerConnection.config
 
     existingShardIds = []
     newShardIds = []
@@ -149,7 +151,46 @@ def main():
     })
     print(result.raw_result)
 
-    # TODO: Construct the sharded indexes on all shard nodes
+    # Create the collections and construct sharded indexes on all shard nodes
+    for shard in configServerConfigDB.shards.find({}):
+        print('Creating shard key indexes on shard ' + shard['_id'])
+
+        shardConnParts = shard['host'].split('/', 1)
+        shardConnection = MongoClient(shardConnParts[1], replicaset=shardConnParts[0])
+
+        for collection in configServerConfigDB.collections.find({'dropped': False}):
+            collectionParts = collection['_id'].split('.', 1)
+            dbName = collectionParts[0]
+            collName = collectionParts[1]
+            collUUID = collection['uuid']
+            shardKey = collection['key']
+
+            db = shardConnection.get_database(dbName)
+
+            applyOpsCommand = {
+                'applyOps': [{
+                    'op': 'c',
+                    'ns': dbName + '.$cmd',
+                    'o': {
+                        'create': collName,
+                    },
+                    'ui': collUUID,
+                }]
+            }
+            print("db.adminCommand(" + str(applyOpsCommand) + ");")
+            db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
+
+            createIndexesCommand = {
+                'createIndexes': collName,
+                'indexes': [{
+                    'key': shardKey,
+                    'name': 'Shard key index'
+                }]
+            }
+            print("db.getSiblingDB(" + dbName + ").runCommand(" + str(createIndexesCommand) + ");")
+            db.command(createIndexesCommand)
+
+        shardConnection.close()
 
     # Restart the cluster so it picks up the new configuration cleanly
     mlaunchRestartCommandLine = ['mlaunch', 'restart', '--dir', mongodClusterRootPath]
