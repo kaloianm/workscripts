@@ -6,16 +6,10 @@ import os
 import psutil
 import shutil
 import subprocess
-import sys
 
 from bson.codec_options import CodecOptions
+from common import exe_name, yes_no
 from pymongo import MongoClient
-
-
-def exe_name(name):
-    if (sys.platform == 'win32'):
-        return name + '.exe'
-    return name
 
 
 # Class to abstract the tool's command line parameters configuration
@@ -66,19 +60,31 @@ class ToolConfiguration:
         subprocess.check_call(mlaunchCommand)
 
 
-# Function for a Yes/No result based on the answer provided as an argument
-def yes_no(answer):
-    yes = set(['yes', 'y', 'ye', ''])
-    no = set(['no', 'n'])
+# Abstracts management of the 'introspect' mongod instance which is used to read the cluster
+# configuration to instantiate
+class ClusterIntrospect:
 
-    while True:
-        choice = input(answer).lower()
-        if choice in yes:
-            return True
-        elif choice in no:
-            return False
-        else:
-            print("Please respond with 'yes' or 'no'\n")
+    # Class initialization. The 'config' parameter is an instance of ToolConfiguration.
+    def __init__(self, config):
+        self._config = config
+
+        self._dir = os.path.join(config.dir, 'introspect')
+        os.makedirs(self._dir)
+
+        print('Introspecting config dump using instance at port ',
+              config.clusterIntrospectMongoDPort)
+
+        # Start the instance and restore the config server dump
+        config.mlaunch_action(
+            'init', self._dir,
+            ['--single', '--port', str(config.clusterIntrospectMongoDPort)])
+        config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
+
+        # Open a connection to the introspect instance
+        self.configDb = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
+
+    def terminate(self):
+        self._config.mlaunch_action('stop', self._dir)
 
 
 # Performs cleanup by killing all potentially running mongodb processes and deleting any leftover
@@ -125,37 +131,27 @@ def main():
     if (not cleanup_previous_runs(config)):
         return -1
 
-    # Make the output directories
-    mongodPreprocessDataPath = os.path.join(config.dir, 'config_preprocess_instance')
-    os.makedirs(mongodPreprocessDataPath)
-
-    mongodClusterRootPath = os.path.join(config.dir, 'cluster_root')
-    os.makedirs(mongodClusterRootPath)
-
-    # Start the instance through which to read the cluster configuration dump and restore the dump
-    print('Pre-processing config dump at port ', config.clusterIntrospectMongoDPort)
-    config.mlaunch_action(
-        'init', mongodPreprocessDataPath,
-        ['--single', '--port', str(config.clusterIntrospectMongoDPort)])
-    config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
-
     # Read the cluster configuration from the preprocess instance and construct the new cluster
-    configDBPreprocess = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
-    numShards = configDBPreprocess.shards.count({})
+    introspect = ClusterIntrospect(config)
+
+    numShards = introspect.configDb.shards.count({})
     if (numShards > 10):
         if (not yes_no('The imported configuration data contains large number of shards (' + str(
                 numShards) + '). Proceeding will start large number of mongod processes.\n' +
                        'Are you sure you want to continue (yes/no)? ')):
             return 1
 
-    mlaunchStartingPort = 20000
+    # Make the output directories
+    mongodClusterRootPath = os.path.join(config.dir, 'cluster_root')
+    os.makedirs(mongodClusterRootPath)
+
     config.mlaunch_action('init', mongodClusterRootPath, [
         '--replicaset', '--nodes', '1', '--sharded',
         str(numShards), '--csrs', '--mongos', '1', '--port',
-        str(mlaunchStartingPort)
+        str(config.clusterStartingPort)
     ])
 
-    configServerPort = mlaunchStartingPort + numShards + 1
+    configServerPort = config.clusterStartingPort + numShards + 1
     config.restore_config_db_to_port(configServerPort)
 
     configServerConnection = MongoClient('localhost', configServerPort)
@@ -164,15 +160,13 @@ def main():
     existingShardIds = []
     newShardIds = []
     shardIdCounter = 1
-    for shard in configDBPreprocess.shards.find({}):
+    for shard in introspect.configDb.shards.find({}):
         existingShardId = shard['_id']
         existingShardIds.append(existingShardId)
 
         newShardId = 'shard0' + str(shardIdCounter)
         newShardIds.append(newShardId)
 
-        print("db.databases.update({primary: '" + existingShardId + "'}, {$set: {primary: '" +
-              newShardId + "'}}, {multi: true});")
         result = configServerConfigDB.databases.update_many({
             'primary': existingShardId
         }, {'$set': {
@@ -180,8 +174,6 @@ def main():
         }})
         print(result.raw_result)
 
-        print("db.chunks.update({shard: '" + existingShardId + "'}, {$set: {shard: '" + newShardId +
-              "'}}, {multi: true});")
         result = configServerConfigDB.chunks.update_many({
             'shard': existingShardId
         }, {'$set': {
@@ -191,7 +183,6 @@ def main():
 
         shardIdCounter = shardIdCounter + 1
 
-    print("db.shards.remove({_id: {$not: {$in: ", list(map(str, newShardIds)), "}}});")
     result = configServerConfigDB.shards.delete_many({
         '_id': {
             '$not': {
