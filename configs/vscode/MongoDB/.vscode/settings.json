@@ -45,5 +45,16 @@
         "unordered_set": "cpp",
         "ios": "cpp",
         "__locale": "cpp"
+    },
+    "search.useIgnoreFiles": false,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/*.o": true,
+        "**/*.obj": true,
+        "**/*.lib": true,
     }
 }
