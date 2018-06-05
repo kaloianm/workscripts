@@ -32,6 +32,19 @@ class ToolConfiguration:
         print('Data directory root at: ', self.dir)
         print('Config dump directory at: ', self.configdump)
 
+        if (not self.__cleanup_previous_runs()):
+            raise FileExistsError('Unable to cleanup any previous runs.')
+
+        os.makedirs(self.dir)
+
+        # Make it unbuffered so the output of the subprocesses shows up immediately in the file
+        kOutputLogFileBufSize = 256
+        self._outputLogFile = open(
+            os.path.join(self.dir, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
+
+    def log_line(self, line):
+        self._outputLogFile.write(str(line) + '\n')
+
     # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
     def restore_config_db_to_port(self, restorePort):
         mongorestoreCommand = [
@@ -41,7 +54,8 @@ class ToolConfiguration:
         ]
 
         print('Executing mongorestore command: ' + ' '.join(mongorestoreCommand))
-        subprocess.check_call(mongorestoreCommand)
+        subprocess.check_call(mongorestoreCommand, stdout=self._outputLogFile,
+                              stderr=self._outputLogFile)
 
     # Invokes the specified 'action' of mlaunch with 'dir' as the environment directory. All the
     # remaining 'args' are just appended to the thus constructed command line.
@@ -57,7 +71,31 @@ class ToolConfiguration:
         mlaunchCommand = mlaunchPrefix + args
 
         print('Executing mlaunch command: ' + ' '.join(mlaunchCommand))
-        subprocess.check_call(mlaunchCommand)
+        subprocess.check_call(mlaunchCommand, stdout=self._outputLogFile)
+
+    # Performs cleanup by killing all potentially running mongodb processes and deleting any
+    # leftover files. Basically leaves '--dir' empty.
+    def __cleanup_previous_runs(self):
+        if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n'
+                       + 'Proceed (yes/no)? ')):
+            return False
+
+        # Iterate through all processes and kill mongod and mongos
+        for process in psutil.process_iter():
+            try:
+                processExecutable = os.path.basename(process.exe())
+            except psutil.NoSuchProcess:
+                pass
+            except psutil.AccessDenied:
+                pass
+            else:
+                if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
+                    process.kill()
+                    process.wait()
+
+        # Remove the output directory
+        shutil.rmtree(self.dir)
+        return True
 
 
 # Abstracts management of the 'introspect' mongod instance which is used to read the cluster
@@ -87,28 +125,10 @@ class ClusterIntrospect:
         self._config.mlaunch_action('stop', self._dir)
 
 
-# Performs cleanup by killing all potentially running mongodb processes and deleting any leftover
-# files. Basically leaves '--dir' empty.
-def cleanup_previous_runs(config):
-    if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n' +
-                   'Proceed (yes/no)? ')):
-        return False
-
-    # Iterate through all processes and kill mongod and mongos
-    for process in psutil.process_iter():
-        try:
-            processExecutable = os.path.basename(process.exe())
-        except psutil.NoSuchProcess:
-            pass
-        except psutil.AccessDenied:
-            pass
-        else:
-            if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
-                process.kill()
-                process.wait()
-
-    shutil.rmtree(config.dir)
-    return True
+def generate_shard_name(shardIdCounter):
+    if (shardIdCounter < 10):
+        return 'shard0' + str(shardIdCounter)
+    return 'shard' + str(shardIdCounter)
 
 
 # Main entrypoint for the application
@@ -127,9 +147,6 @@ def main():
                             metavar='configdumpdir', type=str, nargs=1)
 
     config = ToolConfiguration(argsParser.parse_args())
-
-    if (not cleanup_previous_runs(config)):
-        return -1
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     introspect = ClusterIntrospect(config)
@@ -157,6 +174,8 @@ def main():
     configServerConnection = MongoClient('localhost', configServerPort)
     configServerConfigDB = configServerConnection.config
 
+    # Rename the shards from the dump to the shards launched by mlaunch
+    print('Renaming shards:')
     existingShardIds = []
     newShardIds = []
     shardIdCounter = 1
@@ -164,7 +183,8 @@ def main():
         existingShardId = shard['_id']
         existingShardIds.append(existingShardId)
 
-        newShardId = 'shard0' + str(shardIdCounter)
+        newShardId = generate_shard_name(shardIdCounter)
+        print('Shard ' + existingShardId + ' becomes ' + newShardId)
         newShardIds.append(newShardId)
 
         result = configServerConfigDB.databases.update_many({
@@ -172,14 +192,14 @@ def main():
         }, {'$set': {
             'primary': newShardId
         }})
-        print(result.raw_result)
+        config.log_line(result.raw_result)
 
         result = configServerConfigDB.chunks.update_many({
             'shard': existingShardId
         }, {'$set': {
             'shard': newShardId
         }})
-        print(result.raw_result)
+        config.log_line(result.raw_result)
 
         shardIdCounter = shardIdCounter + 1
 
@@ -190,7 +210,7 @@ def main():
             }
         }
     })
-    print(result.raw_result)
+    config.log_line(result.raw_result)
 
     # Create the collections and construct sharded indexes on all shard nodes
     for shard in configServerConfigDB.shards.find({}):
@@ -218,7 +238,7 @@ def main():
                     'ui': collUUID,
                 }]
             }
-            print("db.adminCommand(" + str(applyOpsCommand) + ");")
+            config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
             db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
 
             createIndexesCommand = {
@@ -228,7 +248,8 @@ def main():
                     'name': 'Shard key index'
                 }]
             }
-            print("db.getSiblingDB(" + dbName + ").runCommand(" + str(createIndexesCommand) + ");")
+            config.log_line(
+                "db.getSiblingDB(" + dbName + ").runCommand(" + str(createIndexesCommand) + ");")
             db.command(createIndexesCommand)
 
         shardConnection.close()
