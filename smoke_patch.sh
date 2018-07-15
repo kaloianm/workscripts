@@ -32,7 +32,7 @@ mkdir "$TESTRUNDIR"
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/3.6.3
+export TOOLSDIR=/home/kaloianm/mongodb/4.0.0
 
 export RESMOKECMD=buildscripts/resmoke.py
 export SCONSCMD=buildscripts/scons.py
@@ -93,31 +93,43 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# Start the main build first so the subsequent slower tasks can overlap with it
+# Start the slower builder and linter first so that the slower tasks can overlap with it
 #
-echo "Starting build ..."
+echo "Starting build ninja and lint ..."
+
 echo "Command lines:" > build.log
 echo $BUILD_NINJA_CMDLINE >> build.log
-echo $BUILD_CMDLINE >> build.log
-time $BUILD_NINJA_CMDLINE >> build.log 2>&1
-time $BUILD_CMDLINE >> build.log 2>&1 &
-PID_build=$!
+time $BUILD_NINJA_CMDLINE >> build.log 2>&1 &
+PID_build_ninja=$!
 
-#
-# Start the linter
-#
-echo "Starting lint ..."
-echo "Command line:" > lint.log
+echo "Command lines:" > lint.log
 echo $LINT_CMDLINE >> lint.log
 time $LINT_CMDLINE >> lint.log 2>&1 &
 PID_lint=$!
+
+echo "Waiting for build ninja ..."
+wait $PID_build_ninja
+if [ $? -ne 0 ]; then
+    echo "build  ninja failed with error $?"
+    kill -9 `jobs -p`
+    exit 1
+fi
+
+echo "Starting build ..."
+echo $BUILD_CMDLINE >> build.log
+time $BUILD_CMDLINE >> build.log 2>&1 &
+PID_build=$!
 
 #
 # Copy any binaries which are needed for running tests
 #
 echo "Copying executables to support tests ..."
 cp "$TOOLSDIR/mongodump" `pwd`
+cp "$TOOLSDIR/mongorestore" `pwd`
 
+#
+# Wait for the build and linter to complete
+#
 echo "Waiting for build ..."
 wait $PID_build
 if [ $? -ne 0 ]; then
