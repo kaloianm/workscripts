@@ -107,6 +107,13 @@ echo $LINT_CMDLINE >> lint.log
 time $LINT_CMDLINE >> lint.log 2>&1 &
 PID_lint=$!
 
+#
+# Copy any binaries which are needed for running tests
+#
+echo "Copying executables to support tests ..."
+cp "$TOOLSDIR/mongodump" `pwd`
+cp "$TOOLSDIR/mongorestore" `pwd`
+
 echo "Waiting for build ninja ..."
 wait $PID_build_ninja
 if [ $? -ne 0 ]; then
@@ -119,13 +126,6 @@ echo "Starting build ..."
 echo $BUILD_CMDLINE >> build.log
 time $BUILD_CMDLINE >> build.log 2>&1 &
 PID_build=$!
-
-#
-# Copy any binaries which are needed for running tests
-#
-echo "Copying executables to support tests ..."
-cp "$TOOLSDIR/mongodump" `pwd`
-cp "$TOOLSDIR/mongorestore" `pwd`
 
 #
 # Wait for the build and linter to complete
