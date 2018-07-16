@@ -34,8 +34,10 @@ mkdir "$TESTDBPATHDIR"
 
 export TOOLSDIR=/home/kaloianm/mongodb/4.0.0
 
-export RESMOKECMD=buildscripts/resmoke.py
-export SCONSCMD=buildscripts/scons.py
+export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v2/bin"
+export PATH=$MONGODBTOOLCHAIN:$PATH
+export RESMOKECMD="python buildscripts/resmoke.py"
+export SCONSCMD="python buildscripts/scons.py"
 
 export CPUS_FOR_BUILD=500
 export CPUS_FOR_LINT=6
@@ -53,8 +55,10 @@ elif [ "$2" == "ubsan" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "opt" ]; then
     export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl"
-else
+elif [ "$2" == "dbg" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl"
+else
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl"
 fi
 
 export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
