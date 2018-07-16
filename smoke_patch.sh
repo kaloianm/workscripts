@@ -147,9 +147,10 @@ if [ $? -ne 0 ]; then
 fi
 
 #
-# Execute the unit tests first to uncover early problems, before even scheduling any of the longer running JS tests
+# Execute the unit tests and dbtest first to uncover early problems, before even scheduling any of
+# the longer running JS tests
 #
-echo "Running unittests ..."
+echo "Running WT unittests ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --suites=unittests
 if [ $? -ne 0 ]; then
     echo "unittests failed with error $?"
@@ -157,8 +158,16 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Running WT dbtest,core ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest,core
+echo "Running WT dbtest ..."
+time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest
+if [ $? -ne 0 ]; then
+    echo "WT dbtest failed with error $?"
+    kill -9 `jobs -p`
+    exit 1
+fi
+
+echo "Running WT core ..."
+time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core
 if [ $? -ne 0 ]; then
     echo "WT basic tests failed with error $?"
     kill -9 `jobs -p`
@@ -208,4 +217,3 @@ if [ $? -ne 0 ]; then
     kill -9 `jobs -p`
     exit 1
 fi
-
