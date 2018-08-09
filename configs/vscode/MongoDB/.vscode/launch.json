@@ -14,12 +14,32 @@
             "name": "(Windows) Generic run",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/ninja/mongo/s/sharding_routing_table_test.exe",
+            "program": "${workspaceFolder}/build/ninja/mongo/db/s/shard_server_test.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": true
-        }
+        },
+        {
+            "name": "(lldb) Attach",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/mongod",
+            "processId": "${command:pickProcess}",
+            "MIMode": "lldb"
+        },
+        {
+            "name": "(lldb) Generic run",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ninja/mongo/db/s/shard_server_test",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "lldb"
+        },
     ]
 }
