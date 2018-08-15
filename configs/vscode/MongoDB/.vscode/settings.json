@@ -93,7 +93,6 @@
         "xlocnum": "cpp",
         "xloctime": "cpp"
     },
-    "search.useIgnoreFiles": false,
     "files.exclude": {
         "*.patch": true,
         "**/.DS_Store": true,
@@ -110,4 +109,5 @@
         "**/*.vcxproj*": true,
         "**/CVS": true,
     },
+    "search.useIgnoreFiles": true,
 }
