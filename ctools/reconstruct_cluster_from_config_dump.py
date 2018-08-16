@@ -187,6 +187,14 @@ def main():
         print('Shard ' + existingShardId + ' becomes ' + newShardId)
         newShardIds.append(newShardId)
 
+        if 'tags' in shard:
+            result = configServerConfigDB.shards.update_many({
+                '_id': newShardId
+            }, {'$set': {
+                'tags': shard['tags']
+            }})
+            config.log_line(result.raw_result)
+
         result = configServerConfigDB.databases.update_many({
             'primary': existingShardId
         }, {'$set': {
@@ -223,7 +231,6 @@ def main():
             collectionParts = collection['_id'].split('.', 1)
             dbName = collectionParts[0]
             collName = collectionParts[1]
-            collUUID = collection['uuid']
             shardKey = collection['key']
 
             db = shardConnection.get_database(dbName)
@@ -235,9 +242,13 @@ def main():
                     'o': {
                         'create': collName,
                     },
-                    'ui': collUUID,
                 }]
             }
+
+            if 'uuid' in collection:
+                collUUID = collection['uuid']
+                applyOpsCommand[0]['applyOps']['ui'] = collUUID
+
             config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
             db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
 
