@@ -173,10 +173,28 @@ fi
 echo "Running WT core ..."
 time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core
 if [ $? -ne 0 ]; then
-    echo "WT basic tests failed with error $?"
+    echo "WT core failed with error $?"
     kill -9 `jobs -p`
     exit 1
 fi
+
+echo "Running WT core_txns ..."
+time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns
+if [ $? -ne 0 ]; then
+    echo "WT core_txns failed with error $?"
+    kill -9 `jobs -p`
+    exit 1
+fi
+
+echo "Running WT replica_sets ..."
+time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets
+if [ $? -ne 0 ]; then
+    echo "WT replica_sets failed with error $?"
+    kill -9 `jobs -p`
+    exit 1
+fi
+
+
 
 #
 # Aggregation tests (they run relatively quick and uncover early sharding problems)
