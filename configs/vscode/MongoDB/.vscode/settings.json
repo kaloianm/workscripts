@@ -109,5 +109,5 @@
         "**/*.vcxproj*": true,
         "**/CVS": true,
     },
-    "search.useIgnoreFiles": true,
+    "search.useIgnoreFiles": false,
 }
