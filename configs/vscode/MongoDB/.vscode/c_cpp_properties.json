@@ -16,6 +16,8 @@
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41"
             ],
             "defines": [],
@@ -35,6 +37,8 @@
                     "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                     "${workspaceFolder}/src/third_party/boost-1.60.0",
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                    "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                     "${workspaceFolder}/src/third_party/pcre-8.41"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
@@ -61,6 +65,8 @@
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41"
             ],
             "defines": [
@@ -71,8 +77,20 @@
             "intelliSenseMode": "msvc-x64",
             "browse": {
                 "path": [
-                    "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/include/*",
-                    "${workspaceFolder}"
+                    "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/include",
+                    "C:/Program Files (x86)/Windows Kits/10/Include/10.0.10240.0/ucrt",
+                    "C:/Program Files (x86)/Windows Kits/8.1/Include/shared",
+                    "C:/Program Files (x86)/Windows Kits/8.1/Include/um",
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/build/ninja",
+                    "${workspaceFolder}/build/ninja/third_party/wiredtiger",
+                    "${workspaceFolder}/src",
+                    "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
+                    "${workspaceFolder}/src/third_party/boost-1.60.0",
+                    "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                    "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                    "${workspaceFolder}/src/third_party/pcre-8.41"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
@@ -92,6 +110,8 @@
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41"
             ],
             "defines": [],
@@ -100,7 +120,16 @@
                 "path": [
                     "/usr/include",
                     "/usr/local/include",
-                    "${workspaceFolder}"
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/build/ninja",
+                    "${workspaceFolder}/build/ninja/third_party/wiredtiger",
+                    "${workspaceFolder}/src",
+                    "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
+                    "${workspaceFolder}/src/third_party/boost-1.60.0",
+                    "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
+                    "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                    "${workspaceFolder}/src/third_party/pcre-8.41"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
