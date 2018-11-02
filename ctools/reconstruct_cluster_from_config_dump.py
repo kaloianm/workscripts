@@ -194,10 +194,19 @@ def main():
         }})
         config.log_line(result.raw_result)
 
+        # Rename the shards in the chunks' current owner field
         result = configServerConfigDB.chunks.update_many({
             'shard': existingShardId
         }, {'$set': {
             'shard': newShardId
+        }})
+        config.log_line(result.raw_result)
+
+        # Rename the shards in the chunks' history
+        result = configServerConfigDB.chunks.update_many({
+            'history.shard': existingShardId
+        }, {'$set': {
+            'history.$[].shard': newShardId
         }})
         config.log_line(result.raw_result)
 
