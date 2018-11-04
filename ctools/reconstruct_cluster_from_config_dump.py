@@ -6,10 +6,15 @@ import os
 import psutil
 import shutil
 import subprocess
+import sys
 
 from bson.codec_options import CodecOptions
 from common import exe_name, yes_no
 from pymongo import MongoClient
+
+# Ensure that the caller is using python 3
+if (sys.version_info[0] < 3):
+    raise Exception("Must be using Python 3")
 
 
 # Class to abstract the tool's command line parameters configuration
@@ -50,8 +55,13 @@ class ToolConfiguration:
         mongorestoreCommand = [
             self.mongoRestoreBinary, '--port',
             str(restorePort), '--numInsertionWorkersPerCollection',
-            str(self.mongoRestoreNumInsertionWorkers), self.configdump
+            str(self.mongoRestoreNumInsertionWorkers)
         ]
+
+        if (os.path.isdir(self.configdump)):
+            mongorestoreCommand += ['--dir', self.configdump]
+        else:
+            mongorestoreCommand += ['--gzip', '--archive', self.configdump]
 
         print('Executing mongorestore command: ' + ' '.join(mongorestoreCommand))
         subprocess.check_call(mongorestoreCommand, stdout=self._outputLogFile,
