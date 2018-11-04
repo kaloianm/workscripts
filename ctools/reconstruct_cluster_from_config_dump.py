@@ -10,6 +10,7 @@ import sys
 
 from bson.codec_options import CodecOptions
 from common import exe_name, yes_no
+from copy import deepcopy
 from pymongo import MongoClient
 
 # Ensure that the caller is using python 3
@@ -119,7 +120,7 @@ class ClusterIntrospect:
         self._dir = os.path.join(config.dir, 'introspect')
         os.makedirs(self._dir)
 
-        print('Introspecting config dump using instance at port ',
+        print('Introspecting config dump using instance at port',
               config.clusterIntrospectMongoDPort)
 
         # Start the instance and restore the config server dump
@@ -133,12 +134,6 @@ class ClusterIntrospect:
 
     def terminate(self):
         self._config.mlaunch_action('stop', self._dir)
-
-
-def generate_shard_name(shardIdCounter):
-    if (shardIdCounter < 10):
-        return 'shard0' + str(shardIdCounter)
-    return 'shard' + str(shardIdCounter)
 
 
 # Main entrypoint for the application
@@ -184,52 +179,68 @@ def main():
     configServerConnection = MongoClient('localhost', configServerPort)
     configServerConfigDB = configServerConnection.config
 
-    # Rename the shards from the dump to the shards launched by mlaunch
-    print('Renaming shards:')
-    existingShardIds = []
-    newShardIds = []
-    shardIdCounter = 1
-    for shard in introspect.configDb.shards.find({}):
-        existingShardId = shard['_id']
-        existingShardIds.append(existingShardId)
+    # Rename the shards from the dump to the shards launched by mlaunch in the shards collection
+    print('Renaming shards in the shards collection:')
 
-        newShardId = generate_shard_name(shardIdCounter)
-        print('Shard ' + existingShardId + ' becomes ' + newShardId)
-        newShardIds.append(newShardId)
+    # Shards that came with the config dump
+    SHARDS_FROM_DUMP = list(introspect.configDb.shards.find({}).sort('_id', 1))
+
+    # Shards that mlaunch generated (should be the same size as SHARDS_FROM_DUMP)
+    SHARDS_FROM_MLAUNCH = list(
+        configServerConfigDB.shards.find({
+            '_id': {
+                '$not': {
+                    '$in': list(map(lambda x: x['_id'], SHARDS_FROM_DUMP))
+                }
+            }
+        }).sort('_id', 1))
+
+    assert (len(SHARDS_FROM_DUMP) == len(SHARDS_FROM_MLAUNCH))
+
+    shardsToInsert = []
+    for shardFromDump, shardFromMlaunch in zip(deepcopy(SHARDS_FROM_DUMP), SHARDS_FROM_MLAUNCH):
+        shardFromDump['_id'] = shardFromMlaunch['_id']
+        shardFromDump['host'] = shardFromMlaunch['host']
+        shardsToInsert.append(shardFromDump)
+
+    # Wipe out all the shards (both from the dump and from mlaunch)
+    result = configServerConfigDB.shards.delete_many({})
+    config.log_line(result.raw_result)
+
+    # Patch the _id and host of the shards in the config dump
+    for shardToInsert in shardsToInsert:
+        result = configServerConfigDB.shards.insert(shardToInsert)
+        config.log_line(result)
+
+    # Rename the shards from the dump to the shards launched by mlaunch in the metadata
+    print('Renaming shards in the routing metadata:')
+    for shardIdFromDump, shardIdFromMlaunch in zip(
+            list(map(lambda x: x['_id'], SHARDS_FROM_DUMP)),
+            list(map(lambda x: x['_id'], SHARDS_FROM_MLAUNCH))):
+        print('Shard ' + shardIdFromDump + ' becomes ' + shardIdFromMlaunch)
 
         result = configServerConfigDB.databases.update_many({
-            'primary': existingShardId
+            'primary': shardIdFromDump
         }, {'$set': {
-            'primary': newShardId
+            'primary': shardIdFromMlaunch
         }})
         config.log_line(result.raw_result)
 
         # Rename the shards in the chunks' current owner field
         result = configServerConfigDB.chunks.update_many({
-            'shard': existingShardId
+            'shard': shardIdFromDump
         }, {'$set': {
-            'shard': newShardId
+            'shard': shardIdFromMlaunch
         }})
         config.log_line(result.raw_result)
 
         # Rename the shards in the chunks' history
         result = configServerConfigDB.chunks.update_many({
-            'history.shard': existingShardId
+            'history.shard': shardIdFromDump
         }, {'$set': {
-            'history.$[].shard': newShardId
+            'history.$[].shard': shardIdFromMlaunch
         }})
         config.log_line(result.raw_result)
-
-        shardIdCounter = shardIdCounter + 1
-
-    result = configServerConfigDB.shards.delete_many({
-        '_id': {
-            '$not': {
-                '$in': list(map(str, newShardIds))
-            }
-        }
-    })
-    config.log_line(result.raw_result)
 
     # Create the collections and construct sharded indexes on all shard nodes
     for shard in configServerConfigDB.shards.find({}):
