@@ -46,7 +46,7 @@ export CPUS_FOR_TESTS=12
 export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
 
 if [ "$2" == "dynamic" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang-3.8` CXX=`which clang++-3.8`"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "clang-3.8" ]; then
