@@ -39,7 +39,7 @@ export PATH=$MONGODBTOOLCHAIN:$PATH
 export RESMOKECMD="python buildscripts/resmoke.py"
 export SCONSCMD="python buildscripts/scons.py"
 
-export CPUS_FOR_BUILD=500
+export CPUS_FOR_BUILD=1000
 export CPUS_FOR_LINT=6
 export CPUS_FOR_TESTS=12
 
