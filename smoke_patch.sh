@@ -39,8 +39,8 @@ export PATH=$MONGODBTOOLCHAIN:$PATH
 export RESMOKECMD="python buildscripts/resmoke.py"
 export SCONSCMD="python buildscripts/scons.py"
 
-export CPUS_FOR_BUILD=1000
-export CPUS_FOR_LINT=6
+export CPUS_FOR_BUILD=640
+export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=12
 
 export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
@@ -61,13 +61,14 @@ else
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl"
 fi
 
-export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
-export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
-
-export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
-
 export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --continueOnFailure --log=file"
 
+# Construct the scons, ninja and linter command lines
+export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
+export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
+export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
+
+# Clone the repositories
 git clone --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
 pushd "$TESTRUNDIR/mongo"
 
@@ -81,14 +82,7 @@ if false; then
     git clone --depth 1 git@github.com:10gen/mongo-enterprise-modules.git 'src/mongo/db/modules/subscription'
 fi
 
-#
-# TODO: Support for RocksDB builds
-#
-if false; then
-    echo "Cloning the RocksDB repository ..."
-    git clone --depth 1 git@github.com:mongodb-partners/mongo-rocks.git 'src/mongo/db/modules/rocksdb'
-fi
-
+# Apply the patch to be run
 echo "Applying patch file $PATCHFILE"
 git am $PATCHFILE
 if [ $? -ne 0 ]; then
@@ -118,7 +112,7 @@ echo "Copying executables to support tests ..."
 cp "$TOOLSDIR/mongodump" `pwd`
 cp "$TOOLSDIR/mongorestore" `pwd`
 
-echo "Waiting for build ninja ..."
+echo "Waiting for build ninja process $PID_build_ninja to complete ..."
 wait $PID_build_ninja
 if [ $? -ne 0 ]; then
     echo "build  ninja failed with error $?"
@@ -134,7 +128,7 @@ PID_build=$!
 #
 # Wait for the build and linter to complete
 #
-echo "Waiting for build ..."
+echo "Waiting for build process $PID_build to complete ..."
 wait $PID_build
 if [ $? -ne 0 ]; then
     echo "build failed with error $?"
@@ -142,100 +136,41 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Waiting for lint ..."
-wait $PID_lint
-if [ $? -ne 0 ]; then
-    echo "lint failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
+##################################################################################################
+# Function to execute a given test suite and block until it completes. Terminates the script if an
+# error is reported from the test execution.
+execute_test_suite () {
+    echo "Running suite $1 with command line $2 ..."
 
-#
-# Execute the unit tests and dbtest first to uncover early problems, before even scheduling any of
-# the longer running JS tests
-#
-echo "Running WT unittests ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --suites=unittests
-if [ $? -ne 0 ]; then
-    echo "unittests failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
+    # Ensure that lint has completed
+    if ! kill -0 $PID_lint > /dev/null 2>&1; then
+        echo "Waiting for lint process $PID_lint to complete ..."
+        wait $PID_lint; local TIMEOUT_RESULT=$?
+        if [ $TIMEOUT_RESULT -ne 0 ]; then
+            echo "lint failed with error $TIMEOUT_RESULT"
+            kill -9 `jobs -p`
+            exit 1
+        fi
+    fi
 
-echo "Running WT dbtest ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest
-if [ $? -ne 0 ]; then
-    echo "WT dbtest failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
+    # Kick off the actual test suite
+    (time $2); local SUITE_RESULT=$?
+    if [ $SUITE_RESULT -ne 0 ]; then
+        echo "Suite $1 failed with error $SUITE_RESULT. Execution will be terminated."
+        kill -9 `jobs -p`
+        exit 1
+    fi
+}
 
-echo "Running WT core ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core
-if [ $? -ne 0 ]; then
-    echo "WT core failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
+# Execute the unit tests, dbtest and core first in order to uncover early problems, before even
+# scheduling any of the longer running JS tests
+execute_test_suite "WT unittests" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=unittests"
+execute_test_suite "WT dbtest" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest"
+execute_test_suite "WT core" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core"
+execute_test_suite "WT core_txns" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns"
 
-echo "Running WT core_txns ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns
-if [ $? -ne 0 ]; then
-    echo "WT core_txns failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-echo "Running WT replica_sets ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets
-if [ $? -ne 0 ]; then
-    echo "WT replica_sets failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-
-
-#
-# Aggregation tests (they run relatively quick and uncover early sharding problems)
-#
-echo "Running WT aggregation ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation
-if [ $? -ne 0 ]; then
-    echo "WT aggregation failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-#
-# Auth tests
-#
-echo "Running WT auth ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth
-if [ $? -ne 0 ]; then
-    echo "WT auth failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-#
-# Sharding jscore passthough
-#
-echo "Running WT sharding_jscore_passthrough ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough
-if [ $? -ne 0 ]; then
-    echo "WT sharding_jscore_passthrough failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
-
-#
-# Sharding suite
-#
-echo "Running WT sharding ..."
-time $RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding
-if [ $? -ne 0 ]; then
-    echo "WT sharding failed with error $?"
-    kill -9 `jobs -p`
-    exit 1
-fi
+execute_test_suite "WT auth" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
+execute_test_suite "WT aggregation" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation"
+execute_test_suite "WT replica_sets" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
+execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
+execute_test_suite "WT sharding" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
