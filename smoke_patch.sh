@@ -39,7 +39,7 @@ export PATH=$MONGODBTOOLCHAIN:$PATH
 export RESMOKECMD="python buildscripts/resmoke.py"
 export SCONSCMD="python buildscripts/scons.py"
 
-export CPUS_FOR_BUILD=640
+export CPUS_FOR_BUILD=512
 export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=12
 
@@ -143,18 +143,21 @@ execute_test_suite () {
     echo "Running suite $1 with command line $2 ..."
 
     # Ensure that lint has completed
-    if ! kill -0 $PID_lint > /dev/null 2>&1; then
-        echo "Waiting for lint process $PID_lint to complete ..."
-        wait $PID_lint; local TIMEOUT_RESULT=$?
-        if [ $TIMEOUT_RESULT -ne 0 ]; then
-            echo "lint failed with error $TIMEOUT_RESULT"
-            kill -9 `jobs -p`
-            exit 1
+    if [ -n "$PID_lint" ]; then
+        if ! kill -0 $PID_lint > /dev/null 2>&1; then
+            echo "Lint process $PID_lint has completed, joining to get its error code ..."
+            wait $PID_lint; local TIMEOUT_RESULT=$?
+            if [ $TIMEOUT_RESULT -ne 0 ]; then
+                echo "lint failed with error $TIMEOUT_RESULT"
+                kill -9 `jobs -p`
+                exit 1
+            fi
         fi
+        unset PID_lint
     fi
 
     # Kick off the actual test suite
-    (time $2); local SUITE_RESULT=$?
+    time $2; local SUITE_RESULT=$?
     if [ $SUITE_RESULT -ne 0 ]; then
         echo "Suite $1 failed with error $SUITE_RESULT. Execution will be terminated."
         kill -9 `jobs -p`
