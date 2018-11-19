@@ -34,8 +34,10 @@ mkdir "$TESTDBPATHDIR"
 
 export TOOLSDIR=/home/kaloianm/mongodb/4.0.0
 
+# Use all the tools from the mongodb toolchain instead of those installed on the system
 export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v2/bin"
 export PATH=$MONGODBTOOLCHAIN:$PATH
+
 export RESMOKECMD="python buildscripts/resmoke.py"
 export SCONSCMD="python buildscripts/scons.py"
 
@@ -49,8 +51,8 @@ if [ "$2" == "dynamic" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang` CXX=`which clang++`"
-elif [ "$2" == "clang-3.8" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang-3.8` CXX=`which clang++-3.8`"
+elif [ "$2" == "system-clang" ]; then
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
 elif [ "$2" == "ubsan" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "opt" ]; then
