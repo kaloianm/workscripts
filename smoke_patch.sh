@@ -61,7 +61,7 @@ else
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl"
 fi
 
-export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --continueOnFailure --log=file"
+export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --log=file"
 
 # Construct the scons, ninja and linter command lines
 export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
@@ -177,3 +177,5 @@ execute_test_suite "WT aggregation" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_T
 execute_test_suite "WT replica_sets" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
 execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
 execute_test_suite "WT sharding" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
+
+execute_test_suite "WT concurrency_sharded_with_stepdowns_and_balancer" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=concurrency_sharded_with_stepdowns_and_balancer"
