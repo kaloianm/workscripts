@@ -13,12 +13,14 @@
                 "${workspaceFolder}/build/ninja",
                 "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                 "${workspaceFolder}/src",
+                "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                "${workspaceFolder}/src/third_party/pcre-8.41"
+                "${workspaceFolder}/src/third_party/pcre-8.41",
+                "${workspaceFolder}/src/third_party/valgrind/include"
             ],
             "defines": [],
             "intelliSenseMode": "clang-x64",
@@ -34,12 +36,14 @@
                     "${workspaceFolder}/build/ninja",
                     "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                     "${workspaceFolder}/src",
+                    "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                     "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                     "${workspaceFolder}/src/third_party/boost-1.60.0",
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                    "${workspaceFolder}/src/third_party/pcre-8.41"
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
+                    "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
@@ -62,12 +66,14 @@
                 "${workspaceFolder}/build/ninja",
                 "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                 "${workspaceFolder}/src",
+                "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                "${workspaceFolder}/src/third_party/pcre-8.41"
+                "${workspaceFolder}/src/third_party/pcre-8.41",
+                "${workspaceFolder}/src/third_party/valgrind/include"
             ],
             "defines": [
                 "_DEBUG",
@@ -85,12 +91,14 @@
                     "${workspaceFolder}/build/ninja",
                     "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                     "${workspaceFolder}/src",
+                    "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                     "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                     "${workspaceFolder}/src/third_party/boost-1.60.0",
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                    "${workspaceFolder}/src/third_party/pcre-8.41"
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
+                    "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
@@ -107,12 +115,14 @@
                 "${workspaceFolder}/build/ninja",
                 "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                 "${workspaceFolder}/src",
+                "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                 "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                 "${workspaceFolder}/src/third_party/boost-1.60.0",
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                "${workspaceFolder}/src/third_party/pcre-8.41"
+                "${workspaceFolder}/src/third_party/pcre-8.41",
+                "${workspaceFolder}/src/third_party/valgrind/include"
             ],
             "defines": [],
             "intelliSenseMode": "clang-x64",
@@ -124,12 +134,14 @@
                     "${workspaceFolder}/build/ninja",
                     "${workspaceFolder}/build/ninja/third_party/wiredtiger",
                     "${workspaceFolder}/src",
+                    "${workspaceFolder}/src/third_party/abseil-cpp-master/abseil-cpp",
                     "${workspaceFolder}/src/third_party/benchmark-1.3.0/benchmark/include",
                     "${workspaceFolder}/src/third_party/boost-1.60.0",
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
-                    "${workspaceFolder}/src/third_party/pcre-8.41"
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
+                    "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
