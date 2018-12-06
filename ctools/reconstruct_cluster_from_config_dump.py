@@ -62,7 +62,7 @@ class ToolConfiguration:
         if (os.path.isdir(self.configdump)):
             mongorestoreCommand += ['--dir', self.configdump]
         else:
-            mongorestoreCommand += ['--gzip', '--archive', self.configdump]
+            mongorestoreCommand += ['--gzip', '--archive={}'.format(self.configdump)]
 
         print('Executing mongorestore command: ' + ' '.join(mongorestoreCommand))
         subprocess.check_call(mongorestoreCommand, stdout=self._outputLogFile,
