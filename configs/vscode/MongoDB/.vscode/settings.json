@@ -117,4 +117,6 @@
      ],
     "search.useIgnoreFiles": false,
     "cquery.cacheDirectory": "${workspaceFolder}/.vscode/cquery-cache/",
+    "editor.suggestSelection": "first",
+    "python.pythonPath": "python",
 }
