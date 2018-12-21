@@ -71,18 +71,17 @@ export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 
 # Clone the repositories
+echo "Cloning the mongo repository ..."
 git clone --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
+
+echo "Cloning the enterprise repository ..."
+git clone --depth 1 git@github.com:10gen/mongo-enterprise-modules.git "$TESTRUNDIR/mongo/src/mongo/db/modules/enterprise"
+
+echo "Cloning the ninja repository ..."
+git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "$TESTRUNDIR/mongo/src/mongo/db/modules/ninja"
+
+# Switch to the root source directory
 pushd "$TESTRUNDIR/mongo"
-
-git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "src/mongo/db/modules/ninja"
-
-#
-# TODO: Support for Enterprise builds
-#
-if false; then
-    echo "Cloning the enterprise repository ..."
-    git clone --depth 1 git@github.com:10gen/mongo-enterprise-modules.git 'src/mongo/db/modules/subscription'
-fi
 
 # Apply the patch to be run
 echo "Applying patch file $PATCHFILE"
@@ -166,6 +165,11 @@ execute_test_suite () {
         exit 1
     fi
 }
+
+
+# The GSSAPI tests require a Kerberos server set up and they can never pass, so exclude them
+# from the run
+perl -ni -e 'print unless /sasl_authentication_session_gssapi_test/' build/unittests.txt
 
 # Execute the unit tests, dbtest and core first in order to uncover early problems, before even
 # scheduling any of the longer running JS tests
