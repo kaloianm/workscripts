@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "SConscript": "python",
         "__bit_reference": "cpp",
         "__functional_base": "cpp",
         "__hash_table": "cpp",
@@ -57,7 +58,6 @@
         "ratio": "cpp",
         "regex": "cpp",
         "rope": "cpp",
-        "SConscript": "python",
         "SConstruct": "python",
         "set": "cpp",
         "sstream": "cpp",
@@ -95,6 +95,12 @@
         "xtr1common": "cpp",
         "xtree": "cpp",
         "xutility": "cpp",
+        "resumable": "cpp",
+        "forward_list": "cpp",
+        "xthread": "cpp",
+        "optional": "cpp",
+        "string_view": "cpp",
+        "variant": "cpp"
     },
     "files.exclude": {
         "*.patch": true,
@@ -116,7 +122,6 @@
         100
      ],
     "search.useIgnoreFiles": false,
-    "cquery.cacheDirectory": "${workspaceFolder}/.vscode/cquery-cache/",
     "editor.suggestSelection": "first",
     "python.pythonPath": "python",
 }
