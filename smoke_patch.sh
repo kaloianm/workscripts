@@ -48,25 +48,25 @@ export CPUS_FOR_TESTS=12
 export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
 
 if [ "$2" == "dynamic" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang` CXX=`which clang++`"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang` CXX=`which clang++` --icecream"
 elif [ "$2" == "clang" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang` CXX=`which clang++`"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang` CXX=`which clang++` --icecream"
 elif [ "$2" == "system-clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
 elif [ "$2" == "ubsan" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=`which clang` CXX=`which clang++`"
 elif [ "$2" == "opt" ]; then
-    export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl"
+    export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl --icecream"
 elif [ "$2" == "dbg" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl --icecream"
 else
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --icecream"
 fi
 
 export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --log=file"
 
 # Construct the scons, ninja and linter command lines
-export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --icecream VARIANT_DIR=ninja build.ninja"
+export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH VARIANT_DIR=ninja build.ninja"
 export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 
