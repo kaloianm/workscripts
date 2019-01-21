@@ -21,6 +21,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                "${workspaceFolder}/src/third_party/pcre-8.41",
                 "${workspaceFolder}/src/third_party/pcre-8.42",
                 "${workspaceFolder}/src/third_party/valgrind/include"
             ],
@@ -46,6 +47,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
                     "${workspaceFolder}/src/third_party/pcre-8.42",
                     "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
@@ -78,6 +80,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                "${workspaceFolder}/src/third_party/pcre-8.41",
                 "${workspaceFolder}/src/third_party/pcre-8.42",
                 "${workspaceFolder}/src/third_party/valgrind/include"
             ],
@@ -105,6 +108,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
                     "${workspaceFolder}/src/third_party/pcre-8.42",
                     "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
@@ -131,6 +135,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                "${workspaceFolder}/src/third_party/pcre-8.41",
                 "${workspaceFolder}/src/third_party/pcre-8.42",
                 "${workspaceFolder}/src/third_party/valgrind/include"
             ],
@@ -152,6 +157,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
+                    "${workspaceFolder}/src/third_party/pcre-8.41",
                     "${workspaceFolder}/src/third_party/pcre-8.42",
                     "${workspaceFolder}/src/third_party/valgrind/include"
                 ],
