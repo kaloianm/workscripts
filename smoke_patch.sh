@@ -19,7 +19,7 @@ if [ ! -f $PATCHFILE ]; then
     exit 1
 fi
 
-export TESTRUNDIR=/tmp/TestRunDirectory
+export TESTRUNDIR=/mnt/SSD/Data/SmokePatchRoot
 
 echo "Using test run directory $TESTRUNDIR"
 if [ -d $TESTRUNDIR ]; then
@@ -32,29 +32,30 @@ mkdir "$TESTRUNDIR"
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/4.0.0
+export TOOLSDIR=/home/kaloianm/mongodb/4.0.5
 
 # Use all the tools from the mongodb toolchain instead of those installed on the system
-export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v2/bin"
+export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v3/bin"
 export PATH=$MONGODBTOOLCHAIN:$PATH
+echo "Using Python from `which python`"
 
 export RESMOKECMD="python buildscripts/resmoke.py"
 export SCONSCMD="python buildscripts/scons.py"
 
-export CPUS_FOR_BUILD=512
+export CPUS_FOR_BUILD=500
 export CPUS_FOR_LINT=12
-export CPUS_FOR_TESTS=12
+export CPUS_FOR_TESTS=24
 
 export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
 
 if [ "$2" == "dynamic" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic CC=`which clang` CXX=`which clang++` --icecream"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic --allocator=system CC=clang CXX=clang++ --icecream"
 elif [ "$2" == "clang" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=`which clang` CXX=`which clang++` --icecream"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=clang CXX=clang++ --icecream"
 elif [ "$2" == "system-clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
 elif [ "$2" == "ubsan" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=`which clang` CXX=`which clang++`"
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=clang CXX=clang++"
 elif [ "$2" == "opt" ]; then
     export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl --icecream"
 elif [ "$2" == "dbg" ]; then
