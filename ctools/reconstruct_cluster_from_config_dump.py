@@ -253,7 +253,8 @@ def main():
             collectionParts = collection['_id'].split('.', 1)
             dbName = collectionParts[0]
             collName = collectionParts[1]
-            collUUID = collection['uuid']
+            collUUID = collection['uuid'] if 'uuid' in collection else None
+
             shardKey = collection['key']
 
             db = shardConnection.get_database(dbName)
@@ -265,9 +266,12 @@ def main():
                     'o': {
                         'create': collName,
                     },
-                    'ui': collUUID,
                 }]
             }
+
+            if collUUID:
+                applyOpsCommand['ui'] = collUUID
+
             config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
             db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
 
