@@ -19,6 +19,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/boost-1.69.0",
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/fmt/dist",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41",
@@ -45,6 +46,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/boost-1.69.0",
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/fmt/dist",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                     "${workspaceFolder}/src/third_party/pcre-8.41",
@@ -78,6 +80,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/boost-1.69.0",
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/fmt/dist",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41",
@@ -106,6 +109,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/boost-1.69.0",
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/fmt/dist",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                     "${workspaceFolder}/src/third_party/pcre-8.41",
@@ -116,7 +120,8 @@
                 "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
             },
             "cStandard": "c11",
-            "cppStandard": "c++17"
+            "cppStandard": "c++17",
+            "compileCommands": "${workspaceFolder}/compile_commands.json"
         },
         {
             "name": "Linux",
@@ -133,6 +138,7 @@
                 "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                 "${workspaceFolder}/src/third_party/boost-1.69.0",
                 "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                "${workspaceFolder}/src/third_party/fmt/dist",
                 "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                 "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                 "${workspaceFolder}/src/third_party/pcre-8.41",
@@ -155,6 +161,7 @@
                     "${workspaceFolder}/src/third_party/boost-1.60.0/boost/predef/os",
                     "${workspaceFolder}/src/third_party/boost-1.69.0",
                     "${workspaceFolder}/src/third_party/boost-1.69.0/boost/predef/os",
+                    "${workspaceFolder}/src/third_party/fmt/dist",
                     "${workspaceFolder}/src/third_party/mozjs-45/extract/js/src",
                     "${workspaceFolder}/src/third_party/mozjs-45/mongo_sources",
                     "${workspaceFolder}/src/third_party/pcre-8.41",
