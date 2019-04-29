@@ -39,8 +39,8 @@ export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v3/bin"
 export PATH=$MONGODBTOOLCHAIN:$PATH
 echo "Using Python from `which python`"
 
-export RESMOKECMD="python buildscripts/resmoke.py"
-export SCONSCMD="python buildscripts/scons.py"
+export RESMOKECMD="python3 buildscripts/resmoke.py"
+export SCONSCMD="python3 buildscripts/scons.py"
 
 export CPUS_FOR_BUILD=500
 export CPUS_FOR_LINT=12
