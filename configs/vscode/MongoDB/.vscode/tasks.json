@@ -6,7 +6,7 @@
         {
             "label": "clang-format",
             "type": "shell",
-            "command": "buildscripts/clang_format.py format",
+            "command": "python buildscripts/clang_format.py format",
             "options": {
                 "cwd": "${workspaceFolder}"
             },
