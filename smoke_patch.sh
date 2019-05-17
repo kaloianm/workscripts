@@ -42,7 +42,8 @@ echo "Using Python from `which python`"
 export RESMOKECMD="python3 buildscripts/resmoke.py"
 export SCONSCMD="python3 buildscripts/scons.py"
 
-export CPUS_FOR_BUILD=500
+export CPUS_FOR_ICECC_BUILD=500
+export CPUS_FOR_LOCAL_BUILD=12
 export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=24
 
@@ -50,18 +51,25 @@ export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
 
 if [ "$2" == "dynamic" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic --allocator=system CC=clang CXX=clang++ --icecream"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$2" == "clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=clang CXX=clang++ --icecream"
-elif [ "$2" == "system-clang" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
-elif [ "$2" == "ubsan" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=clang CXX=clang++"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$2" == "opt" ]; then
     export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl --icecream"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$2" == "dbg" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl --icecream"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$2" == "system-clang" ]; then
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$2" == "ubsan" ]; then
+    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=clang CXX=clang++"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 else
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --icecream"
+    echo "Invalid build type or no build type specified"
+    exit 1
 fi
 
 export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --log=file"
