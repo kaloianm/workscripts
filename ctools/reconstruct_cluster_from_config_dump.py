@@ -270,7 +270,7 @@ def main():
             }
 
             if collUUID:
-                applyOpsCommand['ui'] = collUUID
+                applyOpsCommand['applyOps'][0]['ui'] = collUUID
 
             config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
             db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
