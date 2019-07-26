@@ -133,8 +133,148 @@ class ClusterIntrospect:
         # Open a connection to the introspect instance
         self.configDb = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
 
-    def terminate(self):
-        self._config.mlaunch_action('stop', self._dir)
+
+# Abstracts the manipulations of the mlaunch-started cluster
+class MlaunchCluster:
+
+    # Class initialization. The 'config' parameter is an instance of ToolConfiguration and
+    # 'introspect' is an instance of ClusterIntrospect.
+    def __init__(self, config, introspect):
+        self._config = config
+        self._introspect = introspect
+
+        numShards = introspect.configDb.shards.count({})
+        if (numShards > 10):
+            if (not yes_no('The imported configuration data contains large number of shards (' +
+                           str(numShards) +
+                           '). Proceeding will start large number of mongod processes.\n' +
+                           'Are you sure you want to continue (yes/no)? ')):
+                raise KeyboardInterrupt('Too many shards will be created')
+
+        # Make the root directory path where the cluster will be started
+        self._clusterRoot = os.path.join(config.dir, 'cluster_root')
+        os.makedirs(self._clusterRoot)
+
+        config.mlaunch_action('init', self._clusterRoot, [
+            '--replicaset', '--nodes', '1', '--sharded',
+            str(numShards), '--csrs', '--mongos', '1', '--port',
+            str(config.clusterStartingPort)
+        ])
+
+        # TODO: Find a better way to determine the port of the config server's primary
+        self.configServerPort = config.clusterStartingPort + (numShards + 1)
+
+        configServerConnection = MongoClient('localhost', self.configServerPort)
+        self.configDb = configServerConnection.config
+
+        self._shardsFromDump = list(introspect.configDb.shards.find({}).sort('_id', 1))
+        self._shardsFromMlaunch = list(self.configDb.shards.find({}).sort('_id', 1))
+
+        assert (len(self._shardsFromDump) == len(self._shardsFromMlaunch))
+
+    # Renames the shards from the dump to the shards launched by mlaunch (in the shards collection)
+    def restoreAndFixUpShardIds(self):
+        self._config.restore_config_db_to_port(self.configServerPort)
+
+        print('Renaming shards in the shards collection by deleting and recreating them:')
+
+        shardsToInsert = []
+        for shardFromDump, shardFromMlaunch in zip(deepcopy(self._shardsFromDump),
+                                                   self._shardsFromMlaunch):
+            shardFromDump['_id'] = shardFromMlaunch['_id']
+            shardFromDump['host'] = shardFromMlaunch['host']
+            shardsToInsert.append(shardFromDump)
+
+        # Wipe out all the shards (both those that came from the dump and those from the mlaunch
+        # cluster, since after the restore they are now jumbled together)
+        result = self.configDb.shards.delete_many({})
+        self._config.log_line(result.raw_result)
+
+        # Patch the _id and host of the shards in the config dump
+        for shardToInsert in shardsToInsert:
+            result = self.configDb.shards.insert_one(shardToInsert)
+            self._config.log_line(result)
+
+    # Renames the shards from the dump to the shards launched by mlaunch (in the databases and
+    # chunks collections)
+    def fixUpRoutingMetadata(self):
+        print('Renaming shards in the routing metadata:')
+
+        for shardIdFromDump, shardIdFromMlaunch in zip(
+                list(map(lambda x: x['_id'], self._shardsFromDump)),
+                list(map(lambda x: x['_id'], self._shardsFromMlaunch))):
+            print('Shard ' + shardIdFromDump + ' becomes ' + shardIdFromMlaunch)
+
+            result = self.configDb.databases.update_many({'primary': shardIdFromDump},
+                                                         {'$set': {
+                                                             'primary': shardIdFromMlaunch
+                                                         }})
+            self._config.log_line(result.raw_result)
+
+            # Rename the shards in the chunks' current owner field
+            result = self.configDb.chunks.update_many({'shard': shardIdFromDump},
+                                                      {'$set': {
+                                                          'shard': shardIdFromMlaunch
+                                                      }})
+            self._config.log_line(result.raw_result)
+
+            # Rename the shards in the chunks' history
+            result = self.configDb.chunks.update_many(
+                {'history.shard': shardIdFromDump},
+                {'$set': {
+                    'history.$[].shard': shardIdFromMlaunch
+                }})
+            self._config.log_line(result.raw_result)
+
+    # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
+    def fixUpShards(self):
+        for shard in self.configDb.shards.find({}):
+            print('Creating shard key indexes on shard ' + shard['_id'])
+
+            shardConnParts = shard['host'].split('/', 1)
+            shardConnection = MongoClient(shardConnParts[1], replicaset=shardConnParts[0])
+
+            for collection in self.configDb.collections.find({'dropped': False}):
+                collectionParts = collection['_id'].split('.', 1)
+                dbName = collectionParts[0]
+                collName = collectionParts[1]
+                collUUID = collection['uuid'] if 'uuid' in collection else None
+
+                shardKey = collection['key']
+
+                db = shardConnection.get_database(dbName)
+
+                applyOpsCommand = {
+                    'applyOps': [{
+                        'op': 'c',
+                        'ns': dbName + '.$cmd',
+                        'o': {
+                            'create': collName,
+                        },
+                    }]
+                }
+
+                if collUUID:
+                    applyOpsCommand['applyOps'][0]['ui'] = collUUID
+
+                self._config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
+                db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
+
+                createIndexesCommand = {
+                    'createIndexes': collName,
+                    'indexes': [{
+                        'key': shardKey,
+                        'name': 'Shard key index'
+                    }]
+                }
+                self._config.log_line("db.getSiblingDB(" + dbName + ").runCommand(" +
+                                      str(createIndexesCommand) + ");")
+                db.command(createIndexesCommand)
+
+            shardConnection.close()
+
+    def restartCluster(self):
+        self._config.mlaunch_action('restart', self._clusterRoot)
 
 
 # Main entrypoint for the application
@@ -156,139 +296,14 @@ def main():
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     introspect = ClusterIntrospect(config)
+    mlaunch = MlaunchCluster(config, introspect)
 
-    numShards = introspect.configDb.shards.count({})
-    if (numShards > 10):
-        if (not yes_no('The imported configuration data contains large number of shards (' +
-                       str(numShards) +
-                       '). Proceeding will start large number of mongod processes.\n' +
-                       'Are you sure you want to continue (yes/no)? ')):
-            return 1
-
-    # Make the output directories
-    mongodClusterRootPath = os.path.join(config.dir, 'cluster_root')
-    os.makedirs(mongodClusterRootPath)
-
-    config.mlaunch_action('init', mongodClusterRootPath, [
-        '--replicaset', '--nodes', '1', '--sharded',
-        str(numShards), '--csrs', '--mongos', '1', '--port',
-        str(config.clusterStartingPort)
-    ])
-
-    configServerPort = config.clusterStartingPort + numShards + 1
-    config.restore_config_db_to_port(configServerPort)
-
-    configServerConnection = MongoClient('localhost', configServerPort)
-    configServerConfigDB = configServerConnection.config
-
-    # Rename the shards from the dump to the shards launched by mlaunch in the shards collection
-    print('Renaming shards in the shards collection:')
-
-    # Shards that came with the config dump
-    SHARDS_FROM_DUMP = list(introspect.configDb.shards.find({}).sort('_id', 1))
-
-    # Shards that mlaunch generated (should be the same size as SHARDS_FROM_DUMP)
-    SHARDS_FROM_MLAUNCH = list(
-        configServerConfigDB.shards.find({
-            '_id': {
-                '$not': {
-                    '$in': list(map(lambda x: x['_id'], SHARDS_FROM_DUMP))
-                }
-            }
-        }).sort('_id', 1))
-
-    assert (len(SHARDS_FROM_DUMP) == len(SHARDS_FROM_MLAUNCH))
-
-    shardsToInsert = []
-    for shardFromDump, shardFromMlaunch in zip(deepcopy(SHARDS_FROM_DUMP), SHARDS_FROM_MLAUNCH):
-        shardFromDump['_id'] = shardFromMlaunch['_id']
-        shardFromDump['host'] = shardFromMlaunch['host']
-        shardsToInsert.append(shardFromDump)
-
-    # Wipe out all the shards (both from the dump and from mlaunch)
-    result = configServerConfigDB.shards.delete_many({})
-    config.log_line(result.raw_result)
-
-    # Patch the _id and host of the shards in the config dump
-    for shardToInsert in shardsToInsert:
-        result = configServerConfigDB.shards.insert(shardToInsert)
-        config.log_line(result)
-
-    # Rename the shards from the dump to the shards launched by mlaunch in the metadata
-    print('Renaming shards in the routing metadata:')
-    for shardIdFromDump, shardIdFromMlaunch in zip(
-            list(map(lambda x: x['_id'], SHARDS_FROM_DUMP)),
-            list(map(lambda x: x['_id'], SHARDS_FROM_MLAUNCH))):
-        print('Shard ' + shardIdFromDump + ' becomes ' + shardIdFromMlaunch)
-
-        result = configServerConfigDB.databases.update_many(
-            {'primary': shardIdFromDump}, {'$set': {
-                'primary': shardIdFromMlaunch
-            }})
-        config.log_line(result.raw_result)
-
-        # Rename the shards in the chunks' current owner field
-        result = configServerConfigDB.chunks.update_many({'shard': shardIdFromDump},
-                                                         {'$set': {
-                                                             'shard': shardIdFromMlaunch
-                                                         }})
-        config.log_line(result.raw_result)
-
-        # Rename the shards in the chunks' history
-        result = configServerConfigDB.chunks.update_many(
-            {'history.shard': shardIdFromDump}, {'$set': {
-                'history.$[].shard': shardIdFromMlaunch
-            }})
-        config.log_line(result.raw_result)
-
-    # Create the collections and construct sharded indexes on all shard nodes
-    for shard in configServerConfigDB.shards.find({}):
-        print('Creating shard key indexes on shard ' + shard['_id'])
-
-        shardConnParts = shard['host'].split('/', 1)
-        shardConnection = MongoClient(shardConnParts[1], replicaset=shardConnParts[0])
-
-        for collection in configServerConfigDB.collections.find({'dropped': False}):
-            collectionParts = collection['_id'].split('.', 1)
-            dbName = collectionParts[0]
-            collName = collectionParts[1]
-            collUUID = collection['uuid'] if 'uuid' in collection else None
-
-            shardKey = collection['key']
-
-            db = shardConnection.get_database(dbName)
-
-            applyOpsCommand = {
-                'applyOps': [{
-                    'op': 'c',
-                    'ns': dbName + '.$cmd',
-                    'o': {
-                        'create': collName,
-                    },
-                }]
-            }
-
-            if collUUID:
-                applyOpsCommand['applyOps'][0]['ui'] = collUUID
-
-            config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
-            db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
-
-            createIndexesCommand = {
-                'createIndexes': collName,
-                'indexes': [{
-                    'key': shardKey,
-                    'name': 'Shard key index'
-                }]
-            }
-            config.log_line("db.getSiblingDB(" + dbName + ").runCommand(" +
-                            str(createIndexesCommand) + ");")
-            db.command(createIndexesCommand)
-
-        shardConnection.close()
+    mlaunch.restoreAndFixUpShardIds()
+    mlaunch.fixUpRoutingMetadata()
+    mlaunch.fixUpShards()
 
     # Restart the cluster so it picks up the new configuration cleanly
-    config.mlaunch_action('restart', mongodClusterRootPath)
+    mlaunch.restartCluster()
 
     return 0
 
