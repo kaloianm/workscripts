@@ -24,7 +24,8 @@ class ToolConfiguration:
     # Class initialization. The 'args' parameter contains the parsed tool command line arguments.
     def __init__(self, args):
         self.binarypath = args.binarypath
-        self.dir = args.dir
+        self.introspectRoot = os.path.join(args.dir, 'introspect')
+        self.clusterRoot = os.path.join(args.dir, 'cluster')
         self.configdump = args.configdumpdir[0]
 
         self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
@@ -34,18 +35,20 @@ class ToolConfiguration:
 
         self.mongoRestoreNumInsertionWorkers = 16
 
-        print('Running cluster import with binaries located at: ', self.binarypath)
-        print('Data directory root at: ', self.dir)
-        print('Config dump directory at: ', self.configdump)
+        print('Running cluster import with binaries located at:', self.binarypath)
+        print('Config dump directory at:', self.configdump)
+        print('Data directory root at:', args.dir)
+        print('Introspect directory at:', self.introspectRoot)
+        print('Cluster directory at:', self.clusterRoot)
 
-        if (not self.__cleanup_previous_runs()):
-            raise FileExistsError('Unable to cleanup any previous runs.')
+        self.__cleanup_previous_runs()
 
-        os.makedirs(self.dir)
+        os.makedirs(self.introspectRoot)
+        os.makedirs(self.clusterRoot)
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(os.path.join(self.dir, 'reconstruct.log'), 'w',
+        self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
                                    kOutputLogFileBufSize)
 
     def log_line(self, line):
@@ -90,7 +93,7 @@ class ToolConfiguration:
         if (not yes_no(
                 'The next step will kill all mongodb processes and wipe out the data path.\n' +
                 'Proceed (yes/no)? ')):
-            return False
+            raise KeyboardInterrupt('User disallowed cleanup of the data path')
 
         # Iterate through all processes and kill mongod and mongos
         for process in psutil.process_iter():
@@ -105,9 +108,16 @@ class ToolConfiguration:
                     process.kill()
                     process.wait()
 
-        # Remove the output directory
-        shutil.rmtree(self.dir)
-        return True
+        # Remove the output directories
+        try:
+            shutil.rmtree(self.introspectRoot)
+        except FileNotFoundError:
+            pass
+
+        try:
+            shutil.rmtree(self.clusterRoot)
+        except FileNotFoundError:
+            pass
 
 
 # Abstracts management of the 'introspect' mongod instance which is used to read the cluster
@@ -116,18 +126,14 @@ class ClusterIntrospect:
 
     # Class initialization. The 'config' parameter is an instance of ToolConfiguration.
     def __init__(self, config):
-        self._config = config
-
-        self._dir = os.path.join(config.dir, 'introspect')
-        os.makedirs(self._dir)
-
         print('Introspecting config dump using instance at port',
               config.clusterIntrospectMongoDPort)
 
         # Start the instance and restore the config server dump
         config.mlaunch_action(
-            'init', self._dir,
+            'init', config.introspectRoot,
             ['--single', '--port', str(config.clusterIntrospectMongoDPort)])
+
         config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
 
         # Open a connection to the introspect instance
@@ -151,11 +157,7 @@ class MlaunchCluster:
                            'Are you sure you want to continue (yes/no)? ')):
                 raise KeyboardInterrupt('Too many shards will be created')
 
-        # Make the root directory path where the cluster will be started
-        self._clusterRoot = os.path.join(config.dir, 'cluster_root')
-        os.makedirs(self._clusterRoot)
-
-        config.mlaunch_action('init', self._clusterRoot, [
+        config.mlaunch_action('init', config.clusterRoot, [
             '--replicaset', '--nodes', '1', '--sharded',
             str(numShards), '--csrs', '--mongos', '1', '--port',
             str(config.clusterStartingPort)
@@ -274,7 +276,7 @@ class MlaunchCluster:
             shardConnection.close()
 
     def restartCluster(self):
-        self._config.mlaunch_action('restart', self._clusterRoot)
+        self._config.mlaunch_action('restart', self._config.clusterRoot)
 
 
 # Main entrypoint for the application
