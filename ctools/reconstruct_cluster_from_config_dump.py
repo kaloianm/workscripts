@@ -45,8 +45,8 @@ class ToolConfiguration:
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(
-            os.path.join(self.dir, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
+        self._outputLogFile = open(os.path.join(self.dir, 'reconstruct.log'), 'w',
+                                   kOutputLogFileBufSize)
 
     def log_line(self, line):
         self._outputLogFile.write(str(line) + '\n')
@@ -87,8 +87,9 @@ class ToolConfiguration:
     # Performs cleanup by killing all potentially running mongodb processes and deleting any
     # leftover files. Basically leaves '--dir' empty.
     def __cleanup_previous_runs(self):
-        if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n'
-                       + 'Proceed (yes/no)? ')):
+        if (not yes_no(
+                'The next step will kill all mongodb processes and wipe out the data path.\n' +
+                'Proceed (yes/no)? ')):
             return False
 
         # Iterate through all processes and kill mongod and mongos
@@ -158,8 +159,9 @@ def main():
 
     numShards = introspect.configDb.shards.count({})
     if (numShards > 10):
-        if (not yes_no('The imported configuration data contains large number of shards (' + str(
-                numShards) + '). Proceeding will start large number of mongod processes.\n' +
+        if (not yes_no('The imported configuration data contains large number of shards (' +
+                       str(numShards) +
+                       '). Proceeding will start large number of mongod processes.\n' +
                        'Are you sure you want to continue (yes/no)? ')):
             return 1
 
@@ -219,27 +221,24 @@ def main():
             list(map(lambda x: x['_id'], SHARDS_FROM_MLAUNCH))):
         print('Shard ' + shardIdFromDump + ' becomes ' + shardIdFromMlaunch)
 
-        result = configServerConfigDB.databases.update_many({
-            'primary': shardIdFromDump
-        }, {'$set': {
-            'primary': shardIdFromMlaunch
-        }})
+        result = configServerConfigDB.databases.update_many(
+            {'primary': shardIdFromDump}, {'$set': {
+                'primary': shardIdFromMlaunch
+            }})
         config.log_line(result.raw_result)
 
         # Rename the shards in the chunks' current owner field
-        result = configServerConfigDB.chunks.update_many({
-            'shard': shardIdFromDump
-        }, {'$set': {
-            'shard': shardIdFromMlaunch
-        }})
+        result = configServerConfigDB.chunks.update_many({'shard': shardIdFromDump},
+                                                         {'$set': {
+                                                             'shard': shardIdFromMlaunch
+                                                         }})
         config.log_line(result.raw_result)
 
         # Rename the shards in the chunks' history
-        result = configServerConfigDB.chunks.update_many({
-            'history.shard': shardIdFromDump
-        }, {'$set': {
-            'history.$[].shard': shardIdFromMlaunch
-        }})
+        result = configServerConfigDB.chunks.update_many(
+            {'history.shard': shardIdFromDump}, {'$set': {
+                'history.$[].shard': shardIdFromMlaunch
+            }})
         config.log_line(result.raw_result)
 
     # Create the collections and construct sharded indexes on all shard nodes
@@ -282,8 +281,8 @@ def main():
                     'name': 'Shard key index'
                 }]
             }
-            config.log_line(
-                "db.getSiblingDB(" + dbName + ").runCommand(" + str(createIndexesCommand) + ");")
+            config.log_line("db.getSiblingDB(" + dbName + ").runCommand(" +
+                            str(createIndexesCommand) + ");")
             db.command(createIndexesCommand)
 
         shardConnection.close()
