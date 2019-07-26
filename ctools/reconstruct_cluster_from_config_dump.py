@@ -219,7 +219,7 @@ class MlaunchCluster:
     # Renames the shards from the dump to the shards launched by mlaunch (in the databases and
     # chunks collections)
     def fixUpRoutingMetadata(self):
-        if self._shardIdRemap is None:
+        if not hasattr(self, '_shardIdRemap'):
             return
 
         print('Renaming shards in the routing metadata:')
