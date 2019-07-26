@@ -27,6 +27,7 @@ class ToolConfiguration:
         self.introspectRoot = os.path.join(args.dir, 'introspect')
         self.clusterRoot = os.path.join(args.dir, 'cluster')
         self.configdump = args.configdumpdir[0]
+        self.numShards = args.numshards
 
         self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
 
@@ -139,6 +140,9 @@ class ClusterIntrospect:
         # Open a connection to the introspect instance
         self.configDb = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
 
+    def checkZonesExist(self):
+        return self.configDb.tags.count({}) > 0
+
 
 # Abstracts the manipulations of the mlaunch-started cluster
 class MlaunchCluster:
@@ -149,7 +153,11 @@ class MlaunchCluster:
         self._config = config
         self._introspect = introspect
 
-        numShards = introspect.configDb.shards.count({})
+        if config.numShards is None:
+            numShards = introspect.configDb.shards.count({})
+        else:
+            numShards = config.numShards
+
         if (numShards > 10):
             if (not yes_no('The imported configuration data contains large number of shards (' +
                            str(numShards) +
@@ -169,63 +177,76 @@ class MlaunchCluster:
         configServerConnection = MongoClient('localhost', self.configServerPort)
         self.configDb = configServerConnection.config
 
-        self._shardsFromDump = list(introspect.configDb.shards.find({}).sort('_id', 1))
-        self._shardsFromMlaunch = list(self.configDb.shards.find({}).sort('_id', 1))
-
-        assert (len(self._shardsFromDump) == len(self._shardsFromMlaunch))
-
     # Renames the shards from the dump to the shards launched by mlaunch (in the shards collection)
     def restoreAndFixUpShardIds(self):
+        shardsFromDump = list(self._introspect.configDb.shards.find({}).sort('_id', 1))
+        shardsFromMlaunch = list(self.configDb.shards.find({}).sort('_id', 1))
+
         self._config.restore_config_db_to_port(self.configServerPort)
 
-        print('Renaming shards in the shards collection by deleting and recreating them:')
+        print('Renaming shards in the shards collection:')
 
-        shardsToInsert = []
-        for shardFromDump, shardFromMlaunch in zip(deepcopy(self._shardsFromDump),
-                                                   self._shardsFromMlaunch):
-            shardFromDump['_id'] = shardFromMlaunch['_id']
-            shardFromDump['host'] = shardFromMlaunch['host']
-            shardsToInsert.append(shardFromDump)
+        if len(shardsFromDump) == len(shardsFromMlaunch):
+            result = self.configDb.shards.delete_many({})
+            self._config.log_line(result.raw_result)
 
-        # Wipe out all the shards (both those that came from the dump and those from the mlaunch
-        # cluster, since after the restore they are now jumbled together)
-        result = self.configDb.shards.delete_many({})
-        self._config.log_line(result.raw_result)
+            for shardFromDump, shardFromMlaunch in zip(deepcopy(shardsFromDump), shardsFromMlaunch):
+                shardFromDump['host'] = shardFromMlaunch['host']
+                result = self.configDb.shards.insert_one(shardFromDump)
+                self._config.log_line(result)
 
-        # Patch the _id and host of the shards in the config dump
-        for shardToInsert in shardsToInsert:
-            result = self.configDb.shards.insert_one(shardToInsert)
-            self._config.log_line(result)
+        elif len(shardsFromDump) > len(shardsFromMlaunch):
+            # If the dump has more shards than the mlaunch cluster (--numshards was specified with
+            # smaller number), assign the dump shards to the mlaunch shards in round-robin fashion
+            def roundRobin(arr):
+                i = 0
+                while True:
+                    yield arr[i % len(arr)]
+                    i += 1
+
+            self._shardIdRemap = {}
+
+            for shardFromDump, shardFromMlaunch in zip(shardsFromDump,
+                                                       roundRobin(shardsFromMlaunch)):
+                result = self.configDb.shards.delete_one({'_id': shardFromDump['_id']})
+                self._config.log_line(result.raw_result)
+
+                self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
+
+        elif len(shardsFromDump) < len(shardsFromMlaunch):
+            raise NotImplementedError()
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the databases and
     # chunks collections)
     def fixUpRoutingMetadata(self):
+        if self._shardIdRemap is None:
+            return
+
         print('Renaming shards in the routing metadata:')
 
-        for shardIdFromDump, shardIdFromMlaunch in zip(
-                list(map(lambda x: x['_id'], self._shardsFromDump)),
-                list(map(lambda x: x['_id'], self._shardsFromMlaunch))):
-            print('Shard ' + shardIdFromDump + ' becomes ' + shardIdFromMlaunch)
+        for shardId in self._shardIdRemap:
+            shardIdTo = self._shardIdRemap[shardId]
+            print('Shard', shardId, 'becomes', shardIdTo)
 
-            result = self.configDb.databases.update_many({'primary': shardIdFromDump},
+            # Rename the primary shard for all databases
+            result = self.configDb.databases.update_many({'primary': shardId},
                                                          {'$set': {
-                                                             'primary': shardIdFromMlaunch
+                                                             'primary': shardIdTo
                                                          }})
             self._config.log_line(result.raw_result)
 
             # Rename the shards in the chunks' current owner field
-            result = self.configDb.chunks.update_many({'shard': shardIdFromDump},
+            result = self.configDb.chunks.update_many({'shard': shardId},
                                                       {'$set': {
-                                                          'shard': shardIdFromMlaunch
+                                                          'shard': shardIdTo
                                                       }})
             self._config.log_line(result.raw_result)
 
             # Rename the shards in the chunks' history
-            result = self.configDb.chunks.update_many(
-                {'history.shard': shardIdFromDump},
-                {'$set': {
-                    'history.$[].shard': shardIdFromMlaunch
-                }})
+            result = self.configDb.chunks.update_many({'history.shard': shardId},
+                                                      {'$set': {
+                                                          'history.$[].shard': shardIdTo
+                                                      }})
             self._config.log_line(result.raw_result)
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
@@ -293,11 +314,21 @@ def main():
     argsParser.add_argument('configdumpdir',
                             help='Directory containing a dump of the cluster config database',
                             metavar='configdumpdir', type=str, nargs=1)
+    argsParser.add_argument(
+        '--numshards',
+        help='How many shards to create in the constructed cluster. If specified and is less than'
+        'the number of the shards in the dump, the extra shards will be assigned in round-robin'
+        'fashion on the created cluster. If more than the number of the shards in the dump are'
+        'requested, the extra shards will not have any chunks placed on them.', metavar='numshards',
+        type=int, required=False)
 
     config = ToolConfiguration(argsParser.parse_args())
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     introspect = ClusterIntrospect(config)
+    if (config.numShards is not None and introspect.checkZonesExist()):
+        raise Exception('Cannot use `--numshards` when zones are defined in the cluster')
+
     mlaunch = MlaunchCluster(config, introspect)
 
     mlaunch.restoreAndFixUpShardIds()
