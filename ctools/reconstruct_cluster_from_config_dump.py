@@ -4,6 +4,7 @@
 import argparse
 import os
 import psutil
+import pymongo
 import shutil
 import subprocess
 import sys
@@ -52,8 +53,13 @@ class ToolConfiguration:
         self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
                                    kOutputLogFileBufSize)
 
-    def log_line(self, line):
-        self._outputLogFile.write(str(line) + '\n')
+    def log_line(self, entry):
+        if (isinstance(entry, pymongo.results.DeleteResult)):
+            msg = 'DeleteResult deleted: {}'.format(entry.deleted_count)
+        else:
+            msg = str(entry)
+
+        self._outputLogFile.write(msg + '\n')
 
     # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
     def restore_config_db_to_port(self, restorePort):
@@ -138,13 +144,14 @@ class ClusterIntrospect:
         config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
 
         # Open a connection to the introspect instance
-        self.configDb = MongoClient('localhost', config.clusterIntrospectMongoDPort).config
+        mongoDb = MongoClient('localhost', config.clusterIntrospectMongoDPort)
 
-    def checkZonesExist(self):
-        return self.configDb.tags.count({}) > 0
+        self.configDb = mongoDb.config
 
-    def getNumberOfShards(self):
-        return self.configDb.shards.count({})
+        self.numZones = self.configDb.tags.count({})
+        self.numShards = self.configDb.shards.count({})
+        self.FCV = mongoDb.admin.system.version.find_one({'_id': 'featureCompatibilityVersion'
+                                                          })['version']
 
 
 # Abstracts the manipulations of the mlaunch-started cluster
@@ -173,6 +180,11 @@ class MlaunchCluster:
             str(numShards), '--csrs', '--mongos', '1', '--port',
             str(config.clusterStartingPort)
         ])
+
+        # Set the correct FCV on the cluster being reconstructed
+        clusterConnection = MongoClient('localhost', config.clusterStartingPort)
+        self._config.log_line(
+            clusterConnection.admin.command('setFeatureCompatibilityVersion', introspect.FCV))
 
         # TODO: Find a better way to determine the port of the config server's primary
         self.configServerPort = config.clusterStartingPort + (numShards + 1)
@@ -308,14 +320,8 @@ def main():
         description=
         'Tool to interpret an export of a cluster config database and construct a new cluster with '
         'exactly the same configuration. Requires mlaunch to be installed and in the system path.')
-    argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
-                            metavar='binarypath', type=str, required=True)
-    argsParser.add_argument(
-        '--dir', help='Directory in which to place the data files (will create subdirectories)',
-        metavar='dir', type=str, required=True)
-    argsParser.add_argument('configdumpdir',
-                            help='Directory containing a dump of the cluster config database',
-                            metavar='configdumpdir', type=str, nargs=1)
+
+    # Optional arguments
     argsParser.add_argument(
         '--numshards',
         help='How many shards to create in the constructed cluster. If specified and is less than '
@@ -324,12 +330,25 @@ def main():
         'requested, the extra shards will not have any chunks placed on them.', metavar='numshards',
         type=int, required=False)
 
+    # Mandatory arguments
+    argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
+                            metavar='binarypath', type=str, required=True)
+    argsParser.add_argument(
+        '--dir', help='Directory in which to place the data files (will create subdirectories)',
+        metavar='dir', type=str, required=True)
+
+    # Positional arguments
+    argsParser.add_argument('configdumpdir',
+                            help='Directory containing a dump of the cluster config database',
+                            metavar='configdumpdir', type=str, nargs=1)
+
     config = ToolConfiguration(argsParser.parse_args())
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     introspect = ClusterIntrospect(config)
-    if (config.numShards is not None and introspect.checkZonesExist()
-            and config.numShards < introspect.getNumberOfShards()):
+
+    if (config.numShards is not None and introspect.numZones > 0
+            and config.numShards < introspect.numShards):
         raise ValueError('Cannot use `--numshards` with smaller number of shards than those in the '
                          'dump in the case when zones are defined')
 
@@ -341,8 +360,6 @@ def main():
 
     # Restart the cluster so it picks up the new configuration cleanly
     mlaunch.restartCluster()
-
-    return 0
 
 
 if __name__ == "__main__":
