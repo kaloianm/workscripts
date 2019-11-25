@@ -12,15 +12,13 @@
 #
 
 export PATCHFILE=$1
-
 echo "Using patch file $PATCHFILE"
 if [ ! -f $PATCHFILE ]; then
     echo "File $PATCHFILE not found"
     exit 1
 fi
 
-export TESTRUNDIR=/mnt/SSD/Data/SmokePatchRoot
-
+export TESTRUNDIR="/mnt/SSD/$USER/Data/smoke_patch"
 echo "Using test run directory $TESTRUNDIR"
 if [ -d $TESTRUNDIR ]; then
     echo "Deleting previous test run directory $TESTRUNDIR ..."
@@ -32,12 +30,13 @@ mkdir "$TESTRUNDIR"
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/4.0.5
+export TOOLSDIR=/home/kaloianm/mongodb/4.2.1
 
 # Use all the tools from the mongodb toolchain instead of those installed on the system
 export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v3/bin"
 export PATH=$MONGODBTOOLCHAIN:$PATH
-echo "Using Python from `which python`"
+
+echo "Build environment will be using Python from `which python`"
 
 export RESMOKECMD="python3 buildscripts/resmoke.py"
 export SCONSCMD="python3 buildscripts/scons.py"
@@ -72,10 +71,10 @@ else
     exit 1
 fi
 
-export FLAGS_FOR_TEST="--dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --log=file"
+export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --basePort=12000"
 
 # Construct the scons, ninja and linter command lines
-export BUILD_NINJA_CMDLINE="$SCONSCMD $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH VARIANT_DIR=ninja build.ninja"
+export BUILD_NINJA_CMDLINE="$SCONSCMD --variables-files=etc/scons/mongodbtoolchain_v3_clang.vars $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH VARIANT_DIR=ninja build.ninja"
 export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 
