@@ -6,26 +6,56 @@
 #
 # Export a patch of the changes though `git format-patch` into a file:
 #  > git format-patch --stdout <Git hash> > Patch.patch
+#  > scp Patch.patch BUILD-MACHINE:~/
 #
 # Smoke the patch using the following command line:
-#  > smoke_patch.sh ~/Patch.patch
+#  > smoke_patch.sh ~/Patch.patch BUILDTYPE [<BUILDROOTDIR>]
 #
+
+# Build configuration constants
+export CPUS_FOR_ICECC_BUILD=500
+export CPUS_FOR_LOCAL_BUILD=12
+export CPUS_FOR_LINT=12
+export CPUS_FOR_TESTS=24
+
+# Command line parameters
+if [ "$#" -lt 2 ]; then
+    echo "Error: illegal number of parameters $#"
+    exit 1
+fi
 
 export PATCHFILE=$1
 echo "Using patch file $PATCHFILE"
 if [ ! -f $PATCHFILE ]; then
-    echo "File $PATCHFILE not found"
+    echo "Error: patch file $PATCHFILE not found"
     exit 1
 fi
 
-export TESTRUNDIR="/mnt/SSD/$USER/Data/smoke_patch"
+export BUILDTYPE=$2
+echo "Performing build type $BUILDTYPE"
+
+export BUILDROOTDIR="/tmp/$USER"
+if [ ! -z $3 ]; then
+    BUILDROOTDIR=$3
+fi
+
+# Environment configuration
+export TESTRUNDIR="$BUILDROOTDIR/smoke_patch"
 echo "Using test run directory $TESTRUNDIR"
 if [ -d $TESTRUNDIR ]; then
     echo "Deleting previous test run directory $TESTRUNDIR ..."
     rm -rf $TESTRUNDIR
+    if [ $? -ne 0 ]; then
+        echo "Error: unable to delete previous test run directory $?"
+        exit 1
+    fi
 fi
 
-mkdir "$TESTRUNDIR"
+mkdir --parents "$TESTRUNDIR"
+if [ $? -ne 0 ]; then
+    echo "Error: unable to create test run directory $?"
+    exit 1
+fi
 
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
@@ -41,37 +71,31 @@ echo "Build environment will be using Python from `which python`"
 export RESMOKECMD="python3 buildscripts/resmoke.py"
 export SCONSCMD="python3 buildscripts/scons.py"
 
-export CPUS_FOR_ICECC_BUILD=500
-export CPUS_FOR_LOCAL_BUILD=12
-export CPUS_FOR_LINT=12
-export CPUS_FOR_TESTS=24
-
-export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
-
-if [ "$2" == "dynamic" ]; then
+if [ "$BUILDTYPE" == "dynamic" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic --allocator=system CC=clang CXX=clang++ --icecream"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$2" == "clang" ]; then
+elif [ "$BUILDTYPE" == "clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=clang CXX=clang++ --icecream"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$2" == "opt" ]; then
+elif [ "$BUILDTYPE" == "opt" ]; then
     export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl --icecream"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$2" == "dbg" ]; then
+elif [ "$BUILDTYPE" == "dbg" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl --icecream"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$2" == "system-clang" ]; then
+elif [ "$BUILDTYPE" == "system-clang" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-elif [ "$2" == "ubsan" ]; then
+elif [ "$BUILDTYPE" == "ubsan" ]; then
     export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=clang CXX=clang++"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 else
-    echo "Invalid build type or no build type specified"
+    echo "Error: invalid build type ($BUILDTYPE) specified"
     exit 1
 fi
 
 export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --basePort=12000"
+export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
 
 # Construct the scons, ninja and linter command lines
 export BUILD_NINJA_CMDLINE="$SCONSCMD --variables-files=etc/scons/mongodbtoolchain_v3_clang.vars $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH VARIANT_DIR=ninja build.ninja"
@@ -95,7 +119,7 @@ pushd "$TESTRUNDIR/mongo"
 echo "Applying patch file $PATCHFILE"
 git am $PATCHFILE
 if [ $? -ne 0 ]; then
-    echo "git apply failed with error $?"
+    echo "Error: git apply failed with error $?"
     exit 1
 fi
 
@@ -118,13 +142,14 @@ PID_lint=$!
 # Copy any binaries which are needed for running tests
 #
 echo "Copying executables to support tests ..."
+cp "$TOOLSDIR/bsondump" `pwd`
 cp "$TOOLSDIR/mongodump" `pwd`
 cp "$TOOLSDIR/mongorestore" `pwd`
 
 echo "Waiting for build ninja process $PID_build_ninja to complete ..."
 wait $PID_build_ninja
 if [ $? -ne 0 ]; then
-    echo "build  ninja failed with error $?"
+    echo "Error: build ninja failed with error $?"
     kill -9 `jobs -p`
     exit 1
 fi
@@ -140,7 +165,7 @@ PID_build=$!
 echo "Waiting for build process $PID_build to complete ..."
 wait $PID_build
 if [ $? -ne 0 ]; then
-    echo "build failed with error $?"
+    echo "Error: build failed with error $?"
     kill -9 `jobs -p`
     exit 1
 fi
@@ -157,7 +182,7 @@ execute_test_suite () {
             echo "Lint process $PID_lint has completed, joining to get its error code ..."
             wait $PID_lint; local TIMEOUT_RESULT=$?
             if [ $TIMEOUT_RESULT -ne 0 ]; then
-                echo "lint failed with error $TIMEOUT_RESULT"
+                echo "Error: lint failed with error $TIMEOUT_RESULT"
                 kill -9 `jobs -p`
                 exit 1
             fi
@@ -168,15 +193,14 @@ execute_test_suite () {
     # Kick off the actual test suite
     time $2; local SUITE_RESULT=$?
     if [ $SUITE_RESULT -ne 0 ]; then
-        echo "Suite $1 failed with error $SUITE_RESULT. Execution will be terminated."
+        echo "Error: suite $1 failed with error $SUITE_RESULT and execution will be terminated"
         kill -9 `jobs -p`
         exit 1
     fi
 }
 
-
-# The GSSAPI tests require a Kerberos server set up and they can never pass, so exclude them
-# from the run
+# The GSSAPI tests require a Kerberos server set up and they can never pass, so exclude them from
+# the run
 perl -ni -e 'print unless /sasl_authentication_session_gssapi_test/' build/unittests.txt
 
 # Execute the unit tests, dbtest and core first in order to uncover early problems, before even
@@ -186,10 +210,12 @@ execute_test_suite "WT dbtest" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST -
 execute_test_suite "WT core" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core"
 execute_test_suite "WT core_txns" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns"
 
-execute_test_suite "WT auth" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
+# Slower suites
 execute_test_suite "WT aggregation" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation"
+execute_test_suite "WT auth" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
 execute_test_suite "WT replica_sets" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
 execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
 execute_test_suite "WT sharding" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
 
+# Concurrency suites
 execute_test_suite "WT concurrency_sharded_with_stepdowns_and_balancer" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=concurrency_sharded_with_stepdowns_and_balancer"
