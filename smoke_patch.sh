@@ -183,8 +183,8 @@ execute_test_suite () {
             wait $PID_lint; local TIMEOUT_RESULT=$?
             if [ $TIMEOUT_RESULT -ne 0 ]; then
                 echo "Error: lint failed with error $TIMEOUT_RESULT"
-                kill -9 `jobs -p`
-                exit 1
+                # kill -9 `jobs -p`
+                # exit 1
             fi
         fi
         unset PID_lint
