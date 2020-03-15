@@ -9,7 +9,7 @@
 #  > scp Patch.patch BUILD-MACHINE:~/
 #
 # Smoke the patch using the following command line:
-#  > smoke_patch.sh ~/Patch.patch BUILDTYPE [<BUILDROOTDIR>]
+#  > smoke_patch.sh ~/Patch.patch BRANCH-NAME BUILD-TYPE [<BUILD-ROOT-DIR>]
 #
 
 # Build configuration constants
@@ -18,28 +18,54 @@ export CPUS_FOR_LOCAL_BUILD=12
 export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=24
 
-# Command line parameters
-if [ "$#" -lt 2 ]; then
+# Command line parameters parsing
+if [ "$#" -lt 3 ]; then
     echo "Error: illegal number of parameters $#"
+    echo "Usage: smoke_patch.sh <Patch file> <v4.0|v4.2|v4.4|master> <Build Type> [<Build root>]"
     exit 1
 fi
 
-export PATCHFILE=$1
+export BRANCH=$1
+echo "Running against branch $BRANCH"
+if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
+    export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
+    export ICECREAM_FLAGS="CCACHE=ccache ICECC=icecc"
+    export NINJA_FLAGS="--ninja"
+    export TOOLSDIR=/home/kaloianm/mongodb/4.2.3
+elif [ "$BRANCH" == "v4.2" ]; then
+    export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
+    export ICECREAM_FLAGS="--icecream"
+    export TOOLSDIR=/home/kaloianm/mongodb/4.2.3
+elif [ "$BRANCH" == "v4.0" ]; then
+    export PATH=/opt/mongodbtoolchain/v2/bin:$PATH
+    export ICECREAM_FLAGS="--icecream"
+    export TOOLSDIR=/home/kaloianm/mongodb/4.0.16
+fi
+
+export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $NINJA_FLAGS MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown VARIANT_DIR=ninja"
+export RESMOKE_COMMAND="buildscripts/resmoke.py"
+
+echo "Using build command from: $BUILD_COMMAND"
+echo "Using resmoke command from: $BUILD_COMMAND"
+
+export PATCHFILE=$2
 echo "Using patch file $PATCHFILE"
 if [ ! -f $PATCHFILE ]; then
     echo "Error: patch file $PATCHFILE not found"
     exit 1
 fi
 
-export BUILDTYPE=$2
+export BUILDTYPE=$3
 echo "Performing build type $BUILDTYPE"
 
 export BUILDROOTDIR="/tmp/$USER"
-if [ ! -z $3 ]; then
-    BUILDROOTDIR=$3
+if [ ! -z $4 ]; then
+    BUILDROOTDIR=$4
 fi
 
+#
 # Environment configuration
+#
 export TESTRUNDIR="$BUILDROOTDIR/smoke_patch"
 echo "Using test run directory $TESTRUNDIR"
 if [ -d $TESTRUNDIR ]; then
@@ -60,57 +86,18 @@ fi
 export TESTDBPATHDIR="$TESTRUNDIR/db"
 mkdir "$TESTDBPATHDIR"
 
-export TOOLSDIR=/home/kaloianm/mongodb/4.2.1
-
-# Use all the tools from the mongodb toolchain instead of those installed on the system
-export MONGODBTOOLCHAIN="/opt/mongodbtoolchain/v3/bin"
-export PATH=$MONGODBTOOLCHAIN:$PATH
-
-echo "Build environment will be using Python from `which python`"
-
-export RESMOKECMD="python3 buildscripts/resmoke.py"
-export SCONSCMD="python3 buildscripts/scons.py"
-
-if [ "$BUILDTYPE" == "dynamic" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --link-model=dynamic --allocator=system CC=clang CXX=clang++ --icecream"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "clang" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=clang CXX=clang++ --icecream"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "opt" ]; then
-    export FLAGS_FOR_BUILD="--dbg=off --opt=on --ssl --icecream"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "dbg" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=off --ssl --icecream"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "system-clang" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl CC=/usr/bin/clang CXX=/usr/bin/clang++"
-    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-elif [ "$BUILDTYPE" == "ubsan" ]; then
-    export FLAGS_FOR_BUILD="--dbg=on --opt=on --ssl --allocator=system --sanitize=undefined,address CC=clang CXX=clang++"
-    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-else
-    echo "Error: invalid build type ($BUILDTYPE) specified"
-    exit 1
-fi
-
-export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --basePort=12000"
-export MONGO_VERSION_AND_GITHASH="MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown"
-
-# Construct the scons, ninja and linter command lines
-export BUILD_NINJA_CMDLINE="$SCONSCMD --variables-files=etc/scons/mongodbtoolchain_v3_clang.vars $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH VARIANT_DIR=ninja build.ninja"
-export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
-export LINT_CMDLINE="$SCONSCMD -j $CPUS_FOR_LINT $FLAGS_FOR_BUILD $MONGO_VERSION_AND_GITHASH --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
-
-# Clone the repositories
 echo "Cloning the mongo repository ..."
-git clone --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
+git clone -b $BRANCH --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
 
-echo "Cloning the enterprise repository ..."
-git clone --depth 1 git@github.com:10gen/mongo-enterprise-modules.git "$TESTRUNDIR/mongo/src/mongo/db/modules/enterprise"
+echo "Cloning the mongo-enterprise-modules repository ..."
+git clone -b $BRANCH --depth 1 git@github.com:10gen/mongo-enterprise-modules.git "$TESTRUNDIR/mongo/src/mongo/db/modules/mongo-enterprise-modules"
 
-echo "Cloning the ninja repository ..."
-git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "$TESTRUNDIR/mongo/src/mongo/db/modules/ninja"
+if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
+    echo "Using native ninja support ..."
+else
+    echo "Cloning the ninja repository ..."
+    git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "$TESTRUNDIR/mongo/src/mongo/db/modules/ninja"
+fi
 
 # Switch to the root source directory
 pushd "$TESTRUNDIR/mongo"
@@ -123,20 +110,50 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+if [ "$BUILDTYPE" == "opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=off   --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "dbg" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "clang" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "dynamic" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --link-model=dynamic"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "ubsan" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --sanitize=undefined,address"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-clang" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    CC=/usr/bin/clang CXX=/usr/bin/clang++                                      --dbg=on    --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+else
+    echo "Error: invalid build type ($BUILDTYPE) specified"
+    exit 1
+fi
+
+export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --basePort=12000"
+
+# Construct the scons, ninja and linter command lines
+export LINT_CMDLINE="$BUILD_NINJA_COMMAND -j $CPUS_FOR_LINT --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
+export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND build.ninja"
+export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
+
 #
 # Start the slower builder and linter first so that the slower tasks can overlap with it
 #
-echo "Starting build ninja and lint ..."
+echo "Starting lint and build ..."
 
-echo "Command lines:" > build.log
-echo $BUILD_NINJA_CMDLINE >> build.log
-time $BUILD_NINJA_CMDLINE >> build.log 2>&1 &
-PID_build_ninja=$!
-
-echo "Command lines:" > lint.log
+echo "Lint command line:" > lint.log
 echo $LINT_CMDLINE >> lint.log
 time $LINT_CMDLINE >> lint.log 2>&1 &
 PID_lint=$!
+
+echo "Build command line:" > build.log
+echo $BUILD_NINJA_COMMAND >> build.log
+time $BUILD_NINJA_COMMAND >> build.log 2>&1 &
+PID_build_ninja=$!
 
 #
 # Copy any binaries which are needed for running tests
@@ -205,17 +222,17 @@ perl -ni -e 'print unless /sasl_authentication_session_gssapi_test/' build/unitt
 
 # Execute the unit tests, dbtest and core first in order to uncover early problems, before even
 # scheduling any of the longer running JS tests
-execute_test_suite "WT unittests" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=unittests"
-execute_test_suite "WT dbtest" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest"
-execute_test_suite "WT core" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core"
-execute_test_suite "WT core_txns" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns"
+execute_test_suite "WT unittests" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=unittests"
+execute_test_suite "WT dbtest" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=dbtest"
+execute_test_suite "WT core" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core"
+execute_test_suite "WT core_txns" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=core_txns"
 
 # Slower suites
-execute_test_suite "WT aggregation" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation"
-execute_test_suite "WT auth" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
-execute_test_suite "WT replica_sets" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
-execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
-execute_test_suite "WT sharding" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
+execute_test_suite "WT aggregation" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation"
+execute_test_suite "WT auth" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
+execute_test_suite "WT replica_sets" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
+execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
+execute_test_suite "WT sharding" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
 
 # Concurrency suites
-execute_test_suite "WT concurrency_sharded_with_stepdowns_and_balancer" "$RESMOKECMD -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=concurrency_sharded_with_stepdowns_and_balancer"
+execute_test_suite "WT concurrency_sharded_with_stepdowns_and_balancer" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=concurrency_sharded_with_stepdowns_and_balancer"
