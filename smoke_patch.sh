@@ -13,7 +13,7 @@
 #
 
 # Build configuration constants
-export CPUS_FOR_ICECC_BUILD=500
+export CPUS_FOR_ICECC_BUILD=256
 export CPUS_FOR_LOCAL_BUILD=12
 export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=24
