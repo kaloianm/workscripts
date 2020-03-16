@@ -148,8 +148,8 @@ class ClusterIntrospect:
 
         self.configDb = mongoDb.config
 
-        self.numZones = self.configDb.tags.count({})
-        self.numShards = self.configDb.shards.count({})
+        self.numZones = self.configDb.tags.count_documents({})
+        self.numShards = self.configDb.shards.count_documents({})
         self.FCV = mongoDb.admin.system.version.find_one({'_id': 'featureCompatibilityVersion'
                                                           })['version']
 
@@ -164,7 +164,7 @@ class MlaunchCluster:
         self._introspect = introspect
 
         if config.numShards is None:
-            numShards = introspect.configDb.shards.count({})
+            numShards = introspect.configDb.shards.count_documents({})
         else:
             numShards = config.numShards
 
