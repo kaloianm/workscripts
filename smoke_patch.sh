@@ -12,20 +12,32 @@
 #  > smoke_patch.sh ~/Patch.patch BRANCH-NAME BUILD-TYPE [<BUILD-ROOT-DIR>]
 #
 
-# Build configuration constants
+###################################################################################################
+# Build and test execution constants
+###################################################################################################
 export CPUS_FOR_ICECC_BUILD=256
 export CPUS_FOR_LOCAL_BUILD=12
-export CPUS_FOR_LINT=12
 export CPUS_FOR_TESTS=24
 
+###################################################################################################
 # Command line parameters parsing
+###################################################################################################
 if [ "$#" -lt 3 ]; then
     echo "Error: illegal number of parameters $#"
-    echo "Usage: smoke_patch.sh <Patch file> <v4.0|v4.2|v4.4|master> <Build Type> [<Build root>]"
+    echo "Usage: smoke_patch.sh <Patch-File> <v4.0|v4.2|v4.4|master> <Build Type> [<Build root>]"
     exit 1
 fi
 
-export BRANCH=$1
+# Process the Patch-File argument
+export PATCHFILE=$1
+echo "Using patch file $PATCHFILE"
+if [ ! -f $PATCHFILE ]; then
+    echo "Error: patch file $PATCHFILE not found"
+    exit 1
+fi
+
+# Process the Branch-Name argument
+export BRANCH=$2
 echo "Running against branch $BRANCH"
 if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
@@ -48,24 +60,42 @@ export RESMOKE_COMMAND="buildscripts/resmoke.py"
 echo "Using build command from: $BUILD_COMMAND"
 echo "Using resmoke command from: $BUILD_COMMAND"
 
-export PATCHFILE=$2
-echo "Using patch file $PATCHFILE"
-if [ ! -f $PATCHFILE ]; then
-    echo "Error: patch file $PATCHFILE not found"
-    exit 1
-fi
-
+# Process the Build-Type argument
 export BUILDTYPE=$3
 echo "Performing build type $BUILDTYPE"
 
+if [ "$BUILDTYPE" == "opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=off   --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "dbg" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "clang" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "dynamic" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --link-model=dynamic"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "ubsan" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --sanitize=undefined,address"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-clang" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    CC=/usr/bin/clang CXX=/usr/bin/clang++                                      --dbg=on    --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+else
+    echo "Error: invalid build type ($BUILDTYPE) specified"
+    exit 1
+fi
+
+# Process the Build-Root-Directory argument
 export BUILDROOTDIR="/tmp/$USER"
 if [ ! -z $4 ]; then
     BUILDROOTDIR=$4
 fi
 
-#
-# Environment configuration
-#
+###################################################################################################
+# Environment construction (cloning repositories, etc.)
+###################################################################################################
 export TESTRUNDIR="$BUILDROOTDIR/smoke_patch"
 echo "Using test run directory $TESTRUNDIR"
 if [ -d $TESTRUNDIR ]; then
@@ -99,10 +129,11 @@ else
     git clone --depth 1 git@github.com:RedBeard0531/mongo_module_ninja.git "$TESTRUNDIR/mongo/src/mongo/db/modules/ninja"
 fi
 
-# Switch to the root source directory
+###################################################################################################
+# Building and linting sources
+###################################################################################################
 pushd "$TESTRUNDIR/mongo"
 
-# Apply the patch to be run
 echo "Applying patch file $PATCHFILE"
 git am $PATCHFILE
 if [ $? -ne 0 ]; then
@@ -110,54 +141,25 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-if [ "$BUILDTYPE" == "opt" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=off   --opt=on"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "dbg" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=on    --opt=off"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "clang" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "dynamic" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --link-model=dynamic"
-    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "ubsan" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --sanitize=undefined,address"
-    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-elif [ "$BUILDTYPE" == "system-clang" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    CC=/usr/bin/clang CXX=/usr/bin/clang++                                      --dbg=on    --opt=on"
-    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-else
-    echo "Error: invalid build type ($BUILDTYPE) specified"
-    exit 1
-fi
-
 export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --continueOnFailure --basePort=12000"
 
 # Construct the scons, ninja and linter command lines
-export LINT_CMDLINE="$BUILD_NINJA_COMMAND -j $CPUS_FOR_LINT --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
+export LINT_CMDLINE="$BUILD_NINJA_COMMAND -j $CPUS_FOR_LOCAL_BUILD --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND build.ninja"
 export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
 
-#
 # Start the slower builder and linter first so that the slower tasks can overlap with it
-#
 echo "Starting lint and build ..."
 
-echo "Lint command line:" > lint.log
-echo $LINT_CMDLINE >> lint.log
+echo "Lint command line: $LINT_CMDLINE" > lint.log
 time $LINT_CMDLINE >> lint.log 2>&1 &
 PID_lint=$!
 
-echo "Build command line:" > build.log
-echo $BUILD_NINJA_COMMAND >> build.log
+echo "Build command line: $BUILD_NINJA_COMMAND" > build.log
 time $BUILD_NINJA_COMMAND >> build.log 2>&1 &
 PID_build_ninja=$!
 
-#
 # Copy any binaries which are needed for running tests
-#
 echo "Copying executables to support tests ..."
 cp "$TOOLSDIR/bsondump" `pwd`
 cp "$TOOLSDIR/mongodump" `pwd`
@@ -176,9 +178,7 @@ echo $BUILD_CMDLINE >> build.log
 time $BUILD_CMDLINE >> build.log 2>&1 &
 PID_build=$!
 
-#
 # Wait for the build and linter to complete
-#
 echo "Waiting for build process $PID_build to complete ..."
 wait $PID_build
 if [ $? -ne 0 ]; then
@@ -187,7 +187,11 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-##################################################################################################
+###################################################################################################
+# Test execution (build and lint are complete at this point)
+###################################################################################################
+
+###################################################################################################
 # Function to execute a given test suite and block until it completes. Terminates the script if an
 # error is reported from the test execution.
 execute_test_suite () {
