@@ -50,8 +50,8 @@ class ToolConfiguration:
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
-                                   kOutputLogFileBufSize)
+        self._outputLogFile = open(
+            os.path.join(args.dir, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
 
     def log_line(self, entry):
         if (isinstance(entry, pymongo.results.DeleteResult)):
@@ -70,6 +70,13 @@ class ToolConfiguration:
         ]
 
         if (os.path.isdir(self.configdump)):
+            # Discover if there are compressed files in order to decide whether to add the '--gzip'
+            # prefix.
+            if (os.path.exists(
+                    os.path.join(os.path.join(self.configdump, 'config'), 'databases.bson.gz'))):
+                self._outputLogFile.write(
+                    'Discovered gzipped contents, adding the --gzip option to mongorestore\n')
+                mongorestoreCommand += ['--gzip']
             mongorestoreCommand += ['--dir', self.configdump]
         else:
             mongorestoreCommand += ['--gzip', '--archive={}'.format(self.configdump)]
@@ -97,9 +104,8 @@ class ToolConfiguration:
     # Performs cleanup by killing all potentially running mongodb processes and deleting any
     # leftover files. Basically leaves '--dir' empty.
     def __cleanup_previous_runs(self):
-        if (not yes_no(
-                'The next step will kill all mongodb processes and wipe out the data path.\n' +
-                'Proceed (yes/no)? ')):
+        if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n'
+                       + 'Proceed (yes/no)? ')):
             raise KeyboardInterrupt('User disallowed cleanup of the data path')
 
         # Iterate through all processes and kill mongod and mongos
@@ -150,8 +156,8 @@ class ClusterIntrospect:
 
         self.numZones = self.configDb.tags.count_documents({})
         self.numShards = self.configDb.shards.count_documents({})
-        self.FCV = mongoDb.admin.system.version.find_one({'_id': 'featureCompatibilityVersion'
-                                                          })['version']
+        self.FCV = mongoDb.admin.system.version.find_one(
+            {'_id': 'featureCompatibilityVersion'})['version']
 
 
 # Abstracts the manipulations of the mlaunch-started cluster
@@ -205,8 +211,8 @@ class MlaunchCluster:
 
         if len(shardsFromDump) <= len(shardsFromMlaunch):
             for shardFromDump, shardFromMlaunch in zip(deepcopy(shardsFromDump), shardsFromMlaunch):
-                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
-                                                                       }))
+                self._config.log_line(
+                    self.configDb.shards.delete_one({'_id': shardFromDump['_id']}))
                 self._config.log_line(
                     self.configDb.shards.delete_one({'_id': shardFromMlaunch['_id']}))
 
@@ -228,8 +234,8 @@ class MlaunchCluster:
 
             for shardFromDump, shardFromMlaunch in zip(shardsFromDump,
                                                        roundRobin(shardsFromMlaunch)):
-                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
-                                                                       }))
+                self._config.log_line(
+                    self.configDb.shards.delete_one({'_id': shardFromDump['_id']}))
 
                 self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
 
