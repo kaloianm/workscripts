@@ -43,19 +43,21 @@ if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
     export ICECREAM_FLAGS="CCACHE=ccache ICECC=icecc"
     export NINJA_FLAGS="--ninja"
-    export TOOLSDIR=/home/kaloianm/mongodb/4.2.3
+    export TOOLSDIR=/home/kaloianm/mongodb/4.2.6
+    export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.2" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
     export ICECREAM_FLAGS="--icecream"
-    export TOOLSDIR=/home/kaloianm/mongodb/4.2.3
+    export TOOLSDIR=/home/kaloianm/mongodb/4.2.6
+    export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.0" ]; then
     export PATH=/opt/mongodbtoolchain/v2/bin:$PATH
     export ICECREAM_FLAGS="--icecream"
-    export TOOLSDIR=/home/kaloianm/mongodb/4.0.16
+    export TOOLSDIR=/home/kaloianm/mongodb/4.0.18
+    export RESMOKE_COMMAND="buildscripts/resmoke.py"
 fi
 
 export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $NINJA_FLAGS MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown VARIANT_DIR=ninja"
-export RESMOKE_COMMAND="buildscripts/resmoke.py"
 
 echo "Using build command from: $BUILD_COMMAND"
 echo "Using resmoke command from: $BUILD_COMMAND"
