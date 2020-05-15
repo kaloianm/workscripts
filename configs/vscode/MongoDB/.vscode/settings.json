@@ -103,6 +103,7 @@
         "variant": "cpp"
     },
     "files.exclude": {
+        ".ninja_log": true,
         "*.patch": true,
         "**/.DS_Store": true,
         "**/.git": true,
@@ -117,6 +118,7 @@
         "**/*.VC.DB*": true,
         "**/*.vcxproj*": true,
         "**/CVS": true,
+        "build.ninja": true,
     },
     "editor.rulers": [
         100
