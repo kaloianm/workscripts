@@ -59,9 +59,6 @@ fi
 
 export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $NINJA_FLAGS MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown VARIANT_DIR=ninja"
 
-echo "Using build command from: $BUILD_COMMAND"
-echo "Using resmoke command from: $BUILD_COMMAND"
-
 # Process the Build-Type argument
 export BUILDTYPE=$3
 echo "Performing build type $BUILDTYPE"
@@ -76,13 +73,22 @@ elif [ "$BUILDTYPE" == "clang" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "dynamic" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --link-model=dynamic"
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --link-model=dynamic"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "ubsan" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system  --sanitize=undefined,address"
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars  --dbg=on    --opt=on    --allocator=system      --sanitize=undefined,address"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
-elif [ "$BUILDTYPE" == "system-clang" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    CC=/usr/bin/clang CXX=/usr/bin/clang++                                      --dbg=on    --opt=on"
+elif [ "$BUILDTYPE" == "system-gcc-dbg" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/gcc CXX=/usr/bin/g++                    --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-clang-dbg" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/clang CXX=/usr/bin/clang++              --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-gcc-opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/gcc CXX=/usr/bin/g++                    --dbg=off   --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-clang-opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/clang CXX=/usr/bin/clang++              --dbg=off   --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 else
     echo "Error: invalid build type ($BUILDTYPE) specified"
