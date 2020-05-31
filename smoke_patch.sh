@@ -69,7 +69,7 @@ if [ "$BUILDTYPE" == "gcc-opt" ]; then
 elif [ "$BUILDTYPE" == "gcc-dbg" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars        --dbg=on    --opt=off"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-if [ "$BUILDTYPE" == "clang-opt" ]; then
+elif [ "$BUILDTYPE" == "clang-opt" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=off   --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "clang-dbg" ]; then
@@ -81,7 +81,7 @@ elif [ "$BUILDTYPE" == "gcc" ]; then
 elif [ "$BUILDTYPE" == "clang" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "dynamic" ]; then
+elif [ "$BUILDTYPE" == "clang-dynamic" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on    --link-model=dynamic"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "ubsan" ]; then
