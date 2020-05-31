@@ -63,11 +63,20 @@ export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $NINJA_FLAGS MONGO_VERSI
 export BUILDTYPE=$3
 echo "Performing build type $BUILDTYPE"
 
-if [ "$BUILDTYPE" == "opt" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars    --dbg=off   --opt=on"
+if [ "$BUILDTYPE" == "gcc-opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars        --dbg=off   --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
-elif [ "$BUILDTYPE" == "dbg" ]; then
+elif [ "$BUILDTYPE" == "gcc-dbg" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars        --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+if [ "$BUILDTYPE" == "clang-opt" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=off   --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "clang-dbg" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=off"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "gcc" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars        --dbg=on    --opt=on"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "clang" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on"
