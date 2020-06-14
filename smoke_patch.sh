@@ -42,22 +42,25 @@ echo "Running against branch $BRANCH"
 if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
     export ICECREAM_FLAGS="CCACHE=ccache ICECC=icecc"
-    export NINJA_FLAGS="--ninja"
+    export GENERATE_NINJA_FLAGS="--ninja"
+    export NINJA_TARGET="install-all"
     export TOOLSDIR=/home/kaloianm/mongodb/4.2.6
     export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.2" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
     export ICECREAM_FLAGS="--icecream"
+    export NINJA_TARGET="all"
     export TOOLSDIR=/home/kaloianm/mongodb/4.2.6
     export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.0" ]; then
     export PATH=/opt/mongodbtoolchain/v2/bin:$PATH
     export ICECREAM_FLAGS="--icecream"
+    export NINJA_TARGET="all"
     export TOOLSDIR=/home/kaloianm/mongodb/4.0.18
     export RESMOKE_COMMAND="buildscripts/resmoke.py"
 fi
 
-export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $NINJA_FLAGS MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown VARIANT_DIR=ninja"
+export BUILD_NINJA_COMMAND="buildscripts/scons.py --ssl $GENERATE_NINJA_FLAGS MONGO_VERSION=0.0.0 MONGO_GIT_HASH=unknown VARIANT_DIR=ninja"
 
 # Process the Build-Type argument
 export BUILDTYPE=$3
@@ -163,7 +166,7 @@ export FLAGS_FOR_TEST="--log=file --dbpathPrefix=$TESTDBPATHDIR --shuffle --cont
 # Construct the scons, ninja and linter command lines
 export LINT_CMDLINE="$BUILD_NINJA_COMMAND -j $CPUS_FOR_LOCAL_BUILD --no-cache --build-dir=$TESTRUNDIR/mongo/lint lint"
 export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND build.ninja"
-export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD all"
+export BUILD_CMDLINE="ninja -j $CPUS_FOR_BUILD $NINJA_TARGET"
 
 # Start the slower builder and linter first so that the slower tasks can overlap with it
 echo "Starting lint and build ..."
