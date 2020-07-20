@@ -88,7 +88,7 @@ elif [ "$BUILDTYPE" == "clang-dynamic" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on    --link-model=dynamic"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "ubsan" ]; then
-    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on    --allocator=system      --sanitize=undefined,address"
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on                            --allocator=system      --sanitize=undefined,address"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 elif [ "$BUILDTYPE" == "system-gcc-dbg" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/gcc CXX=/usr/bin/g++ CCACHE=ccache          --dbg=on    --opt=off"
@@ -101,6 +101,9 @@ elif [ "$BUILDTYPE" == "system-gcc-opt" ]; then
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 elif [ "$BUILDTYPE" == "system-clang-opt" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/clang CXX=/usr/bin/clang++ CCACHE=ccache    --dbg=off   --opt=on"
+    export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
+elif [ "$BUILDTYPE" == "system-clang-dynamic" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND                    --jlink=4   CC=/usr/bin/clang CXX=/usr/bin/clang++ CCACHE=ccache    --dbg=on    --opt=on    --link-model=dynamic"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
 else
     echo "Error: invalid build type ($BUILDTYPE) specified"
