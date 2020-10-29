@@ -143,7 +143,7 @@ echo "Cloning the mongo repository ..."
 git clone -b $BRANCH --depth 1 git@github.com:mongodb/mongo.git "$TESTRUNDIR/mongo"
 
 echo "Cloning the mongo-enterprise-modules repository ..."
-git clone -b $BRANCH --depth 1 git@github.com:10gen/mongo-enterprise-modules.git "$TESTRUNDIR/mongo/src/mongo/db/modules/mongo-enterprise-modules"
+git clone -b $BRANCH --depth 1 git@github.com:10gen/mongo-enterprise-modules.git "$TESTRUNDIR/mongo/src/mongo/db/modules/enterprise"
 
 if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
     echo "Using native ninja support ..."
