@@ -265,8 +265,10 @@ class MlaunchCluster:
             self._config.log_line(
                 self.configDb.chunks.update_many({'history.shard': shardId},
                                                  {'$set': {
-                                                     'history.$[].shard': shardIdTo
-                                                 }}))
+                                                     'history.$[element].shard': shardIdTo
+                                                 }},
+                                                 array_filters=[ { 'element.shard': shardId } ]
+                                                 ))
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
     def fixUpShards(self):
