@@ -44,13 +44,13 @@ if [ "$BRANCH" == "master" ] || [ "$BRANCH" == "v4.4" ]; then
     export ICECREAM_FLAGS="CCACHE=ccache ICECC=icecc"
     export GENERATE_NINJA_FLAGS="--ninja"
     export NINJA_TARGET="install-all"
-    export TOOLSDIR=/home/kaloianm/mongodb/4.2.10
+    export TOOLSDIR=/home/kaloianm/mongodb/4.4.4
     export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.2" ]; then
     export PATH=/opt/mongodbtoolchain/v3/bin:$PATH
     export ICECREAM_FLAGS="--icecream"
     export NINJA_TARGET="all"
-    export TOOLSDIR=/home/kaloianm/mongodb/4.2.10
+    export TOOLSDIR=/home/kaloianm/mongodb/4.2.12
     export RESMOKE_COMMAND="buildscripts/resmoke.py run"
 elif [ "$BRANCH" == "v4.0" ]; then
     export PATH=/opt/mongodbtoolchain/v2/bin:$PATH
