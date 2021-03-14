@@ -15,9 +15,9 @@
 ###################################################################################################
 # Build and test execution constants
 ###################################################################################################
-export CPUS_FOR_ICECC_BUILD=128
+export CPUS_FOR_ICECC_BUILD=64
 export CPUS_FOR_LOCAL_BUILD=12
-export CPUS_FOR_TESTS=24
+export CPUS_FOR_TESTS=12
 
 ###################################################################################################
 # Command line parameters parsing
@@ -256,9 +256,9 @@ execute_test_suite "WT core_txns" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FO
 
 # Slower suites
 execute_test_suite "WT aggregation" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=aggregation"
-execute_test_suite "WT auth" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
 execute_test_suite "WT replica_sets" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=replica_sets"
 execute_test_suite "WT sharding_jscore_passthrough" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding_jscore_passthrough"
+execute_test_suite "WT auth" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=auth"
 execute_test_suite "WT sharding" "$RESMOKE_COMMAND -j $CPUS_FOR_TESTS $FLAGS_FOR_TEST --storageEngine=wiredTiger --suites=sharding"
 
 # Concurrency suites
