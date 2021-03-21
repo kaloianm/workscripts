@@ -87,6 +87,9 @@ elif [ "$BUILDTYPE" == "clang" ]; then
 elif [ "$BUILDTYPE" == "clang-dynamic" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on    --link-model=dynamic"
     export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
+elif [ "$BUILDTYPE" == "gcc-dynamic" ]; then
+    export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars        --dbg=on    --opt=on    --link-model=dynamic"
+    export CPUS_FOR_BUILD=$CPUS_FOR_ICECC_BUILD
 elif [ "$BUILDTYPE" == "ubsan" ]; then
     export BUILD_NINJA_COMMAND="$BUILD_NINJA_COMMAND $ICECREAM_FLAGS    --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars      --dbg=on    --opt=on                            --allocator=system      --sanitize=undefined,address"
     export CPUS_FOR_BUILD=$CPUS_FOR_LOCAL_BUILD
