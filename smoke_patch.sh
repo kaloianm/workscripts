@@ -15,7 +15,7 @@
 ###################################################################################################
 # Build and test execution constants
 ###################################################################################################
-export CPUS_FOR_ICECC_BUILD=64
+export CPUS_FOR_ICECC_BUILD=32
 export CPUS_FOR_LOCAL_BUILD=12
 export CPUS_FOR_TESTS=12
 
