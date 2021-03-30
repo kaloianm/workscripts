@@ -17,7 +17,7 @@
 ###################################################################################################
 export CPUS_FOR_ICECC_BUILD=32
 export CPUS_FOR_LOCAL_BUILD=12
-export CPUS_FOR_TESTS=12
+export CPUS_FOR_TESTS=6
 
 ###################################################################################################
 # Command line parameters parsing
