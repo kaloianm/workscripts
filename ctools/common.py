@@ -1,7 +1,10 @@
 # Helper utilities used by the ctools scripts
 #
 
+import motor.motor_asyncio
 import sys
+
+from bson.codec_options import CodecOptions
 
 
 # Function for a Yes/No result based on the answer provided as an argument
@@ -24,3 +27,28 @@ def exe_name(name):
     if (sys.platform == 'win32'):
         return name + '.exe'
     return name
+
+
+class Cluster:
+    def __init__(self, uri):
+        client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+
+        self.adminDb = client.admin.with_options(codec_options=CodecOptions(uuid_representation=4))
+        self.configDb = client.config.with_options(codec_options=CodecOptions(
+            uuid_representation=4))
+
+    @property
+    async def shardIds(self):
+        return list(
+            map(lambda x: x['_id'], await self.configDb.shards.find({}).sort('_id',
+                                                                             1).to_list(None)))
+
+    async def adminCommand(self, *args, **kwargs):
+        return await self.client.admin.command(*args, **kwargs)
+
+    async def runOnEachShard(self, fn):
+        async for shard in cluster.configDb.shards.find({}):
+            connParts = shard['host'].split('/', 1)
+            conn = motor.motor_asyncio.AsyncIOMotorClient(shardConnParts[1],
+                                                          replicaset=shardConnParts[0])
+            fn(shard['_id'], conn)

@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+#
+
+import argparse
+import asyncio
+import bson
+import datetime
+import math
+import motor.motor_asyncio
+import random
+import sys
+import uuid
+
+from bson.codec_options import CodecOptions
+from common import Cluster
+from pymongo import InsertOne
+
+# Ensure that the caller is using python 3
+if (sys.version_info[0] < 3):
+    raise Exception("Must be using Python 3")
+
+
+async def main(args):
+    cluster = Cluster(args.uri)
+    if not (await cluster.adminDb.command('ismaster'))['msg'] == 'isdbgrid':
+        raise Exception("Not connected to mongos")
+
+    dbName = args.ns.split('.', 1)[0]
+    epoch = bson.objectid.ObjectId()
+    collectionUUID = uuid.uuid4()
+    shardIds = await cluster.shardIds
+
+    print(f'Placing {args.numchunks} chunks over {shardIds} for collection {args.ns}')
+
+    print(f'Cleaning up old entries for {args.ns} ...')
+    await cluster.configDb.collections.delete_many({'_id': args.ns})
+    await cluster.configDb.chunks.delete_many({'ns': args.ns})
+    print(f'Cleaned up old entries for {args.ns}')
+
+    # Create the collection on each shard
+    async for shard in cluster.configDb.shards.find({}):
+        print('Creating shard key indexes on shard ' + shard['_id'])
+        connParts = shard['host'].split('/', 1)
+        conn = motor.motor_asyncio.AsyncIOMotorClient(connParts[1], replicaset=connParts[0])
+        db = conn[dbName]
+
+        applyOpsCommand = {
+            'applyOps': [{
+                'op': 'c',
+                'ns': dbName + '.$cmd',
+                'ui': collectionUUID,
+                'o': {
+                    'create': args.ns.split('.', 1)[1],
+                },
+            }]
+        }
+        await db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
+
+        createIndexesCommand = {
+            'createIndexes': args.ns.split('.', 1)[1],
+            'indexes': [{
+                'key': {
+                    'shardKey': 1
+                },
+                'name': 'Shard key index'
+            }]
+        }
+        await db.command(createIndexesCommand)
+
+    # Create collection and chunk entries on the config server
+    def gen_chunk(i):
+        sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
+        shardId = random.choice(
+            shardIds[:sortedShardIdx] +
+            shardIds[sortedShardIdx + 1:]) if random.random() < 0.10 else shardIds[sortedShardIdx]
+
+        obj = {
+            '_id': 'shardKey_' + str(i),
+            'ns': args.ns,
+            'lastmodEpoch': epoch,
+            'lastmod': bson.timestamp.Timestamp(i + 1, 0),
+            'shard': shardId
+        }
+
+        if i == 0:
+            obj = {
+                **obj,
+                **{
+                    'min': {
+                        'shardKey': bson.min_key.MinKey
+                    },
+                    'max': {
+                        'shardKey': i
+                    },
+                }
+            }
+        elif i == args.numchunks - 1:
+            obj = {
+                **obj,
+                **{
+                    'min': {
+                        'shardKey': i - 1
+                    },
+                    'max': {
+                        'shardKey': bson.max_key.MaxKey
+                    },
+                }
+            }
+        else:
+            obj = {**obj, **{'min': {'shardKey': i - 1}, 'max': {'shardKey': i}}}
+
+        return InsertOne(obj)
+
+    print(f'Writing chunks entries')
+    chunks = list(map(gen_chunk, range(args.numchunks)))
+
+    sem = asyncio.Semaphore(5)
+
+    async def safe_write_chunks(chunks_subset, i):
+        async with sem:
+            print(f'{i}: Writing ...')
+            result = await cluster.configDb.chunks.bulk_write(chunks_subset, ordered=False)
+            print(f'{i}: Written {result.inserted_count}')
+
+    batch_size = 5000
+    tasks = [
+        asyncio.ensure_future(safe_write_chunks(chunks[i:i + batch_size], i))
+        for i in range(0, len(chunks), batch_size)
+    ]
+    await asyncio.gather(*tasks)
+
+    print(f'Writing collection entry')
+    await cluster.configDb.collections.insert_one({
+        '_id': args.ns,
+        'lastmodEpoch': epoch,
+        'lastmod': datetime.datetime.now(),
+        'dropped': False,
+        'key': {
+            'shardKey': 1
+        },
+        'unique': True,
+        'uuid': collectionUUID
+    })
+
+
+if __name__ == "__main__":
+    argsParser = argparse.ArgumentParser(
+        description='Tool to generated a sharded collection with various degree of fragmentation')
+    argsParser.add_argument(
+        'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
+        metavar='uri', type=str, nargs=1)
+    argsParser.add_argument('--ns', help='The namespace to use.', metavar='ns', type=str,
+                            required=True)
+    argsParser.add_argument('--numchunks', help='The number of chunks to create.',
+                            metavar='numchunks', type=int, required=True)
+
+    args = argsParser.parse_args()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main(args))
