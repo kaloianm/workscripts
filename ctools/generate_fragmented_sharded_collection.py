@@ -75,7 +75,7 @@ async def main(args):
             shardIds[sortedShardIdx + 1:]) if random.random() < 0.10 else shardIds[sortedShardIdx]
 
         obj = {
-            '_id': 'shardKey_' + str(i),
+            '_id': f'shardKey-{args.ns}-{str(i)}',
             'ns': args.ns,
             'lastmodEpoch': epoch,
             'lastmod': bson.timestamp.Timestamp(i + 1, 0),
@@ -90,7 +90,7 @@ async def main(args):
                         'shardKey': bson.min_key.MinKey
                     },
                     'max': {
-                        'shardKey': i
+                        'shardKey': i * 10000
                     },
                 }
             }
@@ -99,7 +99,7 @@ async def main(args):
                 **obj,
                 **{
                     'min': {
-                        'shardKey': i - 1
+                        'shardKey': (i - 1) * 10000
                     },
                     'max': {
                         'shardKey': bson.max_key.MaxKey
@@ -107,20 +107,25 @@ async def main(args):
                 }
             }
         else:
-            obj = {**obj, **{'min': {'shardKey': i - 1}, 'max': {'shardKey': i}}}
+            obj = {**obj, **{'min': {'shardKey': (i - 1) * 10000}, 'max': {'shardKey': i * 10000}}}
 
         return InsertOne(obj)
 
     print(f'Writing chunks entries')
     chunks = list(map(gen_chunk, range(args.numchunks)))
 
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(8)
+    global num_chunks_written
+    num_chunks_written = 0
 
     async def safe_write_chunks(chunks_subset, i):
         async with sem:
-            print(f'{i}: Writing ...')
             result = await cluster.configDb.chunks.bulk_write(chunks_subset, ordered=False)
-            print(f'{i}: Written {result.inserted_count}')
+            global num_chunks_written
+            num_chunks_written += result.inserted_count
+            print(
+                f'Written {round((num_chunks_written * 100)/args.numchunks, 1)}% ({num_chunks_written} entries) so far',
+                end='\r')
 
     batch_size = 5000
     tasks = [
@@ -128,6 +133,7 @@ async def main(args):
         for i in range(0, len(chunks), batch_size)
     ]
     await asyncio.gather(*tasks)
+    print('Chunks write completed')
 
     print(f'Writing collection entry')
     await cluster.configDb.collections.insert_one({
