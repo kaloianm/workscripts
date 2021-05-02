@@ -44,7 +44,7 @@ sh._retryDelay = function() {
 }
 
 sh._sameChunk = function(a, b) {
-	//print("_sameChunk(",a._id,",", b._id, ")");
+	// print("_sameChunk(",a._id,",", b._id, ")");
 	lhs={ id: a._id };
 	rhs={ id: b._id };
     if (bsonWoCompare(lhs, rhs) === 0) return true;
@@ -181,6 +181,14 @@ sh._mergeChunks = function(firstChunk, lastChunk) {
     if ( firstChunk && lastChunk && !sh._sameChunk(firstChunk, lastChunk) ) {
         rc = sh.merge_chunks(firstChunk.ns, firstChunk.min, lastChunk.max);
         print("Merge Attempt:", firstChunk._id, ",", lastChunk._id, "=", rc.ok);
+    } else {
+        print("Merge Aborted:");
+        rc.ok = 0;
+        rc.firstChunk = firstChunk && firstChunk._id || undefined;
+        rc.lastChunk = lastChunk && lastChunk._id || undefined;
+        if (firstChunk && lastChunk) {
+            rc.sameChunk = sh._sameChunk(firstChunk, lastChunk);
+        };
     }
     if (rc.ok !== 1) printjson(rc);
     return rc;
@@ -389,8 +397,29 @@ sh.hot_shard = function() {
 	)
 }
 
+sh.checkInBalancerWindow = function() {
+    let balancer = this._configDB.settings.findOne({_id: "balancer"}, {activeWindow: 1});
+    if (!balancer || balancer.activeWindow === undefined || balancer.activeWindow.start === undefined) {
+        return true;
+    }
+    let start = balancer.activeWindow.start;
+    let stop = balancer.activeWindow.stop;
+    let currentDate = new Date();
+    let currentHourMinute = `${currentDate.getHours()}:${currentDate.getMinutes()}`;
+    if (start < currentHourMinute && stop > currentHourMinute) {
+        return true;
+    }
+    return false;
+}
+
 
 sh.consolidate_ns_chunks = function(ns) {
+
+    if (!sh.checkInBalancerWindow()) {
+        print(`**Not In Balancer Window**`);
+        return;
+    }
+
     let maxSize = sh._chunkSize();
     let halfSize = maxSize / 2;
     let coll = sh._configDB.collections.findOne({_id: ns});
@@ -398,7 +427,78 @@ sh.consolidate_ns_chunks = function(ns) {
     let breaks = 0;
     let merges = 0;
 
+    print("Collection: ", tojsononeline(coll))
+    print("Max Size: ", sh._dataFormat(halfSize))
+    print(`Start: ${new Date().toISOString()}`);
+
+    // Process chunks in each shard
+    let shards = sh._configDB.shards.find({state: 1}, {_id:1}).toArray();
+    print(`Found ${shards.length} shards`);
+    shards.forEach(function(shard) {
+        print();
+        print(`------- Shard: ${shard._id} --------`);
+        var start = new Date().toISOString();
+        print(`------- Start: ${start}`);
+        print();
+        var stats = sh._consolidate_ns_chunks_shard(shard, ns, coll, maxSize, halfSize);
+        chunksProcessed += stats.chunksProcessed;
+        breaks += stats.breaks;
+        merges += stats.merges;
+        print(`------- Shard: ${shard._id} --------`);
+        print(`------- Chunks :${stats.chunksProcessed}`);
+        print(`------- Breaks :${stats.breaks}`);
+        print(`------- Merges :${stats.merges}`);
+        print(`------- Start: ${start}`);
+        print(`------- End: ${new Date().toISOString()}`);
+
+    });
+    print("----------------------------------------");
+    print(`End: ${new Date().toISOString()}`);
+    print("Chunks :", chunksProcessed);
+    print("Breaks :", breaks);
+    print("Merges :", merges);        
+}
+
+sh.consolidate_ns_chunksShard = function(ns, shardName) {
+
+    if (!sh.checkInBalancerWindow()) {
+        print(`**Not In Balancer Window**`);
+        return;
+    }
+
+    let shard = sh._configDB.shards.findOne({state: 1, _id: shardName}, {_id:1});
+
+    let maxSize = sh._chunkSize();
+    let halfSize = maxSize / 2;
+    let coll = sh._configDB.collections.findOne({_id: ns});
+
+    print("Collection: ", tojsononeline(coll))
+    print("Max Size: ", sh._dataFormat(halfSize))
+
+    print();
+    print(`------- Shard: ${shard._id} --------`);
+    var start = new Date().toISOString();
+    print(`------- Start: ${start}`);
+    print();
+    var stats = sh._consolidate_ns_chunks_shard(shard, ns, coll, maxSize, halfSize);
+    print(`------- Shard: ${shard._id} --------`);
+    print(`------- Chunks :${stats.chunksProcessed}`);
+    print(`------- Breaks :${stats.breaks}`);
+    print(`------- Merges :${stats.merges}`);
+    print(`------- Start: ${start}`);
+    print(`------- End: ${new Date().toISOString()}`);
+}
+
+// Torsten: just a placeholder, adobe wants a resume function
+sh.resume_consolidate = function() {
+    db.getSiblingDB("shardUtils").state.find().forEach(function(saveState) {
+        printjson(saveState);
+    });
+}
+
+sh._consolidate_ns_chunks_shard = function(shard, ns, coll, maxSize, halfSize) {
     const localChunkMerge = function(a, b) {
+        // print(`localChunkMerge:\n ${JSON.stringify(a)}\n${JSON.stringify(b)}`);
         let rc = sh._mergeChunks(a, b);
         if (rc.ok === 1) {
             merges++;
@@ -406,73 +506,75 @@ sh.consolidate_ns_chunks = function(ns) {
         return rc;
     };
 
-    print("Collection: ", tojsononeline(coll))
-    print("Max Size: ", sh._dataFormat(halfSize))
+    let chunksProcessed = 0;
+    let breaks = 0;
+    let merges = 0;
 
-    // Process chunks in each shard
-    sh._configDB.shards.find({state: 1}, {_id:1}).toArray().forEach(function(shard) {
-        var startingChunk = undefined;  // Drop anchor
-        var prevChunk = undefined;      // Previous chunk (current chunk is part of function)
-        var runningSize = 0;            // Trailing aggregate chunk size
+    var startingChunk = undefined;  // Drop anchor
+    var prevChunk = undefined;      // Previous chunk (current chunk is part of function)
+    var runningSize = 0;            // Trailing aggregate chunk size
+    
+    db.getSiblingDB("config").chunks.find({"ns": ns, "shard": shard._id}).sort({min: 1}).noCursorTimeout().forEach(function(chunk) {
 
-        print();
-        print("------- Shard: ", shard._id, "--------");
-        print();
+        chunksProcessed++;
 
-        sh._configDB.chunks.find({"ns": ns, "shard": shard._id}).sort({min: 1}).noCursorTimeout().forEach(function(chunk) {
+        // Additional debug output and state saves
+        if (chunksProcessed % 100 == 0) {
+            print(`Total Merges: ${merges} after ${chunksProcessed}, currently on ${shard._id}`);
+            // let's save every 100s chunk for later resume
+            // Torsten: disabled for now. Adobe wants a resume function
+            // the min from the chunk can be used for the find() over chunks
+            // db.getSiblingDB("shardUtils").state.updateOne({"_id": shard._id}, {$set: {"ns": ns, "chunk": chunk}}, {upsert: true});
+        }
 
-            chunksProcessed++;
+        // Start processing
+        if ( startingChunk === undefined ) {
+            startingChunk = prevChunk = chunk;
+            runningSize = 0;
+        }
 
-            // Start processing
-            if ( startingChunk === undefined ) {
-                startingChunk = prevChunk = chunk;
-                runningSize = 0;
-            }
+        print("Chunk:", chunk._id, "Running:", sh._dataFormat(runningSize));
 
-            print("Chunk:", chunk._id, "Running:", sh._dataFormat(runningSize));
+        // Stop on non-contiguous range and reset to current chunk
+        if ( !sh._sameChunk(prevChunk, chunk) && !sh._contiguousChunks(prevChunk, chunk) ) {
+            breaks++;
+            localChunkMerge(startingChunk, prevChunk);
+            startingChunk = prevChunk = chunk;
+            runningSize = 0;
+        }
 
-            // Stop on non-contiguous range and reset to current chunk
-            if ( !sh._sameChunk(prevChunk, chunk) && !sh._contiguousChunks(prevChunk, chunk) ) {
-                breaks++;
-                localChunkMerge(startingChunk, prevChunk);
-                startingChunk = prevChunk = chunk;
-                runningSize = 0;
-            }
+        // Gather chunk info
+        var dataSize = sh._chunkDataSize(coll.key, chunk);
+        print("Size:", sh._dataFormat(dataSize));
 
-            // Gather chunk info
-            var dataSize = sh._chunkDataSize(coll.key, chunk);
-            print("Size:", sh._dataFormat(dataSize));
+        // Failed to get the size for the chunk or the chunk 
+        // is already big enough so we coalesce what we have
+        // until now and skip this chunk
+        if ( dataSize < 0 || dataSize > halfSize ) {
+            print(`Failed to get size for chunk or chunk big enough`);
+            localChunkMerge(startingChunk, prevChunk);
+            startingChunk = undefined;
+            return;
+        }
 
-            // Failed to get the size for the chunk or the chunk 
-            // is already big enough so we coalesce what we have
-            // until now and skip this chunk
-            if ( dataSize < 0 || dataSize > halfSize ) {
-                localChunkMerge(startingChunk, prevChunk);
-                startingChunk = undefined;
-                return;
-            }
+        // Commulative chunks must be merged
+        // startingChunk + prevChunk < halfSize and currentChunk is big then c1+c2+c3 > maxSize?
+        // 31 x 1 MiB chunks + 1 x 31 MiB = 62 MiB < maxSize
+        if ( runningSize > halfSize ) {
+            print(`cumulative chunks to be merged`);
+            localChunkMerge(startingChunk, prevChunk);
+            startingChunk = chunk;
+            runningSize = 0;
+        }
 
-            // Commulative chunks must be merged
-            // startingChunk + prevChunk < halfSize and currentChunk is big then c1+c2+c3 > maxSize?
-            // 31 x 1 MiB chunks + 1 x 31 MiB = 62 MiB < maxSize
-            if ( runningSize > halfSize ) {
-                localChunkMerge(startingChunk, prevChunk);
-                startingChunk = chunk;
-                runningSize = 0;
-            }
+        prevChunk = chunk;
+        runningSize += dataSize;
 
-            prevChunk = chunk;
-            runningSize += dataSize;
-        });
-
-        // Merge any leftovers
-        localChunkMerge(startingChunk, prevChunk);
     });
 
-    print("----------------------------------------");
-    print("Chunks :", chunksProcessed);
-    print("Breaks :", breaks);
-    print("Merges :", merges);
+    // Merge any leftovers
+    localChunkMerge(startingChunk, prevChunk);
+    return {chunksProcessed: chunksProcessed, breaks: breaks, merges: merges};
 }
 
 var indentStr = function(indent, s) {
