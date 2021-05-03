@@ -59,7 +59,7 @@ async def main(args):
             else:
                 consecutiveChunks.append(c)
 
-            estimated_size_of_run_mb = len(consecutiveChunks) * 48
+            estimated_size_of_run_mb = len(consecutiveChunks) * args.estimated_chunk_size_mb
             if estimated_size_of_run_mb > 240:
                 mergeCommand = {
                     'mergeChunks': args.ns,
@@ -90,7 +90,10 @@ async def main(args):
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(description='Tool to defragment a sharded cluster')
+    argsParser = argparse.ArgumentParser(
+        description=
+        """Tool to defragment a sharded cluster in a way which minimises the rate at which the major
+           shard version gets bumped in order to minimise the amount of stalls due to refresh.""")
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str, nargs=1)
@@ -98,6 +101,11 @@ if __name__ == "__main__":
                             action='store_true')
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
+    argsParser.add_argument(
+        '--estimated_chunk_size_mb', help=
+        """The amount of data to estimate per chunk (in MB). This value is used as an optimisation
+           in order to gather as many consecutive chunks as possible before invoking splitVector.""",
+        metavar='estimated_chunk_size_mb', type=int, default=64)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
