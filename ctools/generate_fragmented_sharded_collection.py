@@ -25,7 +25,7 @@ async def main(args):
     if not (await cluster.adminDb.command('ismaster'))['msg'] == 'isdbgrid':
         raise Exception("Not connected to mongos")
 
-    dbName = args.ns.split('.', 1)[0]
+    ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
     collectionUUID = uuid.uuid4()
     shardIds = await cluster.shardIds
@@ -42,22 +42,22 @@ async def main(args):
         print('Creating shard key indexes on shard ' + shard['_id'])
         connParts = shard['host'].split('/', 1)
         conn = motor.motor_asyncio.AsyncIOMotorClient(connParts[1], replicaset=connParts[0])
-        db = conn[dbName]
+        db = conn[ns['db']]
 
         applyOpsCommand = {
             'applyOps': [{
                 'op': 'c',
-                'ns': dbName + '.$cmd',
+                'ns': ns['db'] + '.$cmd',
                 'ui': collectionUUID,
                 'o': {
-                    'create': args.ns.split('.', 1)[1],
+                    'create': ns['coll'],
                 },
             }]
         }
         await db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
 
         createIndexesCommand = {
-            'createIndexes': args.ns.split('.', 1)[1],
+            'createIndexes': ns['coll'],
             'indexes': [{
                 'key': {
                     'shardKey': 1
@@ -155,9 +155,9 @@ if __name__ == "__main__":
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str, nargs=1)
-    argsParser.add_argument('--ns', help='The namespace to use.', metavar='ns', type=str,
+    argsParser.add_argument('--ns', help='The namespace to create', metavar='ns', type=str,
                             required=True)
-    argsParser.add_argument('--numchunks', help='The number of chunks to create.',
+    argsParser.add_argument('--numchunks', help='The number of chunks to create',
                             metavar='numchunks', type=int, required=True)
     argsParser.add_argument(
         '--fragmentation',
