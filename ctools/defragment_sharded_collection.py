@@ -46,9 +46,7 @@ async def main(args):
     print(f'Collection version: {collectionVersion}')
 
     # Phase 1: Bring all shards to be at the same major chunk version
-    sem = asyncio.Semaphore(2)
-
-    async def merge_chunks_on_shard(shard):
+    async def merge_chunks_on_shard(shard, semaphore):
         shardChunks = shardToChunks[shard]['chunks']
         if len(shardChunks) < 2:
             return
@@ -68,23 +66,26 @@ async def main(args):
                     'bounds': [consecutiveChunks[0]['min'], consecutiveChunks[-1]['max']]
                 }
 
-                async with sem:
+                async with semaphore:
                     if args.dryrun:
                         print(f"Merging on {shard}: {mergeCommand}")
                     else:
                         await cluster.adminDb.command(mergeCommand)
                     consecutiveChunks = []
 
+    semMatching = asyncio.Semaphore(1)
+    semBump = asyncio.Semaphore(1)
     tasks = []
     for s in shardToChunks:
         maxShardVersionChunk = max(shardToChunks[s]['chunks'], key=lambda c: c['lastmod'])
         shardVersion = maxShardVersionChunk['lastmod']
         print(f"{s}: {maxShardVersionChunk['lastmod']}: ", end='')
         if shardVersion.time == collectionVersion.time:
-            print(' Skipping due to matching shard version ...')
+            print(' Merging without major version bump ...')
+            tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, semMatching)))
         else:
-            print(' Bumping ...')
-            tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s)))
+            print(' Merging and performing major version bump ...')
+            tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, semBump)))
     await asyncio.gather(*tasks)
 
 
