@@ -70,9 +70,9 @@ async def main(args):
     # Create collection and chunk entries on the config server
     def gen_chunk(i):
         sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
-        shardId = random.choice(
-            shardIds[:sortedShardIdx] +
-            shardIds[sortedShardIdx + 1:]) if random.random() < 0.10 else shardIds[sortedShardIdx]
+        shardId = random.choice(shardIds[:sortedShardIdx] +
+                                shardIds[sortedShardIdx + 1:]) if random.random(
+                                ) < args.fragmentation else shardIds[sortedShardIdx]
 
         obj = {
             '_id': f'shardKey-{args.ns}-{str(i)}',
@@ -159,6 +159,12 @@ if __name__ == "__main__":
                             required=True)
     argsParser.add_argument('--numchunks', help='The number of chunks to create.',
                             metavar='numchunks', type=int, required=True)
+    argsParser.add_argument(
+        '--fragmentation',
+        help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
+           fragmentation is a measure of how likely it is that a chunk, which needs to sequentially
+           follow the previous one, on the same shard, is actually not on the same shard.""",
+        metavar='fragmentation', type=float, default=0.10)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
