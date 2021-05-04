@@ -31,7 +31,7 @@ async def main(args):
         raise Exception('Balancer must be stopped before running this script')
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
-    if auto_splitter_doc is None or auto_splitter_doc['enabled'] != 'off':
+    if auto_splitter_doc is None or auto_splitter_doc['enabled']:
         raise Exception('Auto-splitter must be disabled before running this script')
 
     chunksize_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
@@ -79,35 +79,40 @@ async def main(args):
     ###############################################################################################
 
     # PHASE 1: Bring all shards to be at the same major chunk version
-    async def merge_chunks_on_shard(shard, semaphore):
+    async def merge_chunks_on_shard(shard, semaphore_for_first_merge, semaphore_for_next_merges):
         shardChunks = shardToChunks[shard]['chunks']
         if len(shardChunks) < 2:
             return
 
-        consecutiveChunks = []
+        num_merges_performed = 0
+        consecutive_chunks = []
         for c in shardChunks:
-            if len(consecutiveChunks) == 0 or consecutiveChunks[-1]['max'] != c['min']:
-                consecutiveChunks = [c]
+            if len(consecutive_chunks) == 0 or consecutive_chunks[-1]['max'] != c['min']:
+                consecutive_chunks = [c]
                 continue
             else:
-                consecutiveChunks.append(c)
+                consecutive_chunks.append(c)
 
-            estimated_size_of_run_mb = len(consecutiveChunks) * args.estimated_chunk_size_mb
+            estimated_size_of_run_mb = len(consecutive_chunks) * args.estimated_chunk_size_mb
             if estimated_size_of_run_mb > 240:
                 mergeCommand = {
                     'mergeChunks': args.ns,
-                    'bounds': [consecutiveChunks[0]['min'], consecutiveChunks[-1]['max']]
+                    'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
                 }
 
-                async with semaphore:
+                async with (semaphore_for_first_merge
+                            if num_merges_performed == 0 else semaphore_for_next_merges):
                     if args.dryrun:
                         print(f"Merging on {shard}: {mergeCommand}")
                     else:
                         await cluster.adminDb.command(mergeCommand)
-                    consecutiveChunks = []
+                    consecutive_chunks = []
 
-    semBump = asyncio.Semaphore(max_merges_on_shards_at_less_than_collection_version)
-    semMatching = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
+                num_merges_performed += 1
+
+    sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
+    sem_less_than_collection_version = asyncio.Semaphore(
+        max_merges_on_shards_at_less_than_collection_version)
     tasks = []
     for s in shardToChunks:
         maxShardVersionChunk = max(shardToChunks[s]['chunks'], key=lambda c: c['lastmod'])
@@ -115,10 +120,15 @@ async def main(args):
         print(f"{s}: {maxShardVersionChunk['lastmod']}: ", end='')
         if shardVersion.time == collectionVersion.time:
             print(' Merging without major version bump ...')
-            tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, semMatching)))
+            tasks.append(
+                asyncio.ensure_future(
+                    merge_chunks_on_shard(s, sem_at_collection_version, sem_at_collection_version)))
         else:
             print(' Merging and performing major version bump ...')
-            tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, semBump)))
+            tasks.append(
+                asyncio.ensure_future(
+                    merge_chunks_on_shard(s, sem_less_than_collection_version,
+                                          sem_at_collection_version)))
     await asyncio.gather(*tasks)
 
 
