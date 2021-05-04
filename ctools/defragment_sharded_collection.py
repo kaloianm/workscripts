@@ -22,8 +22,26 @@ async def main(args):
     if args.dryrun is not None:
         print(f'Performing a dry run ...')
 
-    # Phase 0: Fetch all chunks in memory and bring all shards to be at the collection version in
-    # order to allow concurrent merges across shards without causing refresh stalls
+    ###############################################################################################
+    # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
+    # MaxChunkSize has been configured appropriately
+    #
+    balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
+    if balancer_doc is None or balancer_doc['mode'] != 'off':
+        raise Exception('Balancer must be stopped before running this script')
+
+    auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
+    if auto_splitter_doc is None or auto_splitter_doc['enabled'] != 'off':
+        raise Exception('Auto-splitter must be disabled before running this script')
+
+    chunksize_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
+    if chunksize_doc is None or chunksize_doc['value'] <= 128:
+        raise Exception(
+            'The MaxChunkSize must be configured to at least 128 MB before running this script')
+
+    ###############################################################################################
+    # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
+    #
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': args.ns})
     global num_chunks_processed
     num_chunks_processed = 0
@@ -41,11 +59,26 @@ async def main(args):
         shard['chunks'].append(c)
         num_chunks_processed += 1
         print(
-            f'Phase 0: {round((num_chunks_processed * 100)/num_chunks, 1)}% ({num_chunks_processed} chunks) fetched',
+            f'Initialisation: {round((num_chunks_processed * 100)/num_chunks, 1)}% ({num_chunks_processed} chunks) done',
             end='\r')
-    print(f'Collection version: {collectionVersion}')
 
-    # Phase 1: Bring all shards to be at the same major chunk version
+    print(
+        f'Initialisation completed and found {num_chunks_processed} chunks spread over {len(shardToChunks)} shards'
+    )
+    print(f'Collection version is {collectionVersion}')
+
+    ###############################################################################################
+    #
+    # WRITE PHASES START FROM HERE ONWARDS
+    #
+
+    max_merges_on_shards_at_less_than_collection_version = 1
+    max_merges_on_shards_at_collection_version = 1
+
+    #
+    ###############################################################################################
+
+    # PHASE 1: Bring all shards to be at the same major chunk version
     async def merge_chunks_on_shard(shard, semaphore):
         shardChunks = shardToChunks[shard]['chunks']
         if len(shardChunks) < 2:
@@ -73,8 +106,8 @@ async def main(args):
                         await cluster.adminDb.command(mergeCommand)
                     consecutiveChunks = []
 
-    semMatching = asyncio.Semaphore(1)
-    semBump = asyncio.Semaphore(1)
+    semBump = asyncio.Semaphore(max_merges_on_shards_at_less_than_collection_version)
+    semMatching = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
     tasks = []
     for s in shardToChunks:
         maxShardVersionChunk = max(shardToChunks[s]['chunks'], key=lambda c: c['lastmod'])
