@@ -7,7 +7,7 @@ import motor.motor_asyncio
 import pymongo
 import sys
 
-from common import Cluster
+from common import Cluster, yes_no
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -19,8 +19,11 @@ async def main(args):
     if not (await cluster.adminDb.command('ismaster'))['msg'] == 'isdbgrid':
         raise Exception("Not connected to mongos")
 
-    if args.dryrun is not None:
+    if args.dryrun:
         print(f'Performing a dry run ...')
+    elif not yes_no('The next step will perform durable changes to the cluster.\n' +
+                    'Proceed (yes/no)? '):
+        raise KeyboardInterrupt('User canceled')
 
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
@@ -58,9 +61,10 @@ async def main(args):
         shard = shardToChunks[shardId]
         shard['chunks'].append(c)
         num_chunks_processed += 1
-        print(
-            f'Initialisation: {round((num_chunks_processed * 100)/num_chunks, 1)}% ({num_chunks_processed} chunks) done',
-            end='\r')
+        if num_chunks_processed % 10 == 0:
+            print(
+                f'Initialisation: {round((num_chunks_processed * 100)/num_chunks, 1)}% ({num_chunks_processed} chunks) done',
+                end='\r')
 
     print(
         f'Initialisation completed and found {num_chunks_processed} chunks spread over {len(shardToChunks)} shards'
@@ -140,8 +144,12 @@ if __name__ == "__main__":
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str, nargs=1)
-    argsParser.add_argument('--dryrun', help='Whether to perform a dry run or actual merges',
-                            action='store_true')
+    argsParser.add_argument(
+        '--dryrun', help=
+        """Indicates whether the script should perform actual durable changes to the cluster or just
+           print the commands which will be executed. Since some phases of the script depend on
+           certain state of the cluster to have been reached by previous phases, if this mode is
+           selected, the script will stop early.""", action='store_true')
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument(
