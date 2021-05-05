@@ -91,7 +91,9 @@ class ToolConfiguration:
         if (not isinstance(args, list)):
             raise TypeError('args must be of type list.')
 
-        mlaunchPrefix = ['mlaunch', action, '--binarypath', self.binarypath, '--dir', dir]
+        mlaunchPrefix = [
+            'mlaunch', action, '--binarypath', self.binarypath, '--dir', dir, '--bind_ip_all'
+        ]
 
         if (set(mlaunchPrefix) & set(args)):
             raise ValueError('args duplicates values in mlaunchPrefix')
@@ -266,9 +268,9 @@ class MlaunchCluster:
                 self.configDb.chunks.update_many({'history.shard': shardId},
                                                  {'$set': {
                                                      'history.$[element].shard': shardIdTo
-                                                 }},
-                                                 array_filters=[ { 'element.shard': shardId } ]
-                                                 ))
+                                                 }}, array_filters=[{
+                                                     'element.shard': shardId
+                                                 }]))
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
     def fixUpShards(self):
