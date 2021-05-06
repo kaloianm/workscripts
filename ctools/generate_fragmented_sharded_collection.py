@@ -21,9 +21,8 @@ if (sys.version_info[0] < 3):
 
 
 async def main(args):
-    cluster = Cluster(args.uri)
-    if not (await cluster.adminDb.command('ismaster'))['msg'] == 'isdbgrid':
-        raise Exception("Not connected to mongos")
+    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    await cluster.checkIsMongos()
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
@@ -70,9 +69,9 @@ async def main(args):
     # Create collection and chunk entries on the config server
     def gen_chunk(i):
         sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
-        shardId = random.choice(shardIds[:sortedShardIdx] +
-                                shardIds[sortedShardIdx + 1:]) if random.random(
-                                ) < args.fragmentation else shardIds[sortedShardIdx]
+        shardId = random.choice(
+            shardIds[:sortedShardIdx] + shardIds[sortedShardIdx + 1:]
+        ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
 
         obj = {
             '_id': f'shardKey-{args.ns}-{str(i)}',

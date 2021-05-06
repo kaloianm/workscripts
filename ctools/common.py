@@ -1,6 +1,7 @@
 # Helper utilities used by the ctools scripts
 #
 
+import asyncio
 import motor.motor_asyncio
 import sys
 
@@ -30,12 +31,20 @@ def exe_name(name):
 
 
 class Cluster:
-    def __init__(self, uri):
+    def __init__(self, uri, loop):
         client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
         self.adminDb = client.admin.with_options(codec_options=CodecOptions(uuid_representation=4))
-        self.configDb = client.config.with_options(codec_options=CodecOptions(
-            uuid_representation=4))
+        self.configDb = client.config.with_options(
+            codec_options=CodecOptions(uuid_representation=4))
+
+    class NotMongosException(Exception):
+        pass
+
+    async def checkIsMongos(self):
+        ismaster = await self.adminDb.command('ismaster')
+        if 'msg' not in ismaster or ismaster['msg'] != 'isdbgrid':
+            raise Cluster.NotMongosException('Not connected to a mongos')
 
     @property
     async def shardIds(self):

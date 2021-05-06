@@ -15,15 +15,19 @@ if (sys.version_info[0] < 3):
 
 
 async def main(args):
-    cluster = Cluster(args.uri)
-    if not (await cluster.adminDb.command('ismaster'))['msg'] == 'isdbgrid':
-        raise Exception("Not connected to mongos")
+    cluster = Cluster(args.uri, asyncio.get_event_loop())
 
     if args.dryrun:
         print(f'Performing a dry run ...')
-    elif not yes_no('The next step will perform durable changes to the cluster.\n' +
-                    'Proceed (yes/no)? '):
-        raise KeyboardInterrupt('User canceled')
+        try:
+            await cluster.checkIsMongos()
+        except Cluster.NotMongosException:
+            print('Not connected to a mongos')
+    else:
+        await cluster.checkIsMongos()
+        if not yes_no('The next step will perform durable changes to the cluster.\n' +
+                      'Proceed (yes/no)? '):
+            raise KeyboardInterrupt('User canceled')
 
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
@@ -107,7 +111,9 @@ async def main(args):
                 async with (semaphore_for_first_merge
                             if num_merges_performed == 0 else semaphore_for_next_merges):
                     if args.dryrun:
-                        print(f"Merging on {shard}: {mergeCommand}")
+                        print(
+                            f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
+                        )
                     else:
                         await cluster.adminDb.command(mergeCommand)
                     consecutive_chunks = []
