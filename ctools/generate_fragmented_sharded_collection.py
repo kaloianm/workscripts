@@ -29,6 +29,9 @@ async def main(args):
     collectionUUID = uuid.uuid4()
     shardIds = await cluster.shardIds
 
+    print(f"Enabling sharding for database {ns['db']}")
+    await cluster.adminDb.command({'enableSharding': ns['db']})
+
     print(f'Placing {args.numchunks} chunks over {shardIds} for collection {args.ns}')
 
     print(f'Cleaning up old entries for {args.ns} ...')
