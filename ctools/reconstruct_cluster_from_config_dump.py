@@ -184,9 +184,9 @@ class MlaunchCluster:
                 raise KeyboardInterrupt('Too many shards will be created')
 
         config.mlaunch_action('init', config.clusterRoot, [
-            '--replicaset', '--nodes', '1', '--sharded',
-            str(numShards), '--csrs', '--mongos', '1', '--port',
-            str(config.clusterStartingPort)
+            '--sharded',
+            str(numShards), '--replicaset', '--nodes', '1', '--csrs', '--mongos', '1', '--port',
+            str(config.clusterStartingPort), '--wiredTigerCacheSizeGB', '0.25', '--oplogSize', '50'
         ])
 
         # Set the correct FCV on the cluster being reconstructed
