@@ -8,6 +8,7 @@ import pymongo
 import sys
 
 from common import Cluster, yes_no
+from pymongo import errors as pymongo_errors
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -25,7 +26,7 @@ async def main(args):
             print('Not connected to a mongos')
     else:
         await cluster.checkIsMongos()
-        if not yes_no('The next step will perform durable changes to the cluster.\n' +
+        if not yes_no('The next steps will perform durable changes to the cluster.\n' +
                       'Proceed (yes/no)? '):
             raise KeyboardInterrupt('User canceled')
 
@@ -34,20 +35,22 @@ async def main(args):
     # MaxChunkSize has been configured appropriately
     #
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
-    if balancer_doc is None or balancer_doc['mode'] != 'off':
+    if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
         raise Exception('Balancer must be stopped before running this script')
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
-    if auto_splitter_doc is None or auto_splitter_doc['enabled']:
+    if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
         raise Exception('Auto-splitter must be disabled before running this script')
 
-    chunksize_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
-    if chunksize_doc is None or chunksize_doc['value'] <= 128:
+    chunk_size_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
+    if not args.dryrun and (chunk_size_doc is None or chunk_size_doc['value'] <= 128):
         raise Exception(
             'The MaxChunkSize must be configured to at least 128 MB before running this script')
+    chunk_size = chunk_size_doc['value']
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
+    # in preparation for the subsequent write phase.
     #
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': args.ns})
     global num_chunks_processed
@@ -86,13 +89,22 @@ async def main(args):
     #
     ###############################################################################################
 
-    # PHASE 1: Bring all shards to be at the same major chunk version
+    ###############################################################################################
+    # PHASE 1 (Merge-only): Run up to `max_merges_on_shards_at_collection_version` concurrent
+    # mergeChunks across all shards which are already on the collection major version and up to
+    # `max_merges_on_shards_at_less_than_collection_version`. Every merge on a shard which is not
+    # at the collection version will result in a StaleShardVersion, which in turn triggers a
+    # refresh and a stall on the critical CRUD path.
+    #
+    # At the end of this phase, all chunks which are already contigious on the same shard will be
+    # merged without having to perform any moves.
     async def merge_chunks_on_shard(shard, semaphore_for_first_merge, semaphore_for_next_merges):
         shardChunks = shardToChunks[shard]['chunks']
         if len(shardChunks) < 2:
             return
 
         num_merges_performed = 0
+        num_lock_busy_errors_encountered = 0
         consecutive_chunks = []
         for c in shardChunks:
             if len(consecutive_chunks) == 0 or consecutive_chunks[-1]['max'] != c['min']:
@@ -102,7 +114,11 @@ async def main(args):
                 consecutive_chunks.append(c)
 
             estimated_size_of_run_mb = len(consecutive_chunks) * args.estimated_chunk_size_mb
-            if estimated_size_of_run_mb > 240:
+
+            # After we have collected a run of chunks whose estimated size is 90% of the maximum
+            # chunk size, invoke `splitVector` in order to determine whether we can merge them or
+            # if we should continue adding more chunks to be merged
+            if estimated_size_of_run_mb > chunk_size * 0.90:
                 mergeCommand = {
                     'mergeChunks': args.ns,
                     'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
@@ -115,10 +131,21 @@ async def main(args):
                             f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
                         )
                     else:
-                        await cluster.adminDb.command(mergeCommand)
-                    consecutive_chunks = []
+                        try:
+                            await cluster.adminDb.command(mergeCommand)
+                        except pymongo_errors.OperationFailure as ex:
+                            if ex.details['code'] == 46:  # The code for LockBusy
+                                num_lock_busy_errors_encountered += 1
+                                if num_lock_busy_errors_encountered == 1:
+                                    print(
+                                        f"""WARNING: Lock error occurred while trying to merge chunk range {mergeCommand['bounds']}.
+                                            This indicates the presence of an older MongoDB version."""
+                                    )
+                            else:
+                                raise
 
-                num_merges_performed += 1
+                    consecutive_chunks = []
+                    num_merges_performed += 1
 
     sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
     sem_less_than_collection_version = asyncio.Semaphore(
@@ -140,6 +167,9 @@ async def main(args):
                     merge_chunks_on_shard(s, sem_less_than_collection_version,
                                           sem_at_collection_version)))
     await asyncio.gather(*tasks)
+
+    ###############################################################################################
+    # PHASE 2:
 
 
 if __name__ == "__main__":
