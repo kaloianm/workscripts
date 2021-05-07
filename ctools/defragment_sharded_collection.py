@@ -91,7 +91,7 @@ async def main(args):
     #
 
     max_merges_on_shards_at_less_than_collection_version = 1
-    max_merges_on_shards_at_collection_version = 1
+    max_merges_on_shards_at_collection_version = 8
 
     #
     ###############################################################################################
@@ -105,10 +105,23 @@ async def main(args):
     #
     # At the end of this phase, all chunks which are already contigious on the same shard will be
     # merged without having to perform any moves.
-    async def merge_chunks_on_shard(shard, semaphore_for_first_merge, semaphore_for_next_merges):
+    sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
+    sem_at_less_than_collection_version = asyncio.Semaphore(
+        max_merges_on_shards_at_less_than_collection_version)
+
+    async def merge_chunks_on_shard(shard, collection_version):
         shardChunks = shardToChunks[shard]['chunks']
         if len(shardChunks) < 2:
             return
+
+        chunk_at_shard_version = max(shardChunks, key=lambda c: c['lastmod'])
+        shard_version = chunk_at_shard_version['lastmod']
+        print(f"{shard}: {shard_version}: ", end='')
+        at_collection_version = shard_version.time == collection_version.time
+        if at_collection_version:
+            print(' Merge will start without major version bump ...')
+        else:
+            print(' Merge will start with a major version bump ...')
 
         num_merges_performed = 0
         num_lock_busy_errors_encountered = 0
@@ -131,8 +144,8 @@ async def main(args):
                     'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
                 }
 
-                async with (semaphore_for_first_merge
-                            if num_merges_performed == 0 else semaphore_for_next_merges):
+                async with (sem_at_collection_version
+                            if at_collection_version else sem_at_less_than_collection_version):
                     if args.dryrun:
                         print(
                             f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
@@ -153,26 +166,11 @@ async def main(args):
 
                     consecutive_chunks = []
                     num_merges_performed += 1
+                    at_collection_version = True
 
-    sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
-    sem_less_than_collection_version = asyncio.Semaphore(
-        max_merges_on_shards_at_less_than_collection_version)
     tasks = []
     for s in shardToChunks:
-        maxShardVersionChunk = max(shardToChunks[s]['chunks'], key=lambda c: c['lastmod'])
-        shardVersion = maxShardVersionChunk['lastmod']
-        print(f"{s}: {maxShardVersionChunk['lastmod']}: ", end='')
-        if shardVersion.time == collectionVersion.time:
-            print(' Merging without major version bump ...')
-            tasks.append(
-                asyncio.ensure_future(
-                    merge_chunks_on_shard(s, sem_at_collection_version, sem_at_collection_version)))
-        else:
-            print(' Merging and performing major version bump ...')
-            tasks.append(
-                asyncio.ensure_future(
-                    merge_chunks_on_shard(s, sem_less_than_collection_version,
-                                          sem_at_collection_version)))
+        tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion)))
     await asyncio.gather(*tasks)
 
     ###############################################################################################
