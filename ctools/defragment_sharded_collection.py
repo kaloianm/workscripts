@@ -36,16 +36,23 @@ async def main(args):
     #
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
     if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
-        raise Exception('Balancer must be stopped before running this script')
+        raise Exception("""The balancer must be stopped before running this script. Please run:
+                           db.getSiblingDB('config').settings.update({_id:'balancer'}, {$set: {mode: 'off', enabled: false}}, {upsert: true})"""
+                        )
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
     if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
-        raise Exception('Auto-splitter must be disabled before running this script')
+        raise Exception(
+            """The auto-splitter must be disabled before running this script. Please run:
+               db.getSiblingDB('config').settings.update({_id:'autosplit'}, {$set: {enabled: false}}, {upsert: true})"""
+        )
 
     chunk_size_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
-    if not args.dryrun and (chunk_size_doc is None or chunk_size_doc['value'] <= 128):
+    if not args.dryrun and (chunk_size_doc is None or chunk_size_doc['value'] < 128):
         raise Exception(
-            'The MaxChunkSize must be configured to at least 128 MB before running this script')
+            """The MaxChunkSize must be configured to at least 128 MB before running this script. Please run:
+               db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
+        )
     chunk_size = chunk_size_doc['value']
 
     ###############################################################################################
