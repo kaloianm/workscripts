@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import math
 import motor.motor_asyncio
 import pymongo
 import sys
@@ -199,8 +200,10 @@ async def main(args):
                     'max': mergeCommand['bounds'][1],
                     'estimate': True
                 })
-                actual_size_of_consecutive_chunks = max(data_size_response['size'],
-                                                        1024 * 1024) / 1024
+
+                # Round up the data size of the chunk to the nearest megabyte
+                actual_size_of_consecutive_chunks = math.ceil(
+                    float(data_size_response['size']) / (1024.0 * 1024.0))
 
             if merge_consecutive_chunks_without_size_check:
                 pass
