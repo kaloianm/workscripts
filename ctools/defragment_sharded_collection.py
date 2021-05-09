@@ -10,6 +10,7 @@ import sys
 
 from common import Cluster, yes_no
 from pymongo import errors as pymongo_errors
+from tqdm import tqdm
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -26,7 +27,7 @@ async def main(args):
         f'Collection {args.ns} has a shardKeyPattern of {shardKeyPattern} and {num_chunks} chunks')
 
     if args.dryrun:
-        print(f'Performing a dry run ...')
+        print(f'Performing a dry run. No actual modifications to the cluster will occur.')
         try:
             await cluster.checkIsMongos()
         except Cluster.NotMongosException:
@@ -67,29 +68,26 @@ async def main(args):
     # in preparation for the subsequent write phase.
     ###############################################################################################
 
-    num_chunks_processed = 0
     shard_to_chunks = {}
     collectionVersion = None
-    async for c in cluster.configDb.chunks.find({'ns': args.ns}, sort=[('min', pymongo.ASCENDING)]):
-        shardId = c['shard']
-        if collectionVersion is None:
-            collectionVersion = c['lastmod']
-        if c['lastmod'] > collectionVersion:
-            collectionVersion = c['lastmod']
-        if shardId not in shard_to_chunks:
-            shard_to_chunks[shardId] = {'chunks': [], 'num_merges_performed': 0}
-        shard = shard_to_chunks[shardId]
-        shard['chunks'].append(c)
-        num_chunks_processed += 1
-        if num_chunks_processed % 10 == 0:
-            print(
-                f'Initialisation: {round((num_chunks_processed * 100)/num_chunks, 1)}% ({num_chunks_processed} chunks) done',
-                end='\r')
+
+    with tqdm(total=num_chunks, unit=' chunks') as progress:
+        async for c in cluster.configDb.chunks.find({'ns': args.ns}, sort=[('min',
+                                                                            pymongo.ASCENDING)]):
+            shardId = c['shard']
+            if collectionVersion is None:
+                collectionVersion = c['lastmod']
+            if c['lastmod'] > collectionVersion:
+                collectionVersion = c['lastmod']
+            if shardId not in shard_to_chunks:
+                shard_to_chunks[shardId] = {'chunks': [], 'num_merges_performed': 0}
+            shard = shard_to_chunks[shardId]
+            shard['chunks'].append(c)
+            progress.update()
 
     print(
-        f'Initialisation completed and found {num_chunks_processed} chunks spread over {len(shard_to_chunks)} shards'
+        f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
     )
-    print(f'Collection version is {collectionVersion}')
 
     ###############################################################################################
     #
@@ -136,20 +134,21 @@ async def main(args):
     sem_at_less_than_collection_version = asyncio.Semaphore(
         max_merges_on_shards_at_less_than_collection_version)
 
-    async def merge_chunks_on_shard(shard, collection_version):
+    async def merge_chunks_on_shard(shard, collection_version, progress):
         shard_entry = shard_to_chunks[shard]
         shard_chunks = shard_entry['chunks']
         if len(shard_chunks) < 2:
+            progress.update(n=len(shard_chunks))
             return
 
         chunk_at_shard_version = max(shard_chunks, key=lambda c: c['lastmod'])
         shard_version = chunk_at_shard_version['lastmod']
         shard_is_at_collection_version = shard_version.time == collection_version.time
-        print(f'{shard}: {shard_version}: ', end='')
+        progress.write(f'{shard}: {shard_version}: ', end='')
         if shard_is_at_collection_version:
-            print('Merge will start without major version bump ...')
+            progress.write('Merge will start without major version bump ...')
         else:
-            print('Merge will start with a major version bump ...')
+            progress.write('Merge will start with a major version bump ...')
 
         num_lock_busy_errors_encountered = 0
 
@@ -157,6 +156,8 @@ async def main(args):
         estimated_size_of_consecutive_chunks = 0
 
         for c in shard_chunks:
+            progress.update()
+
             if len(consecutive_chunks) == 0:
                 consecutive_chunks = [c]
                 estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
@@ -232,7 +233,7 @@ async def main(args):
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
                             if num_lock_busy_errors_encountered == 1:
-                                print(
+                                progress.write(
                                     f"""WARNING: Lock error occurred while trying to merge chunk range {mergeCommand['bounds']}.
                                         This indicates the presence of an older MongoDB version.""")
                         else:
@@ -248,10 +249,12 @@ async def main(args):
             shard_entry['num_merges_performed'] += 1
             shard_is_at_collection_version = True
 
-    tasks = []
-    for s in shard_to_chunks:
-        tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion)))
-    await asyncio.gather(*tasks)
+    with tqdm(total=num_chunks, unit=' chunks') as progress:
+        tasks = []
+        for s in shard_to_chunks:
+            tasks.append(
+                asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
+        await asyncio.gather(*tasks)
 
     ###############################################################################################
     # PHASE 2 (Move-and-merge): The purpose of this phase is to move chunks, which are not
