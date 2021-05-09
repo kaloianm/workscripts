@@ -17,26 +17,72 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
+class ShardedCollection:
+    def __init__(self, cluster, ns):
+        self.cluster = cluster
+        self.name = ns
+        self.ns = {'db': self.name.split('.', 1)[0], 'coll': self.name.split('.', 1)[1]}
+
+    async def init(self):
+        self.shard_key_pattern = (await self.cluster.configDb.collections.find_one(
+            {'_id': self.name}))['key']
+
+    async def data_size(self, range):
+        data_size_response = await self.cluster.client[self.ns['db']].command({
+            'dataSize': self.name,
+            'keyPattern': self.shard_key_pattern,
+            'min': range[0],
+            'max': range[1],
+            'estimate': True
+        })
+
+        # Round up the data size of the chunk to the nearest megabyte
+        return math.ceil(float(data_size_response['size']) / (1024.0 * 1024.0))
+
+    async def merge_chunks(self, range):
+        await self.cluster.adminDb.command({'mergeChunks': self.name, 'bounds': range})
+
+    async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write):
+        try:
+            update_result = await self.cluster.configDb.chunks.update_one({
+                'ns': self.name,
+                'min': range[0],
+                'max': range[1],
+                'shard': expected_owning_shard
+            }, {'$set': {
+                'defrag_collection_est_size': size_to_write
+            }})
+
+            if update_result.matched_count != 1:
+                raise Exception(f"Chunk [{min}, {max}] wasn't updated")
+
+            return True
+        except Exception as ex:
+            print(f"""WARNING: Error {ex} occurred while writing the chunk size""")
+            return False
+
+
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
+    coll = ShardedCollection(cluster, args.ns)
+    await coll.init()
 
-    ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
-    shardKeyPattern = (await cluster.configDb.collections.find_one({'_id': args.ns}))['key']
-    num_chunks = await cluster.configDb.chunks.count_documents({'ns': args.ns})
+    num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     print(
-        f'Collection {args.ns} has a shardKeyPattern of {shardKeyPattern} and {num_chunks} chunks')
+        f'Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks'
+    )
 
-    if args.dryrun:
-        print(f'Performing a dry run. No actual modifications to the cluster will occur.')
-        try:
-            await cluster.checkIsMongos()
-        except Cluster.NotMongosException:
-            print('Not connected to a mongos')
-    else:
+    if not args.dryrun:
         await cluster.checkIsMongos()
         if not yes_no('The next steps will perform durable changes to the cluster.\n' +
                       'Proceed (yes/no)? '):
             raise KeyboardInterrupt('User canceled')
+    else:
+        print(f'Performing a dry run. No actual modifications to the cluster will occur.')
+        try:
+            await cluster.checkIsMongos()
+        except Cluster.NotMongosException:
+            print('WARNING: Not connected to a mongos')
 
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
@@ -72,8 +118,8 @@ async def main(args):
     collectionVersion = None
 
     with tqdm(total=num_chunks, unit=' chunks') as progress:
-        async for c in cluster.configDb.chunks.find({'ns': args.ns}, sort=[('min',
-                                                                            pymongo.ASCENDING)]):
+        async for c in cluster.configDb.chunks.find({'ns': coll.name}, sort=[('min',
+                                                                              pymongo.ASCENDING)]):
             shardId = c['shard']
             if collectionVersion is None:
                 collectionVersion = c['lastmod']
@@ -137,8 +183,7 @@ async def main(args):
     async def merge_chunks_on_shard(shard, collection_version, progress):
         shard_entry = shard_to_chunks[shard]
         shard_chunks = shard_entry['chunks']
-        if len(shard_chunks) < 2:
-            progress.update(n=len(shard_chunks))
+        if len(shard_chunks) == 0:
             return
 
         chunk_at_shard_version = max(shard_chunks, key=lambda c: c['lastmod'])
@@ -150,17 +195,18 @@ async def main(args):
         else:
             progress.write('Merge will start with a major version bump ...')
 
-        num_lock_busy_errors_encountered = 0
-
         consecutive_chunks = []
         estimated_size_of_consecutive_chunks = 0
+
+        num_lock_busy_errors_encountered = 0
 
         for c in shard_chunks:
             progress.update()
 
             if len(consecutive_chunks) == 0:
-                consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
+                if not 'defrag_collection_est_size' in c:
+                    consecutive_chunks = [c]
+                    estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
                 continue
 
             merge_consecutive_chunks_without_size_check = False
@@ -169,6 +215,11 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_mb
             elif len(consecutive_chunks) == 1:
+                if not args.dryrun:
+                    chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
+                    data_size = await coll.data_size(chunk_range)
+                    await coll.try_write_chunk_size(chunk_range, shard, data_size)
+
                 consecutive_chunks = [c]
                 estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
                 continue
@@ -182,29 +233,13 @@ async def main(args):
                     target_chunk_size * 0.90) and not merge_consecutive_chunks_without_size_check:
                 continue
 
-            mergeCommand = {
-                'mergeChunks': args.ns,
-                'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
-            }
+            merge_bounds = [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
 
             # Determine the "exact" (not 100% exact because we use the 'estimate' option) size of
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
-            actual_size_of_consecutive_chunks = 0
-            if args.dryrun:
-                actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
-            else:
-                data_size_response = await cluster.client[ns['db']].command({
-                    'dataSize': args.ns,
-                    'keyPattern': shardKeyPattern,
-                    'min': mergeCommand['bounds'][0],
-                    'max': mergeCommand['bounds'][1],
-                    'estimate': True
-                })
-
-                # Round up the data size of the chunk to the nearest megabyte
-                actual_size_of_consecutive_chunks = math.ceil(
-                    float(data_size_response['size']) / (1024.0 * 1024.0))
+            actual_size_of_consecutive_chunks = await coll.data_size(
+                merge_bounds) if not args.dryrun else estimated_size_of_consecutive_chunks
 
             if merge_consecutive_chunks_without_size_check:
                 pass
@@ -222,22 +257,24 @@ async def main(args):
             # Perform the actual merge, obeying the configured concurrency
             async with (sem_at_collection_version
                         if shard_is_at_collection_version else sem_at_less_than_collection_version):
-                if args.dryrun:
-                    print(
-                        f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
-                    )
-                else:
+                if not args.dryrun:
                     try:
-                        await cluster.adminDb.command(mergeCommand)
+                        await coll.merge_chunks(merge_bounds)
+                        await coll.try_write_chunk_size(merge_bounds, shard,
+                                                        actual_size_of_consecutive_chunks)
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
                             if num_lock_busy_errors_encountered == 1:
                                 progress.write(
-                                    f"""WARNING: Lock error occurred while trying to merge chunk range {mergeCommand['bounds']}.
+                                    f"""WARNING: Lock error occurred while trying to merge chunk range {merge_bounds}.
                                         This indicates the presence of an older MongoDB version.""")
                         else:
                             raise
+                else:
+                    progress.write(
+                        f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {merge_bounds}'
+                    )
 
             if merge_consecutive_chunks_without_size_check:
                 consecutive_chunks = [c]
