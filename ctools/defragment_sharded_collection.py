@@ -159,17 +159,17 @@ async def main(args):
         for c in shard_chunks:
             if len(consecutive_chunks) == 0:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
                 continue
 
             merge_consecutive_chunks_without_size_check = False
 
             if consecutive_chunks[-1]['max'] == c['min']:
                 consecutive_chunks.append(c)
-                estimated_size_of_consecutive_chunks += args.estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_mb
             elif len(consecutive_chunks) == 1:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
                 continue
             else:
                 merge_consecutive_chunks_without_size_check = True
@@ -228,6 +228,7 @@ async def main(args):
                 else:
                     try:
                         await cluster.adminDb.command(mergeCommand)
+                        cluster.configDb.chunks.update_one()
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
@@ -240,7 +241,7 @@ async def main(args):
 
             if merge_consecutive_chunks_without_size_check:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
             else:
                 consecutive_chunks = []
                 estimated_size_of_consecutive_chunks = 0
@@ -278,10 +279,22 @@ if __name__ == "__main__":
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument(
-        '--estimated_chunk_size_mb', help=
-        """The amount of data to estimate per chunk (in MB). This value is used as an optimisation
-           in order to gather as many consecutive chunks as possible before invoking dataSize.""",
-        metavar='estimated_chunk_size_mb', type=int, default=64)
+        '--phase_1_estimated_chunk_size_mb',
+        help="""Applies only to Phase 1 and specifies the amount of data to estimate per chunk
+           (in MB) before invoking dataSize in order to obtain the exact size. This value is just an
+           optimisation under Phase 1 order to collect as large of a candidate range to merge as
+           possible before invoking dataSize on the entire candidate range. Otherwise, the script
+           would be invoking dataSize for every single chunk and blocking for the results, which
+           would reduce its parallelism.
+
+           The default is chosen as 40%% of 64MB, which states that we project that under the
+           current 64MB chunkSize default and the way the auto-splitter operates, the collection's
+           chunks are only about 40%% full.
+
+           For dry-runs, because dataSize is not invoked, this parameter is also used to simulate
+           the exact chunk size (i.e., instead of actually calling dataSize, the script pretends
+           that it returned phase_1_estimated_chunk_size_mb).
+           """, metavar='phase_1_estimated_chunk_size_mb', type=int, default=64 * 0.40)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
