@@ -197,9 +197,9 @@ async def main(args):
         shard_is_at_collection_version = shard_version.time == collection_version.time
         progress.write(f'{shard}: {shard_version}: ', end='')
         if shard_is_at_collection_version:
-            progress.write('Merge will start without major version bump ...')
+            progress.write('Merge will start without major version bump')
         else:
-            progress.write('Merge will start with a major version bump ...')
+            progress.write('Merge will start with a major version bump')
 
         consecutive_chunks = []
         estimated_size_of_consecutive_chunks = 0
@@ -210,9 +210,8 @@ async def main(args):
             progress.update()
 
             if len(consecutive_chunks) == 0:
-                if not 'defrag_collection_est_size' in c:
-                    consecutive_chunks = [c]
-                    estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
+                consecutive_chunks = [c]
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
                 continue
 
             merge_consecutive_chunks_without_size_check = False
@@ -221,7 +220,7 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_mb
             elif len(consecutive_chunks) == 1:
-                if not args.dryrun:
+                if not args.dryrun and not 'defrag_collection_est_size' in c:
                     chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
                     data_size = await coll.data_size(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size)
