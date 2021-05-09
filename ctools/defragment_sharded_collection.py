@@ -228,7 +228,6 @@ async def main(args):
                 else:
                     try:
                         await cluster.adminDb.command(mergeCommand)
-                        cluster.configDb.chunks.update_one()
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
