@@ -18,6 +18,12 @@ if (sys.version_info[0] < 3):
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
 
+    ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
+    shardKeyPattern = (await cluster.configDb.collections.find_one({'_id': args.ns}))['key']
+    num_chunks = await cluster.configDb.chunks.count_documents({'ns': args.ns})
+    print(
+        f'Collection {args.ns} has a shardKeyPattern of {shardKeyPattern} and {num_chunks} chunks')
+
     if args.dryrun:
         print(f'Performing a dry run ...')
         try:
@@ -53,16 +59,14 @@ async def main(args):
             """The MaxChunkSize must be configured to at least 128 MB before running this script. Please run:
                db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
         )
-    chunk_size = chunk_size_doc['value']
+    target_chunk_size = chunk_size_doc['value']
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
     # in preparation for the subsequent write phase.
     #
-    num_chunks = await cluster.configDb.chunks.count_documents({'ns': args.ns})
-    global num_chunks_processed
     num_chunks_processed = 0
-    shardToChunks = {}
+    shard_to_chunks = {}
     collectionVersion = None
     async for c in cluster.configDb.chunks.find({'ns': args.ns}, sort=[('min', pymongo.ASCENDING)]):
         shardId = c['shard']
@@ -70,9 +74,9 @@ async def main(args):
             collectionVersion = c['lastmod']
         if c['lastmod'] > collectionVersion:
             collectionVersion = c['lastmod']
-        if shardId not in shardToChunks:
-            shardToChunks[shardId] = {'chunks': []}
-        shard = shardToChunks[shardId]
+        if shardId not in shard_to_chunks:
+            shard_to_chunks[shardId] = {'chunks': [], 'num_merges_performed': 0}
+        shard = shard_to_chunks[shardId]
         shard['chunks'].append(c)
         num_chunks_processed += 1
         if num_chunks_processed % 10 == 0:
@@ -81,7 +85,7 @@ async def main(args):
                 end='\r')
 
     print(
-        f'Initialisation completed and found {num_chunks_processed} chunks spread over {len(shardToChunks)} shards'
+        f'Initialisation completed and found {num_chunks_processed} chunks spread over {len(shard_to_chunks)} shards'
     )
     print(f'Collection version is {collectionVersion}')
 
@@ -110,71 +114,124 @@ async def main(args):
         max_merges_on_shards_at_less_than_collection_version)
 
     async def merge_chunks_on_shard(shard, collection_version):
-        shardChunks = shardToChunks[shard]['chunks']
-        if len(shardChunks) < 2:
+        shard_entry = shard_to_chunks[shard]
+        shard_chunks = shard_entry['chunks']
+        if len(shard_chunks) < 2:
             return
 
-        chunk_at_shard_version = max(shardChunks, key=lambda c: c['lastmod'])
+        chunk_at_shard_version = max(shard_chunks, key=lambda c: c['lastmod'])
         shard_version = chunk_at_shard_version['lastmod']
-        print(f"{shard}: {shard_version}: ", end='')
-        at_collection_version = shard_version.time == collection_version.time
-        if at_collection_version:
-            print(' Merge will start without major version bump ...')
+        shard_is_at_collection_version = shard_version.time == collection_version.time
+        print(f'{shard}: {shard_version}: ', end='')
+        if shard_is_at_collection_version:
+            print('Merge will start without major version bump ...')
         else:
-            print(' Merge will start with a major version bump ...')
+            print('Merge will start with a major version bump ...')
 
-        num_merges_performed = 0
         num_lock_busy_errors_encountered = 0
+
         consecutive_chunks = []
-        for c in shardChunks:
-            if len(consecutive_chunks) == 0 or consecutive_chunks[-1]['max'] != c['min']:
+        estimated_size_of_consecutive_chunks = 0
+
+        for c in shard_chunks:
+            if len(consecutive_chunks) == 0:
                 consecutive_chunks = [c]
+                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
+                continue
+
+            merge_consecutive_chunks_without_size_check = False
+
+            if consecutive_chunks[-1]['max'] == c['min']:
+                consecutive_chunks.append(c)
+                estimated_size_of_consecutive_chunks += args.estimated_chunk_size_mb
+            elif len(consecutive_chunks) == 1:
+                consecutive_chunks = [c]
+                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
                 continue
             else:
-                consecutive_chunks.append(c)
-
-            estimated_size_of_run_mb = len(consecutive_chunks) * args.estimated_chunk_size_mb
+                merge_consecutive_chunks_without_size_check = True
 
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
             # chunk size, invoke `splitVector` in order to determine whether we can merge them or
             # if we should continue adding more chunks to be merged
-            if estimated_size_of_run_mb > chunk_size * 0.90:
-                mergeCommand = {
-                    'mergeChunks': args.ns,
-                    'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
-                }
+            if (estimated_size_of_consecutive_chunks <=
+                    target_chunk_size * 0.90) and not merge_consecutive_chunks_without_size_check:
+                continue
 
-                async with (sem_at_collection_version
-                            if at_collection_version else sem_at_less_than_collection_version):
-                    if args.dryrun:
-                        print(
-                            f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
-                        )
-                    else:
-                        try:
-                            await cluster.adminDb.command(mergeCommand)
-                        except pymongo_errors.OperationFailure as ex:
-                            if ex.details['code'] == 46:  # The code for LockBusy
-                                num_lock_busy_errors_encountered += 1
-                                if num_lock_busy_errors_encountered == 1:
-                                    print(
-                                        f"""WARNING: Lock error occurred while trying to merge chunk range {mergeCommand['bounds']}.
-                                            This indicates the presence of an older MongoDB version."""
-                                    )
-                            else:
-                                raise
+            mergeCommand = {
+                'mergeChunks': args.ns,
+                'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
+            }
 
-                    consecutive_chunks = []
-                    num_merges_performed += 1
-                    at_collection_version = True
+            # Determine the "exact" (not 100% exact because we use the 'estimate' option) size of
+            # the currently accumulated bounds via the `dataSize` command in order to decide
+            # whether this run should be merged or if we should continue adding chunks to it.
+            actual_size_of_consecutive_chunks = 0
+            if args.dryrun:
+                actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
+            else:
+                data_size_response = await cluster.client[ns['db']].command({
+                    'dataSize': args.ns,
+                    'keyPattern': shardKeyPattern,
+                    'min': mergeCommand['bounds'][0],
+                    'max': mergeCommand['bounds'][1],
+                    'estimate': True
+                })
+                actual_size_of_consecutive_chunks = max(data_size_response['size'],
+                                                        1024 * 1024) / 1024
+
+            if merge_consecutive_chunks_without_size_check:
+                pass
+            elif actual_size_of_consecutive_chunks < target_chunk_size * 0.75:
+                # If the actual range size is sill 25% less than the target size, continue adding
+                # consecutive chunks
+                estimated_size_of_consecutive_chunks = actual_size_of_consecutive_chunks
+                continue
+            elif actual_size_of_consecutive_chunks > target_chunk_size * 1.10:
+                # TODO: If the actual range size is 10% more than the target size, use `splitVector`
+                # to determine a better merge/split sequence so as not to generate huge chunks which
+                # will have to be split later on
+                pass
+
+            # Perform the actual merge, obeying the configured concurrency
+            async with (sem_at_collection_version
+                        if shard_is_at_collection_version else sem_at_less_than_collection_version):
+                if args.dryrun:
+                    print(
+                        f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {mergeCommand}'
+                    )
+                else:
+                    try:
+                        await cluster.adminDb.command(mergeCommand)
+                    except pymongo_errors.OperationFailure as ex:
+                        if ex.details['code'] == 46:  # The code for LockBusy
+                            num_lock_busy_errors_encountered += 1
+                            if num_lock_busy_errors_encountered == 1:
+                                print(
+                                    f"""WARNING: Lock error occurred while trying to merge chunk range {mergeCommand['bounds']}.
+                                        This indicates the presence of an older MongoDB version.""")
+                        else:
+                            raise
+
+            if merge_consecutive_chunks_without_size_check:
+                consecutive_chunks = [c]
+                estimated_size_of_consecutive_chunks = args.estimated_chunk_size_mb
+            else:
+                consecutive_chunks = []
+                estimated_size_of_consecutive_chunks = 0
+
+            shard_entry['num_merges_performed'] += 1
+            shard_is_at_collection_version = True
 
     tasks = []
-    for s in shardToChunks:
+    for s in shard_to_chunks:
         tasks.append(asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion)))
     await asyncio.gather(*tasks)
 
     ###############################################################################################
     # PHASE 2:
+    #
+    # TODO:
 
 
 if __name__ == "__main__":
@@ -196,7 +253,7 @@ if __name__ == "__main__":
     argsParser.add_argument(
         '--estimated_chunk_size_mb', help=
         """The amount of data to estimate per chunk (in MB). This value is used as an optimisation
-           in order to gather as many consecutive chunks as possible before invoking splitVector.""",
+           in order to gather as many consecutive chunks as possible before invoking dataSize.""",
         metavar='estimated_chunk_size_mb', type=int, default=64)
 
     args = argsParser.parse_args()

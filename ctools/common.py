@@ -32,10 +32,10 @@ def exe_name(name):
 
 class Cluster:
     def __init__(self, uri, loop):
-        client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+        self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = client.admin.with_options(codec_options=CodecOptions(uuid_representation=4))
-        self.configDb = client.config.with_options(
+        self.adminDb = self.client.admin.with_options(codec_options=CodecOptions(uuid_representation=4))
+        self.configDb = self.client.config.with_options(
             codec_options=CodecOptions(uuid_representation=4))
 
     class NotMongosException(Exception):
