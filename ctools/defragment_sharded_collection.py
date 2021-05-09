@@ -64,7 +64,8 @@ async def main(args):
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
     # in preparation for the subsequent write phase.
-    #
+    ###############################################################################################
+
     num_chunks_processed = 0
     shard_to_chunks = {}
     collectionVersion = None
@@ -93,22 +94,43 @@ async def main(args):
     #
     # WRITE PHASES START FROM HERE ONWARDS
     #
+    ###############################################################################################
+
+    ###############################################################################################
+    # PHASE 1 (Merge-only): The purpose of this phase is to merge as many chunks as possible without
+    # actually moving any data. It is intended to achieve the maximum number of merged chunks with
+    # the minimum possible intrusion to the ongoing CRUD workload due to refresh stalls.
+    #
+    # These are the parameters that control the operation of this phase and their purpose is
+    # explaned below:
 
     max_merges_on_shards_at_less_than_collection_version = 1
     max_merges_on_shards_at_collection_version = 8
 
+    # The way Phase 1 (merge-only) operates is by running:
     #
+    #   (1) Up to `max_merges_on_shards_at_less_than_collection_version` concurrent mergeChunks
+    #       across all shards which are below the collection major version
+    #           AND
+    #   (2) Up to `max_merges_on_shards_at_collection_version` concurrent mergeChunks across all
+    #       shards which are already on the collection major version
+    #
+    # Merges due to (1) will bring the respective shard's major version to that of the collection,
+    # which unfortunately is interpreted by the routers as "something routing-related changed" and
+    # will result in refresh and a stall on the critical CRUD path. Because of this, the script only
+    # runs one at a time of these by default. On the other hand, merges due to (2) only increment
+    # the minor version and will not cause stalls on the CRUD path, so these can run with higher
+    # concurrency.
+    #
+    # The expectation is that at the end of this phase, not all possible defragmentation would have
+    # been achieved, but the number of chunks on the cluster would have been significantly reduced
+    # in a way that would make Phase 2 much less invasive due to refreshes after moveChunk.
+    #
+    # For example in a collection with 1 million chunks, a refresh due to moveChunk could be
+    # expected to take up to a second. However with the number of chunks reduced to 500,000 due to
+    # Phase 1, the refresh time would be on the order of ~100-200msec.
     ###############################################################################################
 
-    ###############################################################################################
-    # PHASE 1 (Merge-only): Run up to `max_merges_on_shards_at_collection_version` concurrent
-    # mergeChunks across all shards which are already on the collection major version and up to
-    # `max_merges_on_shards_at_less_than_collection_version`. Every merge on a shard which is not
-    # at the collection version will result in a StaleShardVersion, which in turn triggers a
-    # refresh and a stall on the critical CRUD path.
-    #
-    # At the end of this phase, all chunks which are already contigious on the same shard will be
-    # merged without having to perform any moves.
     sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
     sem_at_less_than_collection_version = asyncio.Semaphore(
         max_merges_on_shards_at_less_than_collection_version)
@@ -229,9 +251,11 @@ async def main(args):
     await asyncio.gather(*tasks)
 
     ###############################################################################################
-    # PHASE 2:
+    # PHASE 2 (Move-and-merge): The purpose of this phase is to move chunks, which are not
+    # contiguous on a shard (and couldn't be merged by Phase 1) to a shard where they could be
+    # further merged to adjacent chunks.
     #
-    # TODO:
+    # TODO: Implement
 
 
 if __name__ == "__main__":
