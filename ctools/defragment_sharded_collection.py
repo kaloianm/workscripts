@@ -146,6 +146,12 @@ async def main(args):
     # actually moving any data. It is intended to achieve the maximum number of merged chunks with
     # the minimum possible intrusion to the ongoing CRUD workload due to refresh stalls.
     #
+    # The stage is also resumable, because for every chunk/chunk range that it processes, it will
+    # persist a field called 'defrag_collection_est_size' on the chunk, which estimates its size as
+    # of the time the script ran. Resuming Phase 1 will skip over any chunks which already contain
+    # this field, because it indicates that previous execution already ran and performed all the
+    # possible merges.
+    #
     # These are the parameters that control the operation of this phase and their purpose is
     # explaned below:
 
@@ -297,6 +303,9 @@ async def main(args):
     # PHASE 2 (Move-and-merge): The purpose of this phase is to move chunks, which are not
     # contiguous on a shard (and couldn't be merged by Phase 1) to a shard where they could be
     # further merged to adjacent chunks.
+    #
+    # This stage relies on the 'defrag_collection_est_size' fields written to every chunk from
+    # Phase 1 in order to calculate the most optimal move strategy.
     #
     # TODO: Implement
 
