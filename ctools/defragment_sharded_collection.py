@@ -28,7 +28,7 @@ class ShardedCollection:
         self.shard_key_pattern = (await self.cluster.configDb.collections.find_one(
             {'_id': self.name}))['key']
 
-    async def data_size(self, range):
+    async def data_size_kb(self, range):
         data_size_response = await self.cluster.client[self.ns['db']].command({
             'dataSize': self.name,
             'keyPattern': self.shard_key_pattern,
@@ -37,8 +37,8 @@ class ShardedCollection:
             'estimate': True
         })
 
-        # Round up the data size of the chunk to the nearest megabyte
-        return math.ceil(float(data_size_response['size']) / (1024.0 * 1024.0))
+        # Round up the data size of the chunk to the nearest kilobyte
+        return math.ceil(float(data_size_response['size']) / 1024.0)
 
     async def merge_chunks(self, range):
         await self.cluster.adminDb.command({'mergeChunks': self.name, 'bounds': range})
@@ -70,7 +70,8 @@ async def main(args):
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     print(
-        f'Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks'
+        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks.
+            For optimisation and for dry runs, will assume a chunk size of {args.phase_1_estimated_chunk_size_kb}KB."""
     )
 
     if not args.dryrun:
@@ -103,12 +104,12 @@ async def main(args):
                    db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
             )
         else:
-            target_chunk_size = args.dryrun
+            target_chunk_size_kb = args.dryrun
     else:
-        target_chunk_size = chunk_size_doc['value']
+        target_chunk_size_kb = chunk_size_doc['value'] * 1024
 
     if args.dryrun:
-        print(f"""Performing a dry run with target chunk size of {target_chunk_size}.
+        print(f"""Performing a dry run with target chunk size of {target_chunk_size_kb}.
                   No actual modifications to the cluster will occur.""")
         try:
             await cluster.checkIsMongos()
@@ -188,9 +189,9 @@ async def main(args):
     # Phase 1, the refresh time would be on the order of ~100-200msec.
     ###############################################################################################
 
-    sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
     sem_at_less_than_collection_version = asyncio.Semaphore(
         max_merges_on_shards_at_less_than_collection_version)
+    sem_at_collection_version = asyncio.Semaphore(max_merges_on_shards_at_collection_version)
 
     async def merge_chunks_on_shard(shard, collection_version, progress):
         shard_entry = shard_to_chunks[shard]
@@ -217,22 +218,22 @@ async def main(args):
 
             if len(consecutive_chunks) == 0:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
                 continue
 
             merge_consecutive_chunks_without_size_check = False
 
             if consecutive_chunks[-1]['max'] == c['min']:
                 consecutive_chunks.append(c)
-                estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_kb
             elif len(consecutive_chunks) == 1:
                 if not args.dryrun and not 'defrag_collection_est_size' in consecutive_chunks[-1]:
                     chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
-                    data_size = await coll.data_size(chunk_range)
+                    data_size = await coll.data_size_kb(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size)
 
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
                 continue
             else:
                 merge_consecutive_chunks_without_size_check = True
@@ -240,8 +241,8 @@ async def main(args):
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
             # chunk size, invoke `splitVector` in order to determine whether we can merge them or
             # if we should continue adding more chunks to be merged
-            if (estimated_size_of_consecutive_chunks <=
-                    target_chunk_size * 0.90) and not merge_consecutive_chunks_without_size_check:
+            if (estimated_size_of_consecutive_chunks <= target_chunk_size_kb * 0.90
+                ) and not merge_consecutive_chunks_without_size_check:
                 continue
 
             merge_bounds = [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
@@ -250,19 +251,19 @@ async def main(args):
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
             if not args.dryrun:
-                actual_size_of_consecutive_chunks = await coll.data_size(
+                actual_size_of_consecutive_chunks = await coll.data_size_kb(
                     merge_bounds) if not args.dryrun else estimated_size_of_consecutive_chunks
             else:
                 actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
 
             if merge_consecutive_chunks_without_size_check:
                 pass
-            elif actual_size_of_consecutive_chunks < target_chunk_size * 0.75:
+            elif actual_size_of_consecutive_chunks < target_chunk_size_kb * 0.75:
                 # If the actual range size is sill 25% less than the target size, continue adding
                 # consecutive chunks
                 estimated_size_of_consecutive_chunks = actual_size_of_consecutive_chunks
                 continue
-            elif actual_size_of_consecutive_chunks > target_chunk_size * 1.10:
+            elif actual_size_of_consecutive_chunks > target_chunk_size_kb * 1.10:
                 # TODO: If the actual range size is 10% more than the target size, use `splitVector`
                 # to determine a better merge/split sequence so as not to generate huge chunks which
                 # will have to be split later on
@@ -292,7 +293,7 @@ async def main(args):
 
             if merge_consecutive_chunks_without_size_check:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_mb
+                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
             else:
                 consecutive_chunks = []
                 estimated_size_of_consecutive_chunks = 0
@@ -333,8 +334,8 @@ if __name__ == "__main__":
            (in MB) which indicates the target chunk size to be used for the simulation in case the
            cluster doesn't have the chunkSize setting enabled. Since some phases of the script
            depend on certain state of the cluster to have been reached by previous phases, if this
-           mode is selected, the script will stop early.""", metavar='dryrun', type=int,
-        required=False)
+           mode is selected, the script will stop early.""", metavar='target_chunk_size',
+        type=lambda x: x * 1024, required=False)
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument(
@@ -353,7 +354,8 @@ if __name__ == "__main__":
            For dry-runs, because dataSize is not invoked, this parameter is also used to simulate
            the exact chunk size (i.e., instead of actually calling dataSize, the script pretends
            that it returned phase_1_estimated_chunk_size_mb).
-           """, metavar='phase_1_estimated_chunk_size_mb', type=int, default=64 * 0.40)
+           """, metavar='phase_1_estimated_chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
+        type=lambda x: x * 1024, default=64 * 0.40)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
