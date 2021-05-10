@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import logging
 import math
 import motor.motor_asyncio
 import pymongo
@@ -54,11 +55,11 @@ class ShardedCollection:
             }})
 
             if update_result.matched_count != 1:
-                raise Exception(f"Chunk [{min}, {max}] wasn't updated")
+                raise Exception(f"Chunk [{min}, {max}] wasn't updated: {update_result}")
 
             return True
         except Exception as ex:
-            print(f"""WARNING: Error {ex} occurred while writing the chunk size""")
+            logging.warning(f'Error {ex} occurred while writing the chunk size')
             return False
 
 
@@ -77,12 +78,6 @@ async def main(args):
         if not yes_no('The next steps will perform durable changes to the cluster.\n' +
                       'Proceed (yes/no)? '):
             raise KeyboardInterrupt('User canceled')
-    else:
-        print(f'Performing a dry run. No actual modifications to the cluster will occur.')
-        try:
-            await cluster.checkIsMongos()
-        except Cluster.NotMongosException:
-            print('WARNING: Not connected to a mongos')
 
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
@@ -91,8 +86,7 @@ async def main(args):
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
     if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
         raise Exception("""The balancer must be stopped before running this script. Please run:
-                           db.getSiblingDB('config').settings.update({_id:'balancer'}, {$set: {mode: 'off', enabled: false}}, {upsert: true})"""
-                        )
+                           sh.stopBalancer()""")
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
     if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
@@ -102,12 +96,24 @@ async def main(args):
         )
 
     chunk_size_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
-    if not args.dryrun and (chunk_size_doc is None or chunk_size_doc['value'] < 128):
-        raise Exception(
-            """The MaxChunkSize must be configured to at least 128 MB before running this script. Please run:
-               db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
-        )
-    target_chunk_size = chunk_size_doc['value']
+    if chunk_size_doc is None or chunk_size_doc['value'] < 128:
+        if not args.dryrun:
+            raise Exception(
+                """The MaxChunkSize must be configured to at least 128 MB before running this script. Please run:
+                   db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
+            )
+        else:
+            target_chunk_size = args.dryrun
+    else:
+        target_chunk_size = chunk_size_doc['value']
+
+    if args.dryrun:
+        print(f"""Performing a dry run with target chunk size of {target_chunk_size}.
+                  No actual modifications to the cluster will occur.""")
+        try:
+            await cluster.checkIsMongos()
+        except Cluster.NotMongosException:
+            print('Not connected to a mongos')
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
@@ -243,8 +249,11 @@ async def main(args):
             # Determine the "exact" (not 100% exact because we use the 'estimate' option) size of
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
-            actual_size_of_consecutive_chunks = await coll.data_size(
-                merge_bounds) if not args.dryrun else estimated_size_of_consecutive_chunks
+            if not args.dryrun:
+                actual_size_of_consecutive_chunks = await coll.data_size(
+                    merge_bounds) if not args.dryrun else estimated_size_of_consecutive_chunks
+            else:
+                actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
 
             if merge_consecutive_chunks_without_size_check:
                 pass
@@ -271,8 +280,8 @@ async def main(args):
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
                             if num_lock_busy_errors_encountered == 1:
-                                progress.write(
-                                    f"""WARNING: Lock error occurred while trying to merge chunk range {merge_bounds}.
+                                logging.warning(
+                                    f"""Lock error occurred while trying to merge chunk range {merge_bounds}.
                                         This indicates the presence of an older MongoDB version.""")
                         else:
                             raise
@@ -320,9 +329,12 @@ if __name__ == "__main__":
     argsParser.add_argument(
         '--dryrun', help=
         """Indicates whether the script should perform actual durable changes to the cluster or just
-           print the commands which will be executed. Since some phases of the script depend on
-           certain state of the cluster to have been reached by previous phases, if this mode is
-           selected, the script will stop early.""", action='store_true')
+           print the commands which will be executed. If specified, it needs to be passed a value
+           (in MB) which indicates the target chunk size to be used for the simulation in case the
+           cluster doesn't have the chunkSize setting enabled. Since some phases of the script
+           depend on certain state of the cluster to have been reached by previous phases, if this
+           mode is selected, the script will stop early.""", metavar='dryrun', type=int,
+        required=False)
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument(
