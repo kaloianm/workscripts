@@ -14,6 +14,7 @@ import uuid
 from bson.codec_options import CodecOptions
 from common import Cluster
 from pymongo import InsertOne
+from tqdm import tqdm
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -26,7 +27,7 @@ async def main(args):
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
-    collectionUUID = uuid.uuid4()
+    collection_uuid = uuid.uuid4()
     shardIds = await cluster.shardIds
 
     print(f"Enabling sharding for database {ns['db']}")
@@ -39,37 +40,49 @@ async def main(args):
     await cluster.configDb.chunks.delete_many({'ns': args.ns})
     print(f'Cleaned up old entries for {args.ns}')
 
+    sem = asyncio.Semaphore(8)
+
+    ###############################################################################################
     # Create the collection on each shard
+    ###############################################################################################
+    async def safe_create_shard_indexes(shard):
+        async with sem:
+            print('Creating shard key indexes on shard ' + shard['_id'])
+            conn_parts = shard['host'].split('/', 1)
+            conn = motor.motor_asyncio.AsyncIOMotorClient(conn_parts[1], replicaset=conn_parts[0])
+            db = conn[ns['db']]
+
+            applyOpsCommand = {
+                'applyOps': [{
+                    'op': 'c',
+                    'ns': ns['db'] + '.$cmd',
+                    'ui': collection_uuid,
+                    'o': {
+                        'create': ns['coll'],
+                    },
+                }]
+            }
+            await db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
+
+            createIndexesCommand = {
+                'createIndexes': ns['coll'],
+                'indexes': [{
+                    'key': {
+                        'shardKey': 1
+                    },
+                    'name': 'Shard key index'
+                }]
+            }
+            await db.command(createIndexesCommand)
+
+    tasks = []
     async for shard in cluster.configDb.shards.find({}):
-        print('Creating shard key indexes on shard ' + shard['_id'])
-        connParts = shard['host'].split('/', 1)
-        conn = motor.motor_asyncio.AsyncIOMotorClient(connParts[1], replicaset=connParts[0])
-        db = conn[ns['db']]
+        tasks.append(asyncio.ensure_future(safe_create_shard_indexes(shard)))
+    await asyncio.gather(*tasks)
 
-        applyOpsCommand = {
-            'applyOps': [{
-                'op': 'c',
-                'ns': ns['db'] + '.$cmd',
-                'ui': collectionUUID,
-                'o': {
-                    'create': ns['coll'],
-                },
-            }]
-        }
-        await db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
-
-        createIndexesCommand = {
-            'createIndexes': ns['coll'],
-            'indexes': [{
-                'key': {
-                    'shardKey': 1
-                },
-                'name': 'Shard key index'
-            }]
-        }
-        await db.command(createIndexesCommand)
-
+    ###############################################################################################
     # Create collection and chunk entries on the config server
+    ###############################################################################################
     def gen_chunk(i):
         sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
         shardId = random.choice(
@@ -113,31 +126,25 @@ async def main(args):
 
         return InsertOne(obj)
 
-    print(f'Writing chunks entries')
     chunks = list(map(gen_chunk, range(args.numchunks)))
 
-    sem = asyncio.Semaphore(8)
-    global num_chunks_written
-    num_chunks_written = 0
-
-    async def safe_write_chunks(chunks_subset, i):
+    async def safe_write_chunks(chunks_subset, i, progress):
         async with sem:
             result = await cluster.configDb.chunks.bulk_write(chunks_subset, ordered=False)
             global num_chunks_written
-            num_chunks_written += result.inserted_count
-            print(
-                f'Written {round((num_chunks_written * 100)/args.numchunks, 1)}% ({num_chunks_written} entries) so far',
-                end='\r')
+            progress.update(result.inserted_count)
 
-    batch_size = 5000
-    tasks = [
-        asyncio.ensure_future(safe_write_chunks(chunks[i:i + batch_size], i))
-        for i in range(0, len(chunks), batch_size)
-    ]
-    await asyncio.gather(*tasks)
-    print('Chunks write completed')
+    with tqdm(total=args.numchunks, unit=' chunks') as progress:
+        progress.write('Writing chunks entries ...')
+        batch_size = 5000
+        tasks = [
+            asyncio.ensure_future(safe_write_chunks(chunks[i:i + batch_size], i, progress))
+            for i in range(0, len(chunks), batch_size)
+        ]
+        await asyncio.gather(*tasks)
+        progress.write('Chunks write completed')
 
-    print(f'Writing collection entry')
+    print('Writing collection entry')
     await cluster.configDb.collections.insert_one({
         '_id': args.ns,
         'lastmodEpoch': epoch,
@@ -147,7 +154,7 @@ async def main(args):
             'shardKey': 1
         },
         'unique': True,
-        'uuid': collectionUUID
+        'uuid': collection_uuid
     })
 
 
