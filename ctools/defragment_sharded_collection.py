@@ -226,7 +226,7 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_mb
             elif len(consecutive_chunks) == 1:
-                if not args.dryrun and not 'defrag_collection_est_size' in c:
+                if not args.dryrun and not 'defrag_collection_est_size' in consecutive_chunks[-1]:
                     chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
                     data_size = await coll.data_size(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size)
