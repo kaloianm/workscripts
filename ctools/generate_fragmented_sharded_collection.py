@@ -45,12 +45,15 @@ async def main(args):
     ###############################################################################################
     # Create the collection on each shard
     ###############################################################################################
+    shard_connections = {}
+
     async def safe_create_shard_indexes(shard):
         async with sem:
             print('Creating shard key indexes on shard ' + shard['_id'])
             conn_parts = shard['host'].split('/', 1)
-            conn = motor.motor_asyncio.AsyncIOMotorClient(conn_parts[1], replicaset=conn_parts[0])
-            db = conn[ns['db']]
+            shard_connections[shard['_id']] = motor.motor_asyncio.AsyncIOMotorClient(
+                conn_parts[1], replicaset=conn_parts[0])
+            db = shard_connections[shard['_id']][ns['db']]
 
             applyOpsCommand = {
                 'applyOps': [{
@@ -124,23 +127,45 @@ async def main(args):
         else:
             obj = {**obj, **{'min': {'shardKey': (i - 1) * 10000}, 'max': {'shardKey': i * 10000}}}
 
-        return InsertOne(obj)
+        return obj
 
-    chunks = list(map(gen_chunk, range(args.numchunks)))
+    chunk_objs = list(map(gen_chunk, range(args.numchunks)))
 
-    async def safe_write_chunks(chunks_subset, i, progress):
+    async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
-            result = await cluster.configDb.chunks.bulk_write(chunks_subset, ordered=False)
-            global num_chunks_written
-            progress.update(result.inserted_count)
+            config_and_shard_insert = await asyncio.gather(*[
+                asyncio.ensure_future(
+                    cluster.configDb.chunks.bulk_write(
+                        list(map(lambda x: InsertOne(x), chunks_subset)), ordered=False)),
+                asyncio.ensure_future(shard_connections[shard][ns['db']][ns['coll']].bulk_write(
+                    list(
+                        map(lambda x: InsertOne(dict(x['min'], **{'originalChunk': x})),
+                            chunks_subset)), ordered=False))
+            ])
+
+            progress.update(config_and_shard_insert[0].inserted_count)
 
     with tqdm(total=args.numchunks, unit=' chunks') as progress:
         progress.write('Writing chunks entries ...')
         batch_size = 5000
-        tasks = [
-            asyncio.ensure_future(safe_write_chunks(chunks[i:i + batch_size], i, progress))
-            for i in range(0, len(chunks), batch_size)
-        ]
+        shard_to_chunks = {}
+        tasks = []
+        for c in chunk_objs:
+            shard = c['shard']
+            if not shard in shard_to_chunks:
+                shard_to_chunks[shard] = [c]
+            else:
+                shard_to_chunks[shard].append(c)
+
+            if len(shard_to_chunks[shard]) == batch_size:
+                tasks.append(
+                    asyncio.ensure_future(
+                        safe_write_chunks(shard, shard_to_chunks[shard], progress)))
+                del shard_to_chunks[shard]
+
+        for s in shard_to_chunks:
+            tasks.append(asyncio.ensure_future(safe_write_chunks(s, shard_to_chunks[s], progress)))
+
         await asyncio.gather(*tasks)
         progress.write('Chunks write completed')
 
