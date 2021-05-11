@@ -163,7 +163,7 @@ async def main(args):
     # explaned below:
 
     max_merges_on_shards_at_less_than_collection_version = 1
-    max_merges_on_shards_at_collection_version = 8
+    max_merges_on_shards_at_collection_version = 10
 
     # The way Phase 1 (merge-only) operates is by running:
     #

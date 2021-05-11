@@ -40,7 +40,7 @@ async def main(args):
     await cluster.configDb.chunks.delete_many({'ns': args.ns})
     print(f'Cleaned up old entries for {args.ns}')
 
-    sem = asyncio.Semaphore(8)
+    sem = asyncio.Semaphore(10)
 
     ###############################################################################################
     # Create the collection on each shard
