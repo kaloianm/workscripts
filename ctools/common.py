@@ -6,7 +6,7 @@ import motor.motor_asyncio
 import sys
 
 from bson.codec_options import CodecOptions
-
+from bson.binary import UuidRepresentation
 
 # Function for a Yes/No result based on the answer provided as an argument
 def yes_no(answer):
@@ -34,9 +34,9 @@ class Cluster:
     def __init__(self, uri, loop):
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = self.client.admin.with_options(codec_options=CodecOptions(uuid_representation=4))
+        self.adminDb = self.client.admin.with_options(codec_options=CodecOptions(uuid_representation=UuidRepresentation.JAVA_LEGACY))
         self.configDb = self.client.config.with_options(
-            codec_options=CodecOptions(uuid_representation=4))
+            codec_options=CodecOptions(uuid_representation=UuidRepresentation.JAVA_LEGACY))
 
     class NotMongosException(Exception):
         pass
