@@ -12,6 +12,7 @@ import sys
 import uuid
 
 from bson.codec_options import CodecOptions
+from bson.objectid import ObjectId
 from common import Cluster
 from pymongo import InsertOne
 from tqdm import tqdm
@@ -93,7 +94,7 @@ async def main(args):
         ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
 
         obj = {
-            '_id': f'shardKey-{args.ns}-{str(i)}',
+            '_id': ObjectId(),
             'ns': args.ns,
             'lastmodEpoch': epoch,
             'lastmod': bson.timestamp.Timestamp(i + 1, 0),
