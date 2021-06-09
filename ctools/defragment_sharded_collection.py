@@ -28,20 +28,23 @@ class ShardedCollection:
         self.shard_key_pattern = (await self.cluster.configDb.collections.find_one(
             {'_id': self.name}))['key']
 
-    async def data_size_kb(self, range):
+    async def data_size_kb_from_shard(self, range):
         data_size_response = await self.cluster.client[self.ns['db']].command({
             'dataSize': self.name,
             'keyPattern': self.shard_key_pattern,
             'min': range[0],
             'max': range[1],
             'estimate': True
-        })
+        }, codec_options=self.cluster.client.codec_options)
 
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(float(data_size_response['size']) / 1024.0)
 
     async def merge_chunks(self, range):
-        await self.cluster.adminDb.command({'mergeChunks': self.name, 'bounds': range})
+        await self.cluster.adminDb.command({
+            'mergeChunks': self.name,
+            'bounds': range
+        }, codec_options=self.cluster.client.codec_options)
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write):
         try:
@@ -63,20 +66,22 @@ class ShardedCollection:
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
+    try:
+        await cluster.checkIsMongos()
+    except Cluster.NotMongosException:
+        if args.dryrun:
+            print('WARNING: Not connected to a MongoS')
+        else:
+            raise
+
     coll = ShardedCollection(cluster, args.ns)
     await coll.init()
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     print(
         f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks.
-            For optimisation and for dry runs, will assume a chunk size of {args.phase_1_estimated_chunk_size_kb}KB."""
+            For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
     )
-
-    if not args.dryrun:
-        await cluster.checkIsMongos()
-        if not yes_no('The next steps will perform durable changes to the cluster.\n' +
-                      'Proceed (yes/no)? '):
-            raise KeyboardInterrupt('User canceled')
 
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
@@ -107,12 +112,13 @@ async def main(args):
         target_chunk_size_kb = chunk_size_doc['value'] * 1024
 
     if args.dryrun:
-        print(f"""Performing a dry run with target chunk size of {target_chunk_size_kb}.
+        print(f"""Performing a dry run with target chunk size of {target_chunk_size_kb} KB.
                   No actual modifications to the cluster will occur.""")
-        try:
-            await cluster.checkIsMongos()
-        except Cluster.NotMongosException:
-            print('Not connected to a mongos')
+    else:
+        if not yes_no(
+                f"""The next steps will perform an actual merge with target chunk size of {target_chunk_size_kb} KB
+                      Proceed (yes/no)?"""):
+            raise KeyboardInterrupt('User canceled')
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
@@ -227,7 +233,7 @@ async def main(args):
             elif len(consecutive_chunks) == 1:
                 if not args.dryrun and not 'defrag_collection_est_size' in consecutive_chunks[-1]:
                     chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
-                    data_size = await coll.data_size_kb(chunk_range)
+                    data_size = await coll.data_size_kb_from_shard(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size)
 
                 consecutive_chunks = [c]
@@ -237,8 +243,8 @@ async def main(args):
                 merge_consecutive_chunks_without_size_check = True
 
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
-            # chunk size, invoke `splitVector` in order to determine whether we can merge them or
-            # if we should continue adding more chunks to be merged
+            # chunk size, invoke `dataSize` in order to determine whether we can merge them or if
+            # we should continue adding more chunks to be merged
             if (estimated_size_of_consecutive_chunks <= target_chunk_size_kb * 0.90
                 ) and not merge_consecutive_chunks_without_size_check:
                 continue
@@ -249,7 +255,7 @@ async def main(args):
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
             if not args.dryrun:
-                actual_size_of_consecutive_chunks = await coll.data_size_kb(
+                actual_size_of_consecutive_chunks = await coll.data_size_kb_from_shard(
                     merge_bounds) if not args.dryrun else estimated_size_of_consecutive_chunks
             else:
                 actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
@@ -353,7 +359,7 @@ if __name__ == "__main__":
            the exact chunk size (i.e., instead of actually calling dataSize, the script pretends
            that it returned phase_1_estimated_chunk_size_mb).
            """, metavar='phase_1_estimated_chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
-        type=lambda x: int(x) * 1024, default=64 * 0.40)
+        type=lambda x: int(x) * 1024, default=64 * 1024 * 0.40)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
