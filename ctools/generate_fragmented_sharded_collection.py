@@ -85,6 +85,9 @@ async def main(args):
     ###############################################################################################
     # Create collection and chunk entries on the config server
     ###############################################################################################
+    def make_shard_key(i):
+        return uuid.UUID(int=i)
+
     def gen_chunk(i):
         sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
         shardId = random.choice(
@@ -107,7 +110,7 @@ async def main(args):
                         'shardKey': bson.min_key.MinKey
                     },
                     'max': {
-                        'shardKey': i * 10000
+                        'shardKey': make_shard_key(i * 10000)
                     },
                 }
             }
@@ -116,7 +119,7 @@ async def main(args):
                 **obj,
                 **{
                     'min': {
-                        'shardKey': (i - 1) * 10000
+                        'shardKey': make_shard_key((i - 1) * 10000)
                     },
                     'max': {
                         'shardKey': bson.max_key.MaxKey
@@ -124,7 +127,17 @@ async def main(args):
                 }
             }
         else:
-            obj = {**obj, **{'min': {'shardKey': (i - 1) * 10000}, 'max': {'shardKey': i * 10000}}}
+            obj = {
+                **obj,
+                **{
+                    'min': {
+                        'shardKey': make_shard_key((i - 1) * 10000)
+                    },
+                    'max': {
+                        'shardKey': make_shard_key(i * 10000)
+                    }
+                }
+            }
 
         return obj
 
