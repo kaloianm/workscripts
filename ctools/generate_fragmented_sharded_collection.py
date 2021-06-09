@@ -11,7 +11,6 @@ import random
 import sys
 import uuid
 
-from bson.codec_options import CodecOptions
 from bson.objectid import ObjectId
 from common import Cluster
 from pymongo import InsertOne
@@ -23,7 +22,7 @@ if (sys.version_info[0] < 3):
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
     await cluster.checkIsMongos()
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
@@ -52,11 +51,12 @@ async def main(args):
         async with sem:
             print('Creating shard key indexes on shard ' + shard['_id'])
             conn_parts = shard['host'].split('/', 1)
-            shard_connections[shard['_id']] = motor.motor_asyncio.AsyncIOMotorClient(
-                conn_parts[1], replicaset=conn_parts[0])
-            db = shard_connections[shard['_id']][ns['db']]
+            client = shard_connections[shard['_id']] = motor.motor_asyncio.AsyncIOMotorClient(
+                conn_parts[1], replicaset=conn_parts[0],
+                uuidRepresentation=cluster.uuidRepresentation)
+            db = client[ns['db']]
 
-            applyOpsCommand = {
+            await db.command({
                 'applyOps': [{
                     'op': 'c',
                     'ns': ns['db'] + '.$cmd',
@@ -65,10 +65,9 @@ async def main(args):
                         'create': ns['coll'],
                     },
                 }]
-            }
-            await db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4))
+            }, codec_options=client.codec_options)
 
-            createIndexesCommand = {
+            await db.command({
                 'createIndexes': ns['coll'],
                 'indexes': [{
                     'key': {
@@ -76,8 +75,7 @@ async def main(args):
                     },
                     'name': 'Shard key index'
                 }]
-            }
-            await db.command(createIndexesCommand)
+            }, codec_options=client.codec_options)
 
     tasks = []
     async for shard in cluster.configDb.shards.find({}):

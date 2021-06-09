@@ -55,16 +55,14 @@ class ShardedCollection:
             }})
 
             if update_result.matched_count != 1:
-                raise Exception(f"Chunk [{min}, {max}] wasn't updated: {update_result}")
-
-            return True
+                raise Exception(
+                    f"Chunk [{range[0]}, {range[1]}] wasn't updated: {update_result.raw_result}")
         except Exception as ex:
             logging.warning(f'Error {ex} occurred while writing the chunk size')
-            return False
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
     coll = ShardedCollection(cluster, args.ns)
     await coll.init()
 
@@ -335,7 +333,7 @@ if __name__ == "__main__":
            cluster doesn't have the chunkSize setting enabled. Since some phases of the script
            depend on certain state of the cluster to have been reached by previous phases, if this
            mode is selected, the script will stop early.""", metavar='target_chunk_size',
-        type=lambda x: x * 1024, required=False)
+        type=lambda x: int(x) * 1024, required=False)
     argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument(
@@ -355,7 +353,7 @@ if __name__ == "__main__":
            the exact chunk size (i.e., instead of actually calling dataSize, the script pretends
            that it returned phase_1_estimated_chunk_size_mb).
            """, metavar='phase_1_estimated_chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
-        type=lambda x: x * 1024, default=64 * 0.40)
+        type=lambda x: int(x) * 1024, default=64 * 0.40)
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
