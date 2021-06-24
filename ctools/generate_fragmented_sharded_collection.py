@@ -11,6 +11,8 @@ import random
 import sys
 import uuid
 
+from bson.binary import UuidRepresentation
+from bson.codec_options import CodecOptions
 from bson.objectid import ObjectId
 from common import Cluster
 from pymongo import InsertOne
@@ -65,7 +67,7 @@ async def main(args):
                         'create': ns['coll'],
                     },
                 }]
-            }, codec_options=client.codec_options)
+            }, codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
 
             await db.command({
                 'createIndexes': ns['coll'],
@@ -75,7 +77,7 @@ async def main(args):
                     },
                     'name': 'Shard key index'
                 }]
-            }, codec_options=client.codec_options)
+            })
 
     tasks = []
     async for shard in cluster.configDb.shards.find({}):
@@ -182,17 +184,18 @@ async def main(args):
         progress.write('Chunks write completed')
 
     print('Writing collection entry')
-    await cluster.configDb.collections.insert_one({
-        '_id': args.ns,
-        'lastmodEpoch': epoch,
-        'lastmod': datetime.datetime.now(),
-        'dropped': False,
-        'key': {
-            'shardKey': 1
-        },
-        'unique': True,
-        'uuid': collection_uuid
-    })
+    await cluster.configDb.collections.with_options(
+        codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_one({
+            '_id': args.ns,
+            'lastmodEpoch': epoch,
+            'lastmod': datetime.datetime.now(),
+            'dropped': False,
+            'key': {
+                'shardKey': 1
+            },
+            'unique': True,
+            'uuid': collection_uuid
+        })
 
 
 if __name__ == "__main__":
