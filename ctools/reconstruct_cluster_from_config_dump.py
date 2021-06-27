@@ -33,8 +33,8 @@ class ToolConfiguration:
 
         self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
 
-        self.clusterIntrospectMongoDPort = 19000
-        self.clusterStartingPort = 20000
+        self.clusterIntrospectMongoDPort = 20000
+        self.clusterStartingPort = 27017
 
         self.mongoRestoreNumInsertionWorkers = 16
 
