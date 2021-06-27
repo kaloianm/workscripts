@@ -36,7 +36,9 @@ async def main(args):
     print(f"Enabling sharding for database {ns['db']}")
     await cluster.adminDb.command({'enableSharding': ns['db']})
 
-    print(f'Placing {args.numchunks} chunks over {shardIds} for collection {args.ns}')
+    print(
+        f'Placing {args.num_chunks} chunks over {shardIds} for collection {args.ns} with a shard key of {args.shard_key_type}'
+    )
 
     print(f'Cleaning up old entries for {args.ns} ...')
     await cluster.configDb.collections.delete_many({'_id': args.ns})
@@ -95,10 +97,13 @@ async def main(args):
             return ObjectId()
 
     def make_shard_key(i):
-        return uuid.UUID(int=i)
+        if args.shard_key_type == 'uuid':
+            return uuid.UUID(bytes=i.to_bytes(16, byteorder='big'))
+        else:
+            return i
 
     def gen_chunk(i):
-        sortedShardIdx = math.floor(i / (args.numchunks / len(shardIds)))
+        sortedShardIdx = math.floor(i / (args.num_chunks / len(shardIds)))
         shardId = random.choice(
             shardIds[:sortedShardIdx] + shardIds[sortedShardIdx + 1:]
         ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
@@ -123,7 +128,7 @@ async def main(args):
                     },
                 }
             }
-        elif i == args.numchunks - 1:
+        elif i == args.num_chunks - 1:
             obj = {
                 **obj,
                 **{
@@ -150,7 +155,7 @@ async def main(args):
 
         return obj
 
-    chunk_objs = list(map(gen_chunk, range(args.numchunks)))
+    chunk_objs = list(map(gen_chunk, range(args.num_chunks)))
 
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
@@ -166,7 +171,7 @@ async def main(args):
 
             progress.update(config_and_shard_insert[0].inserted_count)
 
-    with tqdm(total=args.numchunks, unit=' chunks') as progress:
+    with tqdm(total=args.num_chunks, unit=' chunks') as progress:
         progress.write('Writing chunks entries ...')
         batch_size = 5000
         shard_to_chunks = {}
@@ -213,8 +218,11 @@ if __name__ == "__main__":
         metavar='uri', type=str, nargs=1)
     argsParser.add_argument('--ns', help='The namespace to create', metavar='ns', type=str,
                             required=True)
-    argsParser.add_argument('--numchunks', help='The number of chunks to create',
-                            metavar='numchunks', type=int, required=True)
+    argsParser.add_argument('--num_chunks', help='The number of chunks to create',
+                            metavar='num_chunks', type=int, required=True)
+    argsParser.add_argument('--shard_key_type', help='The type to use for a shard key',
+                            metavar='shard_key_type', type=str, default='uuid',
+                            choices=['integer', 'uuid'])
     argsParser.add_argument(
         '--fragmentation',
         help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
