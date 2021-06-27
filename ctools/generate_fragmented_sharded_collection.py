@@ -43,7 +43,6 @@ async def main(args):
     uuid_shard_key_byte_order = None
     if args.shard_key_type == 'uuid':
         uuid_shard_key_byte_order = 'little' if cluster.uuid_representation == UuidRepresentation.JAVA_LEGACY else 'big'
-    if uuid_shard_key_byte_order:
         print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
 
     print(f'Cleaning up old entries for {args.ns} ...')
