@@ -10,15 +10,15 @@ from bson.codec_options import CodecOptions
 
 # Function for a Yes/No result based on the answer provided as an argument
 def yes_no(answer):
-    yes = set(['yes', 'y', 'ye', ''])
-    no = set(['no', 'n'])
+    yes = set(['yes', 'y', 'y'])
+    no = set(['no', 'n', ''])
 
     while True:
-        choice = input(answer).lower()
+        choice = input(answer + '\nProceed (yes/NO)? ').lower()
         if choice in yes:
-            return True
+            return
         elif choice in no:
-            return False
+            raise KeyboardInterrupt('User canceled')
         else:
             print("Please respond with 'yes' or 'no'\n")
 

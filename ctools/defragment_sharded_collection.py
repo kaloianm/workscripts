@@ -63,6 +63,13 @@ class ShardedCollection:
         except Exception as ex:
             logging.warning(f'Error {ex} occurred while writing the chunk size')
 
+    async def clear_chunk_size_estimations(self):
+        update_result = await self.cluster.configDb.chunks.update_many(
+            {'ns': self.name}, {'$unset': {
+                'defrag_collection_est_size': ''
+            }})
+        return update_result.modified_count
+
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
@@ -109,10 +116,13 @@ async def main(args):
         print(f"""Performing a dry run with target chunk size of {target_chunk_size_kb} KB.
                   No actual modifications to the cluster will occur.""")
     else:
-        if not yes_no(
-                f"""The next steps will perform an actual merge with target chunk size of {target_chunk_size_kb} KB
-                      Proceed (yes/no)?"""):
-            raise KeyboardInterrupt('User canceled')
+        yes_no(
+            f'The next steps will perform an actual merge with target chunk size of {target_chunk_size_kb} KB.'
+        )
+        if args.phase_1_reset_progress:
+            yes_no(f'Previous defragmentation progress will be reset.')
+            num_cleared = await coll.clear_chunk_size_estimations()
+            print(f'Cleared {num_cleared} already processed chunks.')
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
@@ -334,8 +344,13 @@ if __name__ == "__main__":
            depend on certain state of the cluster to have been reached by previous phases, if this
            mode is selected, the script will stop early.""", metavar='target_chunk_size',
         type=lambda x: int(x) * 1024, required=False)
-    argsParser.add_argument('--ns', help='The namespace to defragment', metavar='ns', type=str,
-                            required=True)
+    argsParser.add_argument('--ns', help="""The namespace on which to perform defragmentation""",
+                            metavar='ns', type=str, required=True)
+    argsParser.add_argument(
+        '--phase_1_reset_progress',
+        help="""Applies only to Phase 1 and instructs the script to clear the chunk size estimation
+        and merge progress which may have been made by an earlier invocation""",
+        action='store_true')
     argsParser.add_argument(
         '--phase_1_estimated_chunk_size_mb',
         help="""Applies only to Phase 1 and specifies the amount of data to estimate per chunk

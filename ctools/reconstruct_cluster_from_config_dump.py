@@ -106,9 +106,7 @@ class ToolConfiguration:
     # Performs cleanup by killing all potentially running mongodb processes and deleting any
     # leftover files. Basically leaves '--dir' empty.
     def __cleanup_previous_runs(self):
-        if (not yes_no('The next step will kill all mongodb processes and wipe out the data path.\n'
-                       + 'Proceed (yes/no)? ')):
-            raise KeyboardInterrupt('User disallowed cleanup of the data path')
+        yes_no('The next step will kill all MongoDB processes and wipe out the data path.')
 
         # Iterate through all processes and kill mongod and mongos
         for process in psutil.process_iter():
@@ -177,11 +175,9 @@ class MlaunchCluster:
             numShards = config.numShards
 
         if (numShards > 10):
-            if (not yes_no('The imported configuration data contains large number of shards (' +
-                           str(numShards) +
-                           '). Proceeding will start large number of mongod processes.\n' +
-                           'Are you sure you want to continue (yes/no)? ')):
-                raise KeyboardInterrupt('Too many shards will be created')
+            yes_no(
+                f'The imported configuration data contains {str(numShards)} shards. Proceeding will start a large number of mongod processes.'
+            )
 
         config.mlaunch_action('init', config.clusterRoot, [
             '--sharded',
