@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 
+from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
 from common import exe_name, yes_no
 from copy import deepcopy
@@ -301,7 +302,9 @@ class MlaunchCluster:
 
                 self._config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
                 self._config.log_line(
-                    db.command(applyOpsCommand, codec_options=CodecOptions(uuid_representation=4)))
+                    db.command(
+                        applyOpsCommand, codec_options=CodecOptions(
+                            uuid_representation=UuidRepresentation.STANDARD)))
 
                 createIndexesCommand = {
                     'createIndexes': collName,

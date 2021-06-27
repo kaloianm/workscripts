@@ -6,7 +6,6 @@ import asyncio
 import bson
 import datetime
 import math
-import motor.motor_asyncio
 import random
 import sys
 import uuid
@@ -24,10 +23,11 @@ if (sys.version_info[0] < 3):
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
-    await cluster.checkIsMongos(warn_only=False)
+    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    await cluster.check_is_mongos(warn_only=False)
 
     shard_key_as_string = True if (await cluster.FCV == '4.0') else False
+
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
     collection_uuid = uuid.uuid4()
@@ -39,6 +39,12 @@ async def main(args):
     print(
         f'Placing {args.num_chunks} chunks over {shardIds} for collection {args.ns} with a shard key of {args.shard_key_type}'
     )
+
+    uuid_shard_key_byte_order = None
+    if args.shard_key_type == 'uuid':
+        uuid_shard_key_byte_order = 'little' if cluster.uuid_representation == UuidRepresentation.JAVA_LEGACY else 'big'
+    if uuid_shard_key_byte_order:
+        print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
 
     print(f'Cleaning up old entries for {args.ns} ...')
     await cluster.configDb.collections.delete_many({'_id': args.ns})
@@ -55,10 +61,7 @@ async def main(args):
     async def safe_create_shard_indexes(shard):
         async with sem:
             print('Creating shard key indexes on shard ' + shard['_id'])
-            conn_parts = shard['host'].split('/', 1)
-            client = shard_connections[shard['_id']] = motor.motor_asyncio.AsyncIOMotorClient(
-                conn_parts[1], replicaset=conn_parts[0],
-                uuidRepresentation=cluster.uuidRepresentation)
+            client = shard_connections[shard['_id']] = await cluster.make_shard_connection(shard)
             db = client[ns['db']]
 
             await db.command({
@@ -90,15 +93,16 @@ async def main(args):
     ###############################################################################################
     # Create collection and chunk entries on the config server
     ###############################################################################################
+
     def make_chunk_id(i):
         if shard_key_as_string:
-            return 'shard-key-' + str(i)
+            return 'shard-key-' + str(i).zfill(8)
         else:
             return ObjectId()
 
     def make_shard_key(i):
-        if args.shard_key_type == 'uuid':
-            return uuid.UUID(bytes=i.to_bytes(16, byteorder='big'))
+        if uuid_shard_key_byte_order:
+            return uuid.UUID(bytes=i.to_bytes(16, byteorder=uuid_shard_key_byte_order))
         else:
             return i
 
@@ -215,7 +219,7 @@ if __name__ == "__main__":
         description='Tool to generated a sharded collection with various degree of fragmentation')
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
-        metavar='uri', type=str, nargs=1)
+        metavar='uri', type=str)
     argsParser.add_argument('--ns', help='The namespace to create', metavar='ns', type=str,
                             required=True)
     argsParser.add_argument('--num_chunks', help='The number of chunks to create',

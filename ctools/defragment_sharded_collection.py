@@ -5,7 +5,6 @@ import argparse
 import asyncio
 import logging
 import math
-import motor.motor_asyncio
 import pymongo
 import sys
 
@@ -72,8 +71,8 @@ class ShardedCollection:
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
-    await cluster.checkIsMongos(warn_only=args.dryrun)
+    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    await cluster.check_is_mongos(warn_only=args.dryrun)
 
     coll = ShardedCollection(cluster, args.ns)
     await coll.init()
@@ -334,7 +333,7 @@ if __name__ == "__main__":
            shard version gets bumped in order to minimise the amount of stalls due to refresh.""")
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
-        metavar='uri', type=str, nargs=1)
+        metavar='uri', type=str)
     argsParser.add_argument(
         '--dryrun', help=
         """Indicates whether the script should perform actual durable changes to the cluster or just

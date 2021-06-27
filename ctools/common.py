@@ -5,7 +5,8 @@ import asyncio
 import motor.motor_asyncio
 import sys
 
-from bson.codec_options import CodecOptions
+from bson.binary import UuidRepresentation
+from pymongo import uri_parser
 
 
 # Function for a Yes/No result based on the answer provided as an argument
@@ -31,11 +32,14 @@ def exe_name(name):
 
 
 class Cluster:
-    def __init__(self, uri, loop, uuidRepresentation):
-        self.uuidRepresentation = uuidRepresentation
+    def __init__(self, uri, loop):
+        uri_options = uri_parser.parse_uri(uri)['options']
+        if 'uuidRepresentation' in uri_options:
+            self.uuid_representation = uri_options['uuidRepresentation']
+        else:
+            self.uuid_representation = None
 
-        self.client = motor.motor_asyncio.AsyncIOMotorClient(
-            uri, uuidRepresentation=self.uuidRepresentation)
+        self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
         self.adminDb = self.client.admin
         self.configDb = self.client.config
@@ -60,7 +64,7 @@ class Cluster:
             map(lambda x: x['_id'], await self.configDb.shards.find({}).sort('_id',
                                                                              1).to_list(None)))
 
-    async def checkIsMongos(self, warn_only=False):
+    async def check_is_mongos(self, warn_only=False):
         print('Server is running at FCV', await self.FCV)
         try:
             ismaster = await self.adminDb.command('ismaster')
@@ -72,12 +76,24 @@ class Cluster:
             else:
                 raise
 
-    async def adminCommand(self, *args, **kwargs):
-        return await self.client.admin.command(*args, **kwargs)
+    async def make_shard_connection(self, shard):
+        conn_parts = shard['host'].split('/', 1)
+        if self.uuid_representation:
+            UUID_REPRESENTATIONS = {
+                UuidRepresentation.UNSPECIFIED: 'unspecified',
+                UuidRepresentation.STANDARD: 'standard',
+                UuidRepresentation.PYTHON_LEGACY: 'pythonLegacy',
+                UuidRepresentation.JAVA_LEGACY: 'javaLegacy',
+                UuidRepresentation.CSHARP_LEGACY: 'csharpLegacy'
+            }
+            return motor.motor_asyncio.AsyncIOMotorClient(
+                conn_parts[1], replicaset=conn_parts[0],
+                uuidRepresentation=UUID_REPRESENTATIONS[self.uuid_representation])
+        else:
+            return motor.motor_asyncio.AsyncIOMotorClient(conn_parts[1], replicaset=conn_parts[0])
 
-    async def runOnEachShard(self, fn):
-        async for shard in cluster.configDb.shards.find({}):
-            connParts = shard['host'].split('/', 1)
-            conn = motor.motor_asyncio.AsyncIOMotorClient(shardConnParts[1],
-                                                          replicaset=shardConnParts[0])
-            fn(shard['_id'], conn)
+    async def on_each_shard(self, fn):
+        tasks = []
+        async for shard in self.configDb.shards.find({}):
+            tasks.append(asyncio.ensure_future(fn(shard['_id'], self.make_shard_connection(shard))))
+        await asyncio.gather(*tasks)
