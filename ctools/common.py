@@ -76,7 +76,7 @@ class Cluster:
             else:
                 raise
 
-    async def make_shard_connection(self, shard):
+    async def make_direct_shard_connection(self, shard):
         conn_parts = shard['host'].split('/', 1)
         if self.uuid_representation:
             UUID_REPRESENTATIONS = {
@@ -95,5 +95,12 @@ class Cluster:
     async def on_each_shard(self, fn):
         tasks = []
         async for shard in self.configDb.shards.find({}):
-            tasks.append(asyncio.ensure_future(fn(shard['_id'], self.make_shard_connection(shard))))
+            tasks.append(
+                asyncio.ensure_future(fn(shard['_id'], self.make_direct_shard_connection(shard))))
         await asyncio.gather(*tasks)
+
+    async def make_direct_config_server_connection(self):
+        return await self.make_direct_shard_connection({
+            '_id': 'config',
+            'host': await self.configsvrConnectionString
+        })

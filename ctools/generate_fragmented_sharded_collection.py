@@ -60,7 +60,8 @@ async def main(args):
     async def safe_create_shard_indexes(shard):
         async with sem:
             print('Creating shard key indexes on shard ' + shard['_id'])
-            client = shard_connections[shard['_id']] = await cluster.make_shard_connection(shard)
+            client = shard_connections[shard['_id']] = await cluster.make_direct_shard_connection(
+                shard)
             db = client[ns['db']]
 
             await db.command({

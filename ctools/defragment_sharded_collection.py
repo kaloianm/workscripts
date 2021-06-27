@@ -9,6 +9,7 @@ import pymongo
 import sys
 
 from common import Cluster, yes_no
+from copy import deepcopy
 from pymongo import errors as pymongo_errors
 from tqdm import tqdm
 
@@ -22,10 +23,13 @@ class ShardedCollection:
         self.cluster = cluster
         self.name = ns
         self.ns = {'db': self.name.split('.', 1)[0], 'coll': self.name.split('.', 1)[1]}
+        self._direct_config_connection = None
 
     async def init(self):
-        self.shard_key_pattern = (await self.cluster.configDb.collections.find_one(
-            {'_id': self.name}))['key']
+        collection_entry = await self.cluster.configDb.collections.find_one({'_id': self.name})
+
+        self.uuid = collection_entry['uuid']
+        self.shard_key_pattern = collection_entry['key']
 
     async def data_size_kb_from_shard(self, range):
         data_size_response = await self.cluster.client[self.ns['db']].command({
@@ -39,11 +43,59 @@ class ShardedCollection:
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
-    async def merge_chunks(self, range):
-        await self.cluster.adminDb.command({
-            'mergeChunks': self.name,
-            'bounds': range
-        }, codec_options=self.cluster.client.codec_options)
+    async def merge_chunks(self, consecutive_chunks, unsafe_mode):
+        assert (len(consecutive_chunks) > 1)
+
+        if unsafe_mode == 'no':
+            await self.cluster.adminDb.command({
+                'mergeChunks': self.name,
+                'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
+            }, codec_options=self.cluster.client.codec_options)
+        elif unsafe_mode == 'unsafe_direct_commit_against_configsvr':
+            if not self._direct_config_connection:
+                self._direct_config_connection = await self.cluster.make_direct_config_server_connection(
+                )
+
+            # TODO: Implement the unsafe_direct_commit_against_configsvr option
+            raise NotImplementedError(
+                'The unsafe_direct_commit_against_configsvr option is not yet implemented')
+        elif unsafe_mode == 'super_unsafe_direct_apply_ops_aginst_configsvr':
+            first_chunk = deepcopy(consecutive_chunks[0])
+            first_chunk['max'] = consecutive_chunks[-1]['max']
+            # TODO: Bump first_chunk['version'] to the collection version
+            first_chunk.pop('history', None)
+
+            first_chunk_update = [{
+                'op': 'u',
+                'b': False,  # No upsert
+                'ns': 'config.chunks',
+                'o': first_chunk,
+                'o2': {
+                    '_id': first_chunk['_id']
+                },
+            }]
+            remaining_chunks_delete = list(
+                map(lambda x: {
+                    'op': 'd',
+                    'ns': 'config.chunks',
+                    'o': {
+                        '_id': x['_id']
+                    },
+                }, consecutive_chunks[1:]))
+            precondition = [
+                # TODO: Include the precondition
+            ]
+            apply_ops_cmd = {
+                'applyOps': first_chunk_update + remaining_chunks_delete,
+                'preCondition': precondition,
+            }
+
+            if not self._direct_config_connection:
+                self._direct_config_connection = await self.cluster.make_direct_config_server_connection(
+                )
+
+            await self._direct_config_connection.admin.command(
+                apply_ops_cmd, codec_options=self.cluster.client.codec_options)
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write_kb):
         try:
@@ -244,8 +296,8 @@ async def main(args):
                 estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
 
                 if not args.dryrun and not has_more and not 'defrag_collection_est_size' in consecutive_chunks[
-                        -1]:
-                    chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
+                        0]:
+                    chunk_range = [consecutive_chunks[0]['min'], consecutive_chunks[0]['max']]
                     data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
 
@@ -257,8 +309,8 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_kb
             elif len(consecutive_chunks) == 1:
-                if not args.dryrun and not 'defrag_collection_est_size' in consecutive_chunks[-1]:
-                    chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
+                if not args.dryrun and not 'defrag_collection_est_size' in consecutive_chunks[0]:
+                    chunk_range = [consecutive_chunks[0]['min'], consecutive_chunks[0]['max']]
                     data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
 
@@ -266,8 +318,8 @@ async def main(args):
                 estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
 
                 if not args.dryrun and not has_more and not 'defrag_collection_est_size' in consecutive_chunks[
-                        -1]:
-                    chunk_range = [consecutive_chunks[-1]['min'], consecutive_chunks[-1]['max']]
+                        0]:
+                    chunk_range = [consecutive_chunks[0]['min'], consecutive_chunks[0]['max']]
                     data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
                     await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
 
@@ -313,7 +365,8 @@ async def main(args):
                         if shard_is_at_collection_version else sem_at_less_than_collection_version):
                 if not args.dryrun:
                     try:
-                        await coll.merge_chunks(merge_bounds)
+                        await coll.merge_chunks(consecutive_chunks,
+                                                args.phase_1_perform_unsafe_merge)
                         await coll.try_write_chunk_size(merge_bounds, shard,
                                                         actual_size_of_consecutive_chunks)
                     except pymongo_errors.OperationFailure as ex:
@@ -403,6 +456,14 @@ if __name__ == "__main__":
            that it returned phase_1_estimated_chunk_size_mb).
            """, metavar='phase_1_estimated_chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
         type=lambda x: int(x) * 1024, default=64 * 1024 * 0.40)
+    argsParser.add_argument(
+        '--phase_1_perform_unsafe_merge',
+        help="""Applies only to Phase 1 and instructs the script to directly write the merged chunks
+           to the config.chunks collection rather than going through the `mergeChunks` command.""",
+        metavar='phase_1_perform_unsafe_merge', type=str, default='no', choices=[
+            'no', 'unsafe_direct_commit_against_configsvr',
+            'super_unsafe_direct_apply_ops_aginst_configsvr'
+        ])
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
