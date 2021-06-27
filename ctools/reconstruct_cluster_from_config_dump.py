@@ -6,6 +6,7 @@ import os
 import psutil
 import pymongo
 import shutil
+import socket
 import subprocess
 import sys
 
@@ -93,7 +94,13 @@ class ToolConfiguration:
             raise TypeError('args must be of type list.')
 
         mlaunchPrefix = [
-            'mlaunch', action, '--binarypath', self.binarypath, '--dir', dir, '--bind_ip_all'
+            'mlaunch',
+            action,
+            '--binarypath',
+            self.binarypath,
+            '--dir',
+            dir,
+            '--bind_ip_all',
         ]
 
         if (set(mlaunchPrefix) & set(args)):
@@ -182,8 +189,21 @@ class MlaunchCluster:
 
         config.mlaunch_action('init', config.clusterRoot, [
             '--sharded',
-            str(numShards), '--replicaset', '--nodes', '1', '--csrs', '--mongos', '1', '--port',
-            str(config.clusterStartingPort), '--wiredTigerCacheSizeGB', '0.25', '--oplogSize', '50'
+            str(numShards),
+            '--replicaset',
+            '--nodes',
+            '1',
+            '--csrs',
+            '--mongos',
+            '1',
+            '--port',
+            str(config.clusterStartingPort),
+            '--wiredTigerCacheSizeGB',
+            '0.25',
+            '--oplogSize',
+            '50',
+            '--hostname',
+            socket.gethostname(),
         ])
 
         # Set the correct FCV on the cluster being reconstructed
