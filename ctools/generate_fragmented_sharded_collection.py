@@ -25,8 +25,9 @@ if (sys.version_info[0] < 3):
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
-    await cluster.checkIsMongos()
+    await cluster.checkIsMongos(warn_only=False)
 
+    shard_key_as_string = True if (await cluster.FCV == '4.0') else False
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
     collection_uuid = uuid.uuid4()
@@ -87,6 +88,12 @@ async def main(args):
     ###############################################################################################
     # Create collection and chunk entries on the config server
     ###############################################################################################
+    def make_chunk_id(i):
+        if shard_key_as_string:
+            return 'shard-key-' + str(i)
+        else:
+            return ObjectId()
+
     def make_shard_key(i):
         return uuid.UUID(int=i)
 
@@ -97,7 +104,7 @@ async def main(args):
         ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
 
         obj = {
-            '_id': ObjectId(),
+            '_id': make_chunk_id(i),
             'ns': args.ns,
             'lastmodEpoch': epoch,
             'lastmod': bson.timestamp.Timestamp(i + 1, 0),

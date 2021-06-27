@@ -43,16 +43,34 @@ class Cluster:
     class NotMongosException(Exception):
         pass
 
-    async def checkIsMongos(self):
-        ismaster = await self.adminDb.command('ismaster')
-        if 'msg' not in ismaster or ismaster['msg'] != 'isdbgrid':
-            raise Cluster.NotMongosException('Not connected to a mongos')
+    @property
+    async def configsvrConnectionString(self):
+        serverStatus = await self.adminDb.command({'serverStatus': 1, 'sharding': 1})
+        return serverStatus['sharding']['configsvrConnectionString']
+
+    @property
+    async def FCV(self):
+        fcvDocument = await self.adminDb['system.version'].find_one(
+            {'_id': 'featureCompatibilityVersion'})
+        return fcvDocument['version']
 
     @property
     async def shardIds(self):
         return list(
             map(lambda x: x['_id'], await self.configDb.shards.find({}).sort('_id',
                                                                              1).to_list(None)))
+
+    async def checkIsMongos(self, warn_only=False):
+        print('Server is running at FCV', await self.FCV)
+        try:
+            ismaster = await self.adminDb.command('ismaster')
+            if 'msg' not in ismaster or ismaster['msg'] != 'isdbgrid':
+                raise Cluster.NotMongosException('Not connected to a mongos')
+        except Cluster.NotMongosException:
+            if warn_only:
+                print('WARNING: Not connected to a MongoS')
+            else:
+                raise
 
     async def adminCommand(self, *args, **kwargs):
         return await self.client.admin.command(*args, **kwargs)

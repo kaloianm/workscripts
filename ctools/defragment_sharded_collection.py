@@ -66,13 +66,7 @@ class ShardedCollection:
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop(), uuidRepresentation='standard')
-    try:
-        await cluster.checkIsMongos()
-    except Cluster.NotMongosException:
-        if args.dryrun:
-            print('WARNING: Not connected to a MongoS')
-        else:
-            raise
+    await cluster.checkIsMongos(warn_only=args.dryrun)
 
     coll = ShardedCollection(cluster, args.ns)
     await coll.init()
