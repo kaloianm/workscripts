@@ -432,19 +432,25 @@ async def main(args):
         if args.dryrun:
             return
 
-        # TODO abort if source shard has too few chunks already
-
+        num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name, 'shard': shard})
         async for c in cluster.configDb.chunks.find({'ns': coll.name, 'shard': shard}):
             progress.update()
 
-            if await get_chunk_size(c) > target_chunk_size_kb:
+            # Abort if we have too few chunks already
+            if num_chunks + 1 < idealNumChunks:
+                return
+
+            center_size = await get_chunk_size(c)
+
+            if center_size > target_chunk_size_kb:
                 continue
 
             left_chunk = await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']})
 
             if not (left_chunk is None):
-                new_size = await get_chunk_size(left_chunk) + await get_chunk_size(c)
-                if new_size < target_chunk_size_kb * 1.25:
+                left_size = await get_chunk_size(left_chunk)
+                new_size = left_size + center_size
+                if new_size < target_chunk_size_kb * 2 and center_size <= left_size:
                     # TODO abort if target shard has too much data already
 
                     merge_bounds = [left_chunk['min'], c['max']]
@@ -453,12 +459,16 @@ async def main(args):
                     await coll.move_chunk(c, left_chunk['shard'])
                     await coll.merge_chunks([left_chunk, c], args.phase_1_perform_unsafe_merge)
                     await coll.try_write_chunk_size(merge_bounds, left_chunk['shard'], new_size)
+
+                    num_chunks -= 1
                     continue
             
             right_chunk = await cluster.configDb.chunks.find_one({'ns':coll.name, 'min': c['max']})
-            if not (left_chunk is None):
-                new_size = await get_chunk_size(right_chunk) + await get_chunk_size(c)
-                if new_size  < target_chunk_size_kb * 1.25:
+
+            if not (right_chunk is None):
+                right_size = await get_chunk_size(left_chunk)
+                new_size = right_size + center_size
+                if new_size < target_chunk_size_kb * 2 and center_size <= right_size:
                     # TODO abort if target shard has too much data already
 
                     merge_bounds = [c['min'], right_chunk['max']]
@@ -467,6 +477,9 @@ async def main(args):
                     await coll.move_chunk(c, right_chunk['shard'])
                     await coll.merge_chunks([c, right_chunk], args.phase_1_perform_unsafe_merge)
                     await coll.try_write_chunk_size(merge_bounds, right_chunk['shard'], new_size)
+
+                    num_chunks -= 1
+
                     continue
 
     # Update chunk contents to latest version
