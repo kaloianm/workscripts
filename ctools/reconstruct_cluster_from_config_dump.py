@@ -9,6 +9,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import random
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
@@ -31,6 +32,7 @@ class ToolConfiguration:
         self.clusterRoot = os.path.join(args.dir, 'cluster')
         self.configdump = args.configdumpdir[0]
         self.numShards = args.numshards
+        self.genData = args.gen_data
 
         self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
 
@@ -342,6 +344,46 @@ class MlaunchCluster:
     def restartCluster(self):
         self._config.mlaunch_action('restart', self._config.clusterRoot)
 
+    def generateData(self):
+        if not self._config.genData:
+            return            
+
+        conn = MongoClient('localhost', self._config.clusterStartingPort)
+        for collection in self.configDb.collections.find({'dropped': False}):
+            if 'key' not in collection:
+                continue
+
+            collectionParts = collection['_id'].split('.', 1)
+            dbName = collectionParts[0]
+            collName = collectionParts[1]
+            coll = conn[dbName][collName]
+
+            if dbName == 'config':
+                continue
+
+            def gen_doc(name, sub, res_dict):
+                if isinstance(sub, dict):
+                    for k in sub:
+                        sub_res = {}
+                        gen_doc(k, sub[k], sub_res)
+                        res_dict[name] = sub_res
+                else:
+                    res_dict[name] = int(random.uniform(-1024*1024, 128*1024*1024))
+
+            print('Generating data for ', collection['_id'])
+
+            batch = []
+            for x in range(1024 * 1024):
+                doc = {}
+                for k in collection['key']:
+                    gen_doc(k, collection['key'][k], doc)
+                batch.append(doc)
+
+                if x % (32 * 1024) == 0:
+                    coll.insert_many(batch)
+                    batch = []
+                    print('Generated ', x, " documents")
+
 
 # Main entrypoint for the application
 def main():
@@ -366,6 +408,11 @@ def main():
         '--dir', help='Directory in which to place the data files (will create subdirectories)',
         metavar='dir', type=str, required=True)
 
+    argsParser.add_argument(
+        '--gen_data',
+        help="""Generate random data in the collection after reconstructing the cluster""",
+        action='store_true')
+
     # Positional arguments
     argsParser.add_argument('configdumpdir',
                             help='Directory containing a dump of the cluster config database',
@@ -389,6 +436,8 @@ def main():
 
     # Restart the cluster so it picks up the new configuration cleanly
     mlaunch.restartCluster()
+
+    mlaunch.generateData()
 
 
 if __name__ == "__main__":
