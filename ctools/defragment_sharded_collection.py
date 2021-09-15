@@ -500,15 +500,18 @@ async def main(args):
         # replace list of chunks for phase 2
         shard_entry['chunks'] = remain_chunks
 
-    
-    print('Phase 1: Merging consecutive chunks on shards')
-    
-    with tqdm(total=num_chunks, unit=' chunks') as progress:
-        tasks = []
-        for s in shard_to_chunks:
-            tasks.append(
-                asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
-        await asyncio.gather(*tasks)
+    # Conditionally execute phase 1
+    if args.exec_phase == 'phase1' or args.exec_phase == 'all':
+        print('Phase 1: Merging consecutive chunks on shards')
+        
+        with tqdm(total=num_chunks, unit=' chunks') as progress:
+            tasks = []
+            for s in shard_to_chunks:
+                tasks.append(
+                    asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
+            await asyncio.gather(*tasks)
+    else:
+        print("Skipping Phase I")
 
     ###############################################################################################
     # PHASE 2 (Move-and-merge): The purpose of this phase is to move chunks, which are not
@@ -744,6 +747,11 @@ async def main(args):
         print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
                   collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
 
+        # Only conditionally execute phase2, break here to get above log lines
+        if args.exec_phase != 'phase2' and args.exec_phase == 'all':
+            print("Skipping Phase II")
+            break
+
         moved_data_kb = 0
         with tqdm(total=num_small_chunks, unit=' chunks') as progress:
             tasks = []
@@ -852,6 +860,12 @@ if __name__ == "__main__":
         metavar='phase_1_perform_unsafe_merge', type=str, default='no', choices=[
             'no', 'unsafe_direct_commit_against_configsvr',
             'super_unsafe_direct_apply_ops_aginst_configsvr'
+        ])
+    argsParser.add_argument(
+        '--phases',
+        help="""Which.""",
+        metavar='phase', dest="exec_phase", type=str, default='all', choices=[
+            'all', 'phase1', 'phase2'
         ])
 
     args = argsParser.parse_args()
