@@ -525,12 +525,18 @@ async def main(args):
     chunks_id_index = {}
     chunks_min_index = {}
     chunks_max_index = {}
+    num_small_chunks = 0
     for s in shard_to_chunks:
         for c in shard_to_chunks[s]['chunks']:
             assert(chunks_id_index.get(c['_id']) == None)
             chunks_id_index[c['_id']] = c
             chunks_min_index[frozenset(c['min'].items())] = c
             chunks_max_index[frozenset(c['max'].items())] = c
+        if 'defrag_collection_est_size' in c:
+            if c['defrag_collection_est_size'] < target_chunk_size_kb * args.small_chunk_frac:
+                num_small_chunks += 1
+        else:
+            print("need to perform a chunk size estimation")
 
     # might be called with a chunk document without size estimation
     async def get_chunk_size(ch):
@@ -541,7 +547,6 @@ async def main(args):
         if 'defrag_collection_est_size' in local:
             return local['defrag_collection_est_size']
 
-        print("need to perform a chunk size estimation")
         chunk_range = [ch['min'], ch['max']]
         data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
         chunks_id_index[ch['_id']]['defrag_collection_est_size'] = data_size_kb
@@ -648,6 +653,7 @@ async def main(args):
                     total_shard_size[target_shard] += center_size_kb
                     total_moved_data_kb += center_size_kb
                     num_chunks -= 1
+                    num_small_chunks -= 1
                     continue
             
             if right_chunk is not None:
@@ -678,6 +684,7 @@ async def main(args):
                     total_shard_size[target_shard] += center_size_kb
                     total_moved_data_kb += center_size_kb
                     num_chunks -= 1
+                    num_small_chunks -= 1
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
@@ -731,14 +738,14 @@ async def main(args):
 
     # Move and merge small chunks. The way this is written it might need to run multiple times
     max_iterations = 25
-    num_chunks = len(chunks_id_index)
     total_moved_data_kb = 0
     while max_iterations > 0:
         max_iterations -= 1
-        print(f"""Number of chunks is {num_chunks} the ideal number of chunks based on collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
+        print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
+                  collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
 
         moved_data_kb = 0
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
+        with tqdm(total=num_small_chunks, unit=' chunks') as progress:
             tasks = []
             # TODO balancer logic prevents us from donating / receiving more than once per shard
             for s in shard_to_chunks:
@@ -774,8 +781,6 @@ async def main(args):
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
 
-    num_chunks = len(chunks_id_index)
-
     print("\nReached convergence: \n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
@@ -788,7 +793,7 @@ async def main(args):
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
     print("\n")
-    print(f"""Number of chunks is {num_chunks} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
+    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
     print(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
     print(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
 
