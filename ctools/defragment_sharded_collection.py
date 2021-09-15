@@ -306,6 +306,12 @@ async def main(args):
         consecutive_chunks = []
         num_lock_busy_errors_encountered = 0
 
+        def get_chunk_size(ch):
+            if 'defrag_collection_est_size' in ch:
+                return ch['defrag_collection_est_size']
+            else:
+                return args.phase_1_estimated_chunk_size_kb
+
         def lookahead(iterable):
             """Pass through all values from the given iterable, augmented by the
             information if there are more values to come after the current one
@@ -328,7 +334,7 @@ async def main(args):
 
             if len(consecutive_chunks) == 0:
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
+                estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
                 if not has_more:
                     remain_chunks.append(c)
@@ -346,7 +352,7 @@ async def main(args):
 
             if consecutive_chunks[-1]['max'] == c['min']:
                 consecutive_chunks.append(c)
-                estimated_size_of_consecutive_chunks += args.phase_1_estimated_chunk_size_kb
+                estimated_size_of_consecutive_chunks += get_chunk_size(c)
             elif len(consecutive_chunks) == 1:
                 if 'defrag_collection_est_size' not in consecutive_chunks[0]:
                     if args.dryrun:
@@ -360,7 +366,7 @@ async def main(args):
                 remain_chunks.append(consecutive_chunks[0])
 
                 consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
+                estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
                 if not has_more:
                     remain_chunks.append(c)
@@ -404,6 +410,22 @@ async def main(args):
                 # consecutive chunks
                 estimated_size_of_consecutive_chunks = actual_size_of_consecutive_chunks
                 continue
+            elif actual_size_of_consecutive_chunks >= target_chunk_size_kb * (0.75 * 2):
+                # Probably happens on multiple executions of Phase I
+                while actual_size_of_consecutive_chunks > 0.75:
+                    if get_chunk_size(consecutive_chunks[0]) > target_chunk_size_kb * 0.75:
+                        big_c = consecutive_chunks.pop(0)
+                        actual_size_of_consecutive_chunks -= get_chunk_size(big_c)
+                        remain_chunks.append(big_c)
+                    else:
+                        break
+                # if just one chunk remains skip the merge
+                if len(consecutive_chunks == 1):
+                    remain_chunks.append(consecutive_chunks[0])
+                    consecutive_chunks = []
+                    estimated_size_of_consecutive_chunks = 0
+                    break
+
             elif actual_size_of_consecutive_chunks > target_chunk_size_kb * 1.10:
                 # TODO: If the actual range size is 10% more than the target size, use `splitVector`
                 # to determine a better merge/split sequence so as not to generate huge chunks which
