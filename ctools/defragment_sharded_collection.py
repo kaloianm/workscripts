@@ -556,6 +556,10 @@ async def main(args):
 
         return data_size_kb
 
+    async def exec_throttle():
+        if args.phase_2_throttling_secs > 0:
+            await asyncio.sleep(args.phase_2_throttling_secs)
+
     async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
         total_moved_data_kb = 0
 
@@ -657,6 +661,7 @@ async def main(args):
                     total_moved_data_kb += center_size_kb
                     num_chunks -= 1
                     num_small_chunks -= 1
+                    await exec_throttle()
                     continue
             
             if right_chunk is not None:
@@ -688,6 +693,7 @@ async def main(args):
                     total_moved_data_kb += center_size_kb
                     num_chunks -= 1
                     num_small_chunks -= 1
+                    await exec_throttle()
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
@@ -863,10 +869,15 @@ if __name__ == "__main__":
         ])
     argsParser.add_argument(
         '--phases',
-        help="""Which.""",
+        help="""Which phases are going to be executed.""",
         metavar='phase', dest="exec_phase", type=str, default='all', choices=[
             'all', 'phase1', 'phase2'
         ])
+    argsParser.add_argument(
+        '--phase_2_throttling',
+        help="""Wait time in seconds between subsequent migrations.""",
+        metavar='seconds', dest="phase_2_throttling_secs", type=int, default=0)
+
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
