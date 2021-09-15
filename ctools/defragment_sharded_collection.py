@@ -65,6 +65,27 @@ class ShardedCollection:
                 'bounds': [chunk['min'], chunk['max']]
             }, codec_options=self.cluster.client.codec_options)
 
+    async def split_chunk(self, chunk, maxChunkSize_kb):
+        shard_entry = await self.cluster.configDb.collections.find_one({'_id': chunk.shard})
+        if shard_entry is None:
+            raise Exception("cannot resolve shard {chunk.shard}")
+            
+        conn = await self.cluster.make_direct_shard_connection(shard_entry)
+        res = await conn.admin.command({
+                'splitVector': self.name,
+                'keyPattern': self.shard_key_pattern,
+                'maxChunkSizeBytes': maxChunkSize_kb * 1024,
+                'min': chunk['min'], 
+                'max': chunk['max']
+            }, codec_options=self.cluster.client.codec_options)
+
+        await self.cluster.adminDb.command({
+                'splitChunk': self.name,
+                'bounds': [chunk['min'], chunk['max']],
+                'splitKeys': res['splitKeys']
+            }, codec_options=self.cluster.client.codec_options)
+
+        conn.close()        
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
@@ -665,11 +686,16 @@ async def main(args):
         if args.dryrun:
             return
 
+        # TODO split needs to add the newly created chunks to the local chunks 
+        return
+
         async for c in cluster.configDb.chunks.find({'ns': coll.name, 'shard': shard}):
             progress.update()
 
             local_c = chunks_id_index[c['_id']]
-            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
+            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.6:
+                await coll.split_chunk(local_c, target_chunk_size_kb)
+            elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
                 await coll.split_chunk_middle(local_c)
 
     num_shards = await cluster.configDb.shards.count_documents({})
