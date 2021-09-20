@@ -768,7 +768,7 @@ async def main(args):
                   collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
 
         # Only conditionally execute phase2, break here to get above log lines
-        if args.exec_phase != 'phase2' and args.exec_phase == 'all':
+        if args.exec_phase != 'phase2' and args.exec_phase != 'all':
             print("Skipping Phase II")
             break
 
