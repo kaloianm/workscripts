@@ -8,6 +8,7 @@ import math
 from motor.frameworks.asyncio import is_event_loop
 import pymongo
 import sys
+import time
 
 from common import Cluster, yes_no
 from copy import deepcopy
@@ -43,7 +44,6 @@ class ShardedCollection:
         pipeline = [{"$collStats": {"storageStats": {}}},
                     {"$match": {"shard": shard}}]
         list = await self.cluster.client[self.ns['db']][self.ns['coll']].aggregate(pipeline).to_list(1)
-        print(list)
         size = list[0]['storageStats']['size']
         return math.ceil(max(float(size), 1024.0) / 1024.0)
 
@@ -79,7 +79,7 @@ class ShardedCollection:
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
 
-        if len(res['splitKeys']) > 1:
+        if len(res['splitKeys']) > 0:
             await self.cluster.adminDb.command({
                     'splitChunk': self.name,
                     'bounds': [chunk['min'], chunk['max']],
@@ -182,7 +182,7 @@ async def main(args):
     await coll.init()
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
-    print(
+    logging.info(
         f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks.
             For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
     )
@@ -222,8 +222,8 @@ async def main(args):
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
 
     if args.dryrun:
-        print(f"""Performing a dry run with target chunk size of {target_chunk_size_kb} KB.
-                  No actual modifications to the cluster will occur.""")
+        logging.info(f"""Performing a dry run with target chunk size of {target_chunk_size_kb} KB.
+                        No actual modifications to the cluster will occur.""")
     else:
         yes_no(
             f'The next steps will perform an actual merge with target chunk size of {target_chunk_size_kb} KB.'
@@ -231,7 +231,7 @@ async def main(args):
         if args.phase_1_reset_progress:
             yes_no(f'Previous defragmentation progress will be reset.')
             num_cleared = await coll.clear_chunk_size_estimations()
-            print(f'Cleared {num_cleared} already processed chunks.')
+            logging.info(f'Cleared {num_cleared} already processed chunks.')
 
     ###############################################################################################
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
@@ -240,7 +240,7 @@ async def main(args):
 
     async def load_chunks():
         global shard_to_chunks, collectionVersion
-        print('Preperation: Loading chunks into memory')
+        logging.info('Preperation: Loading chunks into memory')
         shard_to_chunks = {}
         collectionVersion = None
         with tqdm(total=num_chunks, unit=' chunks') as progress:
@@ -260,7 +260,7 @@ async def main(args):
     await load_chunks()
     assert (len(shard_to_chunks) > 1)
 
-    print(
+    logging.info(
         f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
     )
 
@@ -509,7 +509,7 @@ async def main(args):
 
     # Conditionally execute phase 1
     if args.exec_phase == 'phase1' or args.exec_phase == 'all':
-        print('Phase 1: Merging consecutive chunks on shards')
+        logging.info('Phase 1: Merging consecutive chunks on shards')
         
         with tqdm(total=num_chunks, unit=' chunks') as progress:
             tasks = []
@@ -518,7 +518,7 @@ async def main(args):
                     asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
             await asyncio.gather(*tasks)
     else:
-        print("Skipping Phase I")
+        logging.info("Skipping Phase I")
 
     ###############################################################################################
     # PHASE 2 (Move-and-merge): The purpose of this phase is to move chunks, which are not
@@ -548,7 +548,7 @@ async def main(args):
                     if c['defrag_collection_est_size'] < target_chunk_size_kb * args.small_chunk_frac:
                         num_small_chunks += 1
 #                else:
-#                    print("need to perform a chunk size estimation")
+#                    logging.warning("need to perform a chunk size estimation")
 
     build_chunk_index()
 
@@ -567,10 +567,6 @@ async def main(args):
 
         return data_size_kb
 
-    async def exec_throttle():
-        if args.phase_2_throttle_secs > 0:
-            await asyncio.sleep(args.phase_2_throttle_secs)
-
     async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
         global num_small_chunks
         total_moved_data_kb = 0
@@ -580,16 +576,21 @@ async def main(args):
         if len(shard_chunks) == 0:
             return 0
 
-        async def get_chunk_imbalance_or_0(target_chunk):
-            if (target_chunk is None) or target_chunk['shard'] == shard:
-                return 0
+        begin_time = time.monotonic()
+        async def exec_throttle():
+            duration = time.monotonic() - begin_time
+            if duration < args.min_migration_period:
+                await asyncio.sleep(args.min_migration_period - duration)
 
-            size = await get_chunk_size(target_chunk)
-            size_remain = (size % target_chunk_size_kb)
-            if size_remain == 0:
+        async def get_remain_chunk_imbalance(center, target_chunk):
+            if (target_chunk is None) or target_chunk['shard'] == shard:
+                return sys.maxsize
+
+            combined = await get_chunk_size(center) + await get_chunk_size(target_chunk)
+            remain = (combined % target_chunk_size_kb)
+            if remain == 0:
                 return 0
-            else:
-                return abs(size_remain - target_chunk_size_kb)
+            return min(combined, abs(remain - target_chunk_size_kb))
 
         num_chunks = len(shard_chunks)
 
@@ -651,7 +652,7 @@ async def main(args):
                 is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
                 # only move a smaller chunk unless shard is bigger
                 if (center_size_kb <= left_size or is_overweight) and (
-                    await get_chunk_imbalance_or_0(left_chunk)) >= (await get_chunk_imbalance_or_0(right_chunk)):
+                    await get_remain_chunk_imbalance(c, left_chunk)) < (await get_remain_chunk_imbalance(c, right_chunk)):
 
                     if not args.dryrun:
                         await coll.move_chunk(c, target_shard)
@@ -680,7 +681,7 @@ async def main(args):
                 target_shard = right_chunk['shard']
                 right_size = await get_chunk_size(right_chunk)
                 new_size = right_size + center_size_kb
-                is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * 1.2
+                is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
                 if center_size_kb <= right_size or is_overweight:
                     # TODO abort if target shard has too much data already
 
@@ -750,26 +751,26 @@ async def main(args):
     ideal_num_chunks = max(math.ceil(coll_size_kb / target_chunk_size_kb), num_shards)
     ideal_num_chunks_per_shard = min(math.ceil(ideal_num_chunks / num_shards), 1)
 
-    print('Phase 2: Moving and merging small chunks')
-    print(f'Collection size {coll_size_kb} kb. Avg chunk size Phase I {avg_chunk_size_phase_1} kb')
+    logging.info('Phase 2: Moving and merging small chunks')
+    logging.info(f'Collection size {coll_size_kb} kb. Avg chunk size Phase I {avg_chunk_size_phase_1} kb')
 
     orig_shard_sizes = total_shard_size.copy()
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
-        print(f"Number chunks on shard {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb")
+        logging.info(f"Number chunks on shard {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb")
 
     # Move and merge small chunks. The way this is written it might need to run multiple times
     max_iterations = 25
     total_moved_data_kb = 0
     while max_iterations > 0:
         max_iterations -= 1
-        print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
-                  collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
+        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
+                         collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
 
         # Only conditionally execute phase2, break here to get above log lines
         if args.exec_phase != 'phase2' and args.exec_phase != 'all':
-            print("Skipping Phase II")
+            logging.info("Skipping Phase II")
             break
 
         moved_data_kb = 0
@@ -799,7 +800,7 @@ async def main(args):
         if num_chunks < math.ceil(ideal_num_chunks * 1.25) or moved_data_kb == 0:
             break
 
-        print(f'Phase 2.2: Splitting oversized chunks, moved {moved_data_kb} kb of data')
+        logging.info(f'Phase 2.2: Splitting oversized chunks, moved {moved_data_kb} kb of data')
 
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks') as progress:
@@ -813,21 +814,21 @@ async def main(args):
         await load_chunks()
         build_chunk_index()
 
-    print("\nReached convergence: \n")
+    logging.info("\nReached convergence: \n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
-        print(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
-              f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
+        logging.info(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
+                     f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
     
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
-    print("\n")
-    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
-    print(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
-    print(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
+    logging.info("\n")
+    logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
+    logging.info(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
+    logging.info(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
@@ -887,15 +888,17 @@ if __name__ == "__main__":
         ])
     argsParser.add_argument(
         '--phases',
-        help="""Which phases are going to be executed.""",
+        help="""Which phase of the defragmentation algorithm to execute.""",
         metavar='phase', dest="exec_phase", type=str, default='all', choices=[
             'all', 'phase1', 'phase2'
         ])
     argsParser.add_argument(
-        '--phase_2_throttle',
-        help="""Wait time in seconds between subsequent migrations.""",
-        metavar='seconds', dest="phase_2_throttle_secs", type=int, default=0)
+        '--phase_2_min_migration_period',
+        help="""Minimum time in seconds between the start of subsequent migrations.""",
+        metavar='seconds', dest="min_migration_period", type=int, default=0)
 
+    list = " ".join(sys.argv[1:])
+    logging.info(f"Starting with parameters: {list}")
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
