@@ -243,7 +243,7 @@ async def main(args):
         logging.info('Preperation: Loading chunks into memory')
         shard_to_chunks = {}
         collectionVersion = None
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
+        with tqdm(total=num_chunks, unit=' chunk') as progress:
             async for c in cluster.configDb.chunks.find({'ns': coll.name}, sort=[('min',
                                                                                 pymongo.ASCENDING)]):
                 shard_id = c['shard']
@@ -511,7 +511,7 @@ async def main(args):
     if args.exec_phase == 'phase1' or args.exec_phase == 'all':
         logging.info('Phase 1: Merging consecutive chunks on shards')
         
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
+        with tqdm(total=num_chunks, unit=' chunk') as progress:
             tasks = []
             for s in shard_to_chunks:
                 tasks.append(
