@@ -183,8 +183,8 @@ async def main(args):
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     logging.info(
-        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks.
-            For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
+        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks. """
+        f"""For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
     )
 
     ###############################################################################################
@@ -765,8 +765,8 @@ async def main(args):
     total_moved_data_kb = 0
     while max_iterations > 0:
         max_iterations -= 1
-        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
-                         collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
+        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on"""
+                     f""" collection size is {ideal_num_chunks}  ({ideal_num_chunks_per_shard} per shard)""")
 
         # Only conditionally execute phase2, break here to get above log lines
         if args.exec_phase != 'phase2' and args.exec_phase != 'all':
