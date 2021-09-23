@@ -814,21 +814,21 @@ async def main(args):
         await load_chunks()
         build_chunk_index()
 
-    logging.info("\nReached convergence: \n")
+    print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
-        logging.info(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
-                     f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
+        print(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
+              f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
     
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
-    logging.info("\n")
-    logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
-    logging.info(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
-    logging.info(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
+    print("\n");
+    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
+    print(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
+    print(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
