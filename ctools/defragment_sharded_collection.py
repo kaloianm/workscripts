@@ -898,7 +898,9 @@ if __name__ == "__main__":
         metavar='seconds', dest="min_migration_period", type=int, default=0)
 
     list = " ".join(sys.argv[1:])
-    logging.info(f"Starting with parameters: {list}")
+    
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+    logging.info(f"Starting with parameters: '{list}'")
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
