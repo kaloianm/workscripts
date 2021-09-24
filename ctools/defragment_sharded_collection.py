@@ -175,6 +175,17 @@ class ShardedCollection:
             }})
         return update_result.modified_count
 
+def fmt_bytes(num):
+    suffix = "B"
+    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f}Yi{suffix}"
+
+def fmt_kb(num):
+    return fmt_bytes(num*1024)
+
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
@@ -186,7 +197,7 @@ async def main(args):
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     logging.info(
         f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks. """
-        f"""For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
+        f"""For optimisation and for dry runs will assume a chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
     )
 
     ###############################################################################################
@@ -227,11 +238,11 @@ async def main(args):
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
 
     if args.dryrun:
-        logging.info(f"""Performing a dry run with target chunk size of {target_chunk_size_kb} KB.
+        logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)}.
                         No actual modifications to the cluster will occur.""")
     else:
         yes_no(
-            f'The next steps will perform an actual merge with target chunk size of {target_chunk_size_kb} KB.'
+            f'The next steps will perform an actual merge with target chunk size of {fmt_kb(target_chunk_size_kb)}.'
         )
         if args.phase_1_reset_progress:
             yes_no(f'Previous defragmentation progress will be reset.')
@@ -668,7 +679,7 @@ async def main(args):
                         await coll.merge_chunks([left_chunk, c], args.phase_1_perform_unsafe_merge)
                     else:
                         bounds = [left_chunk['min'], c['max']]
-                        progress.write(f'Moving chunk left from {shard} to {target_shard}, merging {bounds}, new size: {new_size}')
+                        progress.write(f'Moving chunk left from {shard} to {target_shard}, merging {bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map, 
                     chunks_id_index.pop(c['_id']) # only first chunk is kept
@@ -699,7 +710,7 @@ async def main(args):
                         await coll.merge_chunks([c, right_chunk], args.phase_1_perform_unsafe_merge)
                     else:
                         bounds = [c['min'], right_chunk['max']]
-                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, merging {bounds}, new size: {new_size}')
+                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, merging {bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map
                     chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
@@ -761,13 +772,13 @@ async def main(args):
     ideal_num_chunks_per_shard = min(math.ceil(ideal_num_chunks / num_shards), 1)
 
     logging.info('Phase 2: Moving and merging small chunks')
-    logging.info(f'Collection size {coll_size_kb} kb. Avg chunk size Phase I {avg_chunk_size_phase_1} kb')
+    logging.info(f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}')
 
     orig_shard_sizes = total_shard_size.copy()
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
-        logging.info(f"Number chunks on shard {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb")
+        logging.info(f"Number chunks on shard {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9}")
 
     # Move and merge small chunks. The way this is written it might need to run multiple times
     max_iterations = 25
@@ -809,7 +820,7 @@ async def main(args):
         if num_chunks < math.ceil(ideal_num_chunks * 1.25) or moved_data_kb == 0:
             break
 
-        logging.info(f'Phase 2.2: Splitting oversized chunks, moved {moved_data_kb} kb of data')
+        logging.info(f'Phase 2.2: Splitting oversized chunks, moved {fmt_kb(moved_data_kb)} of data')
 
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks') as progress:
@@ -829,15 +840,15 @@ async def main(args):
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
-        print(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
-              f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
+        print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
+                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(data_size / num_chunks_per_shard): >9}")
     
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
     print("\n");
-    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
-    print(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
-    print(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
+    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(coll_size_kb)}""")
+    print(f'Average chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)} average chunk size Phase II {fmt_kb(avg_chunk_size_phase_2)}')
+    print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / coll_size_kb):.2f} %")
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
