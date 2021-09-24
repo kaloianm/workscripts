@@ -206,14 +206,17 @@ async def main(args):
         )
 
     chunk_size_doc = await cluster.configDb.settings.find_one({'_id': 'chunksize'})
-    if chunk_size_doc is None or chunk_size_doc['value'] < 128:
+    if chunk_size_doc is None:
         if not args.dryrun:
             raise Exception(
-                """The MaxChunkSize must be configured to at least 128 MB before running this script. Please run:
-                   db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: 128}}, {upsert: true})"""
+                """The MaxChunkSize must be configured before running this script. Please run:
+                   db.getSiblingDB('config').settings.update({_id:'chunksize'}, {$set: {value: <maxChunkSize>}}, {upsert: true})"""
             )
         else:
             target_chunk_size_kb = args.dryrun
+    elif chunk_size_doc['value'] <= 0:
+        raise Exception(
+                f"""Found an invalid chunk size in config.settings: '{chunk_size_doc['value']}'""")
     else:
         target_chunk_size_kb = chunk_size_doc['value'] * 1024
 
