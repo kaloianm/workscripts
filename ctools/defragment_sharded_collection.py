@@ -636,6 +636,8 @@ async def main(args):
             def exclude_shard(target_chunk):
                 if target_chunk is None or target_chunk['shard'] == shard:
                     return True
+                if args.dryrun:
+                    return False
                 target_shard_entry = shard_to_chunks[target_chunk['shard']]
                 if 'move_time' not in target_shard_entry or 'move_time' not in c:
                     return False
