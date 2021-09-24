@@ -185,8 +185,8 @@ async def main(args):
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     logging.info(
-        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks.
-            For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
+        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks. """
+        f"""For optimisation and for dry runs will assume a chunk size of {args.phase_1_estimated_chunk_size_kb} KB."""
     )
 
     ###############################################################################################
@@ -245,7 +245,7 @@ async def main(args):
         logging.info('Preperation: Loading chunks into memory')
         shard_to_chunks = {}
         collectionVersion = None
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
+        with tqdm(total=num_chunks, unit=' chunk') as progress:
             async for c in cluster.configDb.chunks.find({'ns': coll.name}, sort=[('min',
                                                                                 pymongo.ASCENDING)]):
                 shard_id = c['shard']
@@ -513,7 +513,7 @@ async def main(args):
     if args.exec_phase == 'phase1' or args.exec_phase == 'all':
         logging.info('Phase 1: Merging consecutive chunks on shards')
         
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
+        with tqdm(total=num_chunks, unit=' chunk') as progress:
             tasks = []
             for s in shard_to_chunks:
                 tasks.append(
@@ -767,8 +767,8 @@ async def main(args):
     total_moved_data_kb = 0
     while max_iterations > 0:
         max_iterations -= 1
-        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on 
-                         collection size is {ideal_num_chunks}, per shard {ideal_num_chunks_per_shard}""")
+        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on"""
+                     f""" collection size is {ideal_num_chunks}  ({ideal_num_chunks_per_shard} per shard)""")
 
         # Only conditionally execute phase2, break here to get above log lines
         if args.exec_phase != 'phase2' and args.exec_phase != 'all':
@@ -816,21 +816,21 @@ async def main(args):
         await load_chunks()
         build_chunk_index()
 
-    logging.info("\nReached convergence: \n")
+    print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
-        logging.info(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
-                     f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
+        print(f"Number chunks on {s}: {num_chunks_per_shard}  Data-Size: {data_size} kb "
+              f" ({data_size - orig_shard_sizes[s]} kb)  Avg chunk size {round(data_size / num_chunks_per_shard, 2)} kb")
     
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
-    logging.info("\n")
-    logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
-    logging.info(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
-    logging.info(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
+    print("\n");
+    print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {coll_size_kb} kb""")
+    print(f'Average chunk size Phase I {round(avg_chunk_size_phase_1, 2)} kb  average chunk size Phase II {round(avg_chunk_size_phase_2, 2)} kb')
+    print(f"Total moved data: {total_moved_data_kb} kb i.e. {round(100 * total_moved_data_kb / coll_size_kb, 2)} %")
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
@@ -900,7 +900,9 @@ if __name__ == "__main__":
         metavar='seconds', dest="min_migration_period", type=int, default=0)
 
     list = " ".join(sys.argv[1:])
-    logging.info(f"Starting with parameters: {list}")
+    
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+    logging.info(f"Starting with parameters: '{list}'")
 
     args = argsParser.parse_args()
     loop = asyncio.get_event_loop()
