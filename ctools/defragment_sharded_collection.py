@@ -588,7 +588,6 @@ async def main(args):
 
         return data_size_kb
 
-    # do to the same target shard within 15 minutes
     async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
         global num_small_chunks
         total_moved_data_kb = 0
@@ -633,13 +632,18 @@ async def main(args):
         for c in sorted_chunks:
             progress.update()
 
+            # exclude target shards chunks which might have conflicting range deletions
             def exclude_shard(target_chunk):
                 if target_chunk is None or target_chunk['shard'] == shard:
                     return True
                 target_shard_entry = shard_to_chunks[target_chunk['shard']]
-                if 'move_time' in target_shard_entry and 'move_time' in c:
-                    return (c['move_time'] - target_shard_entry['move_time']) > 2 * orphan_cleanup_delay
-                return False
+                if 'move_time' not in target_shard_entry or 'move_time' not in c:
+                    return False
+                # if 15 mins passed since the shard stopped donating, do not move
+                if time.monotonic() - target_shard_entry['move_time'] > 2 * orphan_cleanup_delay:
+                    return False
+                # if the chunk got moved after target stopped donating, do not exclude
+                return target_shard_entry['move_time'] - c['move_time'] < 2 * orphan_cleanup_delay
 
             # Abort if we have too few chunks already
             if num_chunks <= idealNumChunks + 1:
@@ -755,6 +759,7 @@ async def main(args):
         if args.dryrun or len(shard_chunks) == 0:
             return
 
+        did_work = False
         for c in shard_chunks:
             progress.update()
 
@@ -764,8 +769,12 @@ async def main(args):
             local_c = chunks_id_index[c['_id']]
             if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.6:
                 await coll.split_chunk(local_c, target_chunk_size_kb)
+                did_work = True
             elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
                 await coll.split_chunk_middle(local_c)
+                did_work = True
+
+        return did_work
 
     num_shards = await cluster.configDb.shards.count_documents({})
     coll_size_kb = await coll.data_size_kb()
@@ -846,11 +855,14 @@ async def main(args):
             for s in shard_to_chunks:
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
-            await asyncio.gather(*tasks)
+            did_work = await asyncio.gather(*tasks)
 
-        # after a run of split_chunks we need to reload all chunks
-        await load_chunks()
-        build_chunk_index()
+            # after a run of split_chunks we need to reload all chunks
+            for b in did_work:
+                if b:
+                    await load_chunks()
+                    build_chunk_index()
+                    break
 
     print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
