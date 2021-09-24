@@ -586,6 +586,10 @@ async def main(args):
             duration = time.monotonic() - begin_time
             if duration < args.min_migration_period:
                 await asyncio.sleep(args.min_migration_period - duration)
+            if args.max_migrations > 0:
+                args.max_migrations -= 1
+            if args.max_migrations == 0:
+                raise Exception("Max number of migrations exceeded")
 
         async def get_remain_chunk_imbalance(center, target_chunk):
             if (target_chunk is None) or target_chunk['shard'] == shard:
@@ -901,6 +905,10 @@ if __name__ == "__main__":
         '--phase_2_min_migration_period',
         help="""Minimum time in seconds between the start of subsequent migrations.""",
         metavar='seconds', dest="min_migration_period", type=int, default=0)
+    argsParser.add_argument(
+        '--phase_2_max_migrations',
+        help="""Maximum number of migrations.""",
+        metavar='max_migrations', dest="max_migrations", type=int, default=-1)
 
     list = " ".join(sys.argv[1:])
     
