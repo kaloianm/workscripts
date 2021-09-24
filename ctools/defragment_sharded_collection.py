@@ -544,9 +544,14 @@ async def main(args):
     # This stage relies on the 'defrag_collection_est_size' fields written to every chunk from
     # Phase 1 in order to calculate the most optimal move strategy.
     #
+    
+    config_conn = await coll.cluster.make_direct_config_server_connection()
+    resp = await config_conn.admin.command({'getParameter': 1, 'orphanCleanupDelaySecs': 1})
+    assert (resp['ok'] == 1)
+    orphan_cleanup_delay = resp['orphanCleanupDelaySecs']
+    config_conn.close()
 
     total_shard_size = {}
-
     # Mirror the config.chunks indexes in memory
     def build_chunk_index():
         global chunks_id_index, chunks_min_index, chunks_max_index, num_small_chunks
@@ -583,7 +588,7 @@ async def main(args):
 
         return data_size_kb
 
-    chunk_not_movable = set()
+    # do to the same target shard within 15 minutes
     async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
         global num_small_chunks
         total_moved_data_kb = 0
@@ -628,13 +633,21 @@ async def main(args):
         for c in sorted_chunks:
             progress.update()
 
+            def exclude_shard(target_chunk):
+                if target_chunk is None or target_chunk['shard'] == shard:
+                    return True
+                target_shard_entry = shard_to_chunks[target_chunk['shard']]
+                if 'move_time' in target_shard_entry and 'move_time' in c:
+                    return (c['move_time'] - target_shard_entry['move_time']) > 2 * orphan_cleanup_delay
+                return False
+
             # Abort if we have too few chunks already
             if num_chunks <= idealNumChunks + 1:
                 progress.write(f"too few chunks already on shard {shard}: {num_chunks} < {idealNumChunks} + 1")
                 break
 
             # this chunk might no longer exist due to a move
-            if c['_id'] not in chunks_id_index or c['_id'] in chunk_not_movable:
+            if c['_id'] not in chunks_id_index:
                 continue
 
             # avoid moving larger chunks
@@ -648,13 +661,11 @@ async def main(args):
 
             left_chunk = chunks_max_index.get(frozenset(c['min'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']})
             right_chunk = chunks_min_index.get(frozenset(c['max'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'min': c['max']})
-#                if not args.dryrun:
-#                    assert(left_chunk is None or (await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']}))['shard'] == left_chunk['shard'])
 
             # skip chunks on same shard
-            if left_chunk is not None and left_chunk['shard'] == shard:
+            if exclude_shard(left_chunk):
                 left_chunk = None
-            if right_chunk is not None and right_chunk['shard'] == shard:
+            if exclude_shard(right_chunk):
                 right_chunk = None
             
             # Exclude overweight target shards
@@ -687,9 +698,9 @@ async def main(args):
                     chunks_min_index.pop(frozenset(c['min'].items()))
                     chunks_max_index.pop(frozenset(left_chunk['max'].items()))
                     chunks_max_index[frozenset(c['max'].items())] = left_chunk
-                    chunk_not_movable.add(left_chunk['_id'])
                     left_chunk['max'] = c['max']
                     left_chunk['defrag_collection_est_size'] = new_size
+                    left_chunk['move_time'] = time.monotonic()
 
                     total_shard_size[shard] -= center_size_kb
                     total_shard_size[target_shard] += center_size_kb
@@ -719,10 +730,10 @@ async def main(args):
                     chunks_min_index.pop(frozenset(right_chunk['min'].items()))
                     chunks_max_index.pop(frozenset(c['max'].items()))
                     chunks_max_index[frozenset(right_chunk['max'].items())] = c
-                    chunk_not_movable.add(c['_id'])
                     c['shard'] = target_shard
                     c['max'] = right_chunk['max']
                     c['defrag_collection_est_size'] = new_size
+                    c['move_time'] = time.monotonic()
 
                     total_shard_size[shard] -= center_size_kb
                     total_shard_size[target_shard] += center_size_kb
@@ -731,7 +742,11 @@ async def main(args):
                     num_small_chunks -= 1
                     await exec_throttle()
                     continue
+        
+            pass # end of loop
+            
         # </for c in sorted_chunks:>
+        shard_entry['move_time'] = time.monotonic()
         return total_moved_data_kb
 
     async def split_oversized_chunks(shard, progress):
