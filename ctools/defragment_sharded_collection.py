@@ -29,6 +29,8 @@ class ShardedCollection:
 
     async def init(self):
         collection_entry = await self.cluster.configDb.collections.find_one({'_id': self.name})
+        if (collection_entry is None) or collection_entry.get('dropped', False):
+            raise Exception(f"""Collection '{self.name}' does not exist""")
 
         self.uuid = collection_entry['uuid']
         self.shard_key_pattern = collection_entry['key']
