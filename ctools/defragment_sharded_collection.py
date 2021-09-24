@@ -583,6 +583,7 @@ async def main(args):
 
         return data_size_kb
 
+    chunk_not_movable = set()
     async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
         global num_small_chunks
         total_moved_data_kb = 0
@@ -633,7 +634,7 @@ async def main(args):
                 break
 
             # this chunk might no longer exist due to a move
-            if c['_id'] not in chunks_id_index:
+            if c['_id'] not in chunks_id_index or c['_id'] in chunk_not_movable:
                 continue
 
             # avoid moving larger chunks
@@ -686,6 +687,7 @@ async def main(args):
                     chunks_min_index.pop(frozenset(c['min'].items()))
                     chunks_max_index.pop(frozenset(left_chunk['max'].items()))
                     chunks_max_index[frozenset(c['max'].items())] = left_chunk
+                    chunk_not_movable.add(left_chunk['_id'])
                     left_chunk['max'] = c['max']
                     left_chunk['defrag_collection_est_size'] = new_size
 
@@ -717,6 +719,7 @@ async def main(args):
                     chunks_min_index.pop(frozenset(right_chunk['min'].items()))
                     chunks_max_index.pop(frozenset(c['max'].items()))
                     chunks_max_index[frozenset(right_chunk['max'].items())] = c
+                    chunk_not_movable.add(c['_id'])
                     c['shard'] = target_shard
                     c['max'] = right_chunk['max']
                     c['defrag_collection_est_size'] = new_size
@@ -767,7 +770,7 @@ async def main(args):
     if args.dryrun and coll_size_kb == 1:
         coll_size_kb = sum_coll_size
 
-    avg_chunk_size_phase_1 = sum_coll_size / len(chunks_id_index)
+    avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
     ideal_num_chunks = max(math.ceil(coll_size_kb / target_chunk_size_kb), num_shards)
     ideal_num_chunks_per_shard = min(math.ceil(ideal_num_chunks / num_shards), 1)
 
