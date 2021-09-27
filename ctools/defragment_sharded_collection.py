@@ -364,7 +364,9 @@ async def main(args):
                 # Assume that the user might run phase I more than once. We may encouter chunks with 
                 # defrag_collection_est_size set and minimum 75% target chunk size. Do not attempt 
                 # to merge these further
-                skip_chunk = get_chunk_size(c) >= target_chunk_size_kb * 0.75
+                skip_chunk = False
+                if 'defrag_collection_est_size' in c:
+                    skip_chunk = c['defrag_collection_est_size'] >= target_chunk_size_kb * 0.75
 
                 if skip_chunk or not has_more:
                     remain_chunks.append(c)
