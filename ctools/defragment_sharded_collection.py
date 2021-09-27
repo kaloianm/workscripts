@@ -462,13 +462,13 @@ async def main(args):
                         actual_size_of_consecutive_chunks -= get_chunk_size(big_c)
                         remain_chunks.append(big_c)
                     else:
-                        break
+                        continue
                 # if just one chunk remains skip the merge
                 if len(consecutive_chunks) == 1:
                     remain_chunks.append(consecutive_chunks[0])
                     consecutive_chunks = []
                     estimated_size_of_consecutive_chunks = 0
-                    break
+                    continue
 
             elif actual_size_of_consecutive_chunks > target_chunk_size_kb * 1.10:
                 # TODO: If the actual range size is 10% more than the target size, use `splitVector`
@@ -815,7 +815,7 @@ async def main(args):
         num_chunks = len(chunks_id_index)
         if not args.dryrun:
             num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
-            assert(num_chunks_actual == num_chunks)
+            assert(num_chunks_actual == num_chunks), f"actual: {num_chunks_actual}, expected: {num_chunks}"
 
         if num_chunks < math.ceil(ideal_num_chunks * 1.25) or moved_data_kb == 0:
             break
