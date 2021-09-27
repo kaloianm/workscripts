@@ -26,7 +26,8 @@ async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
     await cluster.check_is_mongos(warn_only=False)
 
-    shard_key_as_string = True if (await cluster.FCV == '4.0') else False
+    fcv = await cluster.FCV
+    shard_key_as_string = True if (fcv == '4.0' or fcv == '4.2') else False
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
