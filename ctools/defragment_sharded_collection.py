@@ -767,9 +767,9 @@ async def main(args):
     if args.dryrun and coll_size_kb == 1:
         coll_size_kb = sum_coll_size
 
-    avg_chunk_size_phase_1 = sum_coll_size / len(chunks_id_index)
+    avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
     ideal_num_chunks = max(math.ceil(coll_size_kb / target_chunk_size_kb), num_shards)
-    ideal_num_chunks_per_shard = min(math.ceil(ideal_num_chunks / num_shards), 1)
+    ideal_num_chunks_per_shard = max(math.ceil(ideal_num_chunks / num_shards), 1)
 
     logging.info('Phase 2: Moving and merging small chunks')
     logging.info(f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}')
