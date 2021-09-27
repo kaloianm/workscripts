@@ -376,10 +376,15 @@ async def main(args):
             progress.update()
 
             if len(consecutive_chunks) == 0:
-                consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
-                if not has_more:
+                # Assume that the user might run phase I more than once. We may encouter chunks with 
+                # defrag_collection_est_size set and minimum 75% target chunk size. Do not attempt 
+                # to merge these further
+                skip_chunk = False
+                if 'defrag_collection_est_size' in c:
+                    skip_chunk = c['defrag_collection_est_size'] >= target_chunk_size_kb * 0.75
+
+                if skip_chunk or not has_more:
                     remain_chunks.append(c)
                     if 'defrag_collection_est_size' not in c:
                         if not args.dryrun:
@@ -388,6 +393,9 @@ async def main(args):
                             chunk_range = [c['min'], c['max']]
                             c['defrag_collection_est_size'] = await coll.data_size_kb_from_shard(chunk_range)
                             await coll.try_write_chunk_size(chunk_range, shard, c['defrag_collection_est_size'])
+                else:
+                    consecutive_chunks = [c]
+                    estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
                 continue
 
@@ -453,22 +461,6 @@ async def main(args):
                 # consecutive chunks
                 estimated_size_of_consecutive_chunks = actual_size_of_consecutive_chunks
                 continue
-            elif actual_size_of_consecutive_chunks >= target_chunk_size_kb * (0.75 * 2):
-                
-                # Probably happens on multiple executions of Phase I
-                while len(consecutive_chunks) > 1 and actual_size_of_consecutive_chunks > 0.75:
-                    if get_chunk_size(consecutive_chunks[0]) > target_chunk_size_kb * 0.75:
-                        big_c = consecutive_chunks.pop(0)
-                        actual_size_of_consecutive_chunks -= get_chunk_size(big_c)
-                        remain_chunks.append(big_c)
-                    else:
-                        break
-                # if just one chunk remains skip the merge
-                if len(consecutive_chunks) == 1:
-                    remain_chunks.append(consecutive_chunks[0])
-                    consecutive_chunks = []
-                    estimated_size_of_consecutive_chunks = 0
-                    break
 
             elif actual_size_of_consecutive_chunks > target_chunk_size_kb * 1.10:
                 # TODO: If the actual range size is 10% more than the target size, use `splitVector`
