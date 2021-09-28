@@ -82,13 +82,13 @@ class ShardedCollection:
             }, codec_options=self.cluster.client.codec_options)
 
         if len(res['splitKeys']) > 0:
-            await conn.adminDb.command({
-                    'splitChunk': self.name,
-                    'bounds': [chunk['min'], chunk['max']],
-                    'splitKeys': res['splitKeys']
+            for key in res['splitKeys']:
+                res = await self.cluster.adminDb.command({
+                    'split': self.name,
+                    'middle': key
                 }, codec_options=self.cluster.client.codec_options)
 
-        conn.close()        
+        conn.close()
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
