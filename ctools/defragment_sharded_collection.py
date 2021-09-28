@@ -687,6 +687,7 @@ async def main(args):
                     num_chunks -= 1
                     num_small_chunks -= 1
                     await exec_throttle()
+                    begin_time = time.monotonic()
                     continue
             
             if right_chunk is not None:
@@ -719,6 +720,7 @@ async def main(args):
                     num_chunks -= 1
                     num_small_chunks -= 1
                     await exec_throttle()
+                    begin_time = time.monotonic()
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
