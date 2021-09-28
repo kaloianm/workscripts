@@ -54,8 +54,8 @@ class ToolConfiguration:
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(
-            os.path.join(args.dir, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
+        self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
+                                   kOutputLogFileBufSize)
 
     def log_line(self, entry):
         if (isinstance(entry, pymongo.results.DeleteResult)):
@@ -166,8 +166,8 @@ class ClusterIntrospect:
 
         self.numZones = self.configDb.tags.count_documents({})
         self.numShards = self.configDb.shards.count_documents({})
-        self.FCV = mongoDb.admin.system.version.find_one(
-            {'_id': 'featureCompatibilityVersion'})['version']
+        self.FCV = mongoDb.admin.system.version.find_one({'_id': 'featureCompatibilityVersion'
+                                                          })['version']
 
 
 # Abstracts the manipulations of the mlaunch-started cluster
@@ -232,8 +232,8 @@ class MlaunchCluster:
 
         if len(shardsFromDump) <= len(shardsFromMlaunch):
             for shardFromDump, shardFromMlaunch in zip(deepcopy(shardsFromDump), shardsFromMlaunch):
-                self._config.log_line(
-                    self.configDb.shards.delete_one({'_id': shardFromDump['_id']}))
+                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
+                                                                       }))
                 self._config.log_line(
                     self.configDb.shards.delete_one({'_id': shardFromMlaunch['_id']}))
 
@@ -255,8 +255,8 @@ class MlaunchCluster:
 
             for shardFromDump, shardFromMlaunch in zip(shardsFromDump,
                                                        roundRobin(shardsFromMlaunch)):
-                self._config.log_line(
-                    self.configDb.shards.delete_one({'_id': shardFromDump['_id']}))
+                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
+                                                                       }))
 
                 self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
 
@@ -346,7 +346,7 @@ class MlaunchCluster:
 
     def generateData(self):
         if not self._config.genData:
-            return            
+            return
 
         conn = MongoClient('localhost', self._config.clusterStartingPort)
         for collection in self.configDb.collections.find({'dropped': False}):
@@ -368,7 +368,7 @@ class MlaunchCluster:
                         gen_doc(k, sub[k], sub_res)
                         res_dict[name] = sub_res
                 else:
-                    res_dict[name] = int(random.uniform(-1024*1024, 128*1024*1024))
+                    res_dict[name] = int(random.uniform(-1024 * 1024, 128 * 1024 * 1024))
 
             print('Generating data for ', collection['_id'])
 
