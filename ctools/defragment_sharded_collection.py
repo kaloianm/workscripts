@@ -88,9 +88,6 @@ class ShardedCollection:
                     'middle': key
                 }, codec_options=self.cluster.client.codec_options)
 
-                if res['ok'] != 1.0:
-                    print("Failed split on middle point " + str(key) + ". Details: " + str(res));
-
         conn.close()
 
     async def move_chunk(self, chunk, to):
