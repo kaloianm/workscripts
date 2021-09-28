@@ -7,6 +7,7 @@ import psutil
 import pymongo
 import shutil
 import socket
+import logging
 import subprocess
 import sys
 import random
@@ -41,11 +42,11 @@ class ToolConfiguration:
 
         self.mongoRestoreNumInsertionWorkers = 16
 
-        print('Running cluster import with binaries located at:', self.binarypath)
-        print('Config dump directory at:', self.configdump)
-        print('Data directory root at:', args.dir)
-        print('Introspect directory at:', self.introspectRoot)
-        print('Cluster directory at:', self.clusterRoot)
+        logging.info(f'Running cluster import with binaries located at: {self.binarypath}')
+        logging.info(f'Config dump directory at: {self.configdump}')
+        logging.info(f'Data directory root at: {args.dir}')
+        logging.info(f'Introspect directory at: {self.introspectRoot}')
+        logging.info(f'Cluster directory at: {self.clusterRoot}')
 
         self.__cleanup_previous_runs()
 
@@ -56,14 +57,6 @@ class ToolConfiguration:
         kOutputLogFileBufSize = 256
         self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
                                    kOutputLogFileBufSize)
-
-    def log_line(self, entry):
-        if (isinstance(entry, pymongo.results.DeleteResult)):
-            msg = 'DeleteResult deleted: {}'.format(entry.deleted_count)
-        else:
-            msg = str(entry)
-
-        self._outputLogFile.write(msg + '\n')
 
     # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
     def restore_config_db_to_port(self, restorePort):
@@ -85,7 +78,7 @@ class ToolConfiguration:
         else:
             mongorestoreCommand += ['--gzip', '--archive={}'.format(self.configdump)]
 
-        print('Executing mongorestore command: ' + ' '.join(mongorestoreCommand))
+        logging.info(f'Executing mongorestore command: {" ".join(mongorestoreCommand)}')
         subprocess.check_call(mongorestoreCommand, stdout=self._outputLogFile,
                               stderr=self._outputLogFile)
 
@@ -110,8 +103,9 @@ class ToolConfiguration:
 
         mlaunchCommand = mlaunchPrefix + args
 
-        print('Executing mlaunch command: ' + ' '.join(mlaunchCommand))
-        subprocess.check_call(mlaunchCommand, stdout=self._outputLogFile)
+        logging.info(f'Executing mlaunch command: {" ".join(mlaunchCommand)}')
+        subprocess.check_call(mlaunchCommand, stdout=self._outputLogFile,
+                              stderr=self._outputLogFile)
 
     # Performs cleanup by killing all potentially running mongodb processes and deleting any
     # leftover files. Basically leaves '--dir' empty.
@@ -149,8 +143,9 @@ class ClusterIntrospect:
 
     # Class initialization. The 'config' parameter is an instance of ToolConfiguration.
     def __init__(self, config):
-        print('Introspecting config dump using instance at port',
-              config.clusterIntrospectMongoDPort)
+        logging.info(
+            f'Introspecting config dump using instance at port {config.clusterIntrospectMongoDPort}'
+        )
 
         # Start the instance and restore the config server dump
         config.mlaunch_action(
@@ -210,8 +205,7 @@ class MlaunchCluster:
 
         # Set the correct FCV on the cluster being reconstructed
         clusterConnection = MongoClient('localhost', config.clusterStartingPort)
-        self._config.log_line(
-            clusterConnection.admin.command('setFeatureCompatibilityVersion', introspect.FCV))
+        clusterConnection.admin.command('setFeatureCompatibilityVersion', introspect.FCV)
 
         # TODO: Find a better way to determine the port of the config server's primary
         self.configServerPort = config.clusterStartingPort + (numShards + 1)
@@ -226,23 +220,21 @@ class MlaunchCluster:
 
         self._config.restore_config_db_to_port(self.configServerPort)
 
-        print('Renaming shards in the shards collection:')
+        logging.info('Renaming shards in the shards collection:')
 
         self._shardIdRemap = {}
 
         if len(shardsFromDump) <= len(shardsFromMlaunch):
             for shardFromDump, shardFromMlaunch in zip(deepcopy(shardsFromDump), shardsFromMlaunch):
-                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
-                                                                       }))
-                self._config.log_line(
-                    self.configDb.shards.delete_one({'_id': shardFromMlaunch['_id']}))
+                self.configDb.shards.delete_one({'_id': shardFromDump['_id']})
+                self.configDb.shards.delete_one({'_id': shardFromMlaunch['_id']})
 
                 self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
 
                 shardFromDump['_id'] = shardFromMlaunch['_id']
                 shardFromDump['host'] = shardFromMlaunch['host']
 
-                self._config.log_line(self.configDb.shards.insert_one(shardFromDump))
+                self.configDb.shards.insert_one(shardFromDump)
 
         elif len(shardsFromDump) > len(shardsFromMlaunch):
             # If the dump has more shards than the mlaunch cluster (--numshards was specified with
@@ -255,46 +247,40 @@ class MlaunchCluster:
 
             for shardFromDump, shardFromMlaunch in zip(shardsFromDump,
                                                        roundRobin(shardsFromMlaunch)):
-                self._config.log_line(self.configDb.shards.delete_one({'_id': shardFromDump['_id']
-                                                                       }))
+                self.configDb.shards.delete_one({'_id': shardFromDump['_id']})
 
                 self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the databases and
     # chunks collections)
     def fixUpRoutingMetadata(self):
-        print('Renaming shards in the routing metadata:')
+        logging.info('Renaming shards in the routing metadata:')
 
         for shardId in self._shardIdRemap:
             shardIdTo = self._shardIdRemap.get(shardId)
-            print('Shard', shardId, 'becomes', shardIdTo)
+            logging.info(f'Shard {shardId} becomes {shardIdTo}')
 
             # Rename the primary shard for all databases
-            self._config.log_line(
-                self.configDb.databases.update_many({'primary': shardId},
-                                                    {'$set': {
-                                                        'primary': shardIdTo
-                                                    }}))
+            self.configDb.databases.update_many({'primary': shardId},
+                                                {'$set': {
+                                                    'primary': shardIdTo
+                                                }})
 
             # Rename the shards in the chunks' current owner field
-            self._config.log_line(
-                self.configDb.chunks.update_many({'shard': shardId}, {'$set': {
-                    'shard': shardIdTo
-                }}))
+            self.configDb.chunks.update_many({'shard': shardId}, {'$set': {'shard': shardIdTo}})
 
             # Rename the shards in the chunks' history
-            self._config.log_line(
-                self.configDb.chunks.update_many({'history.shard': shardId},
-                                                 {'$set': {
-                                                     'history.$[element].shard': shardIdTo
-                                                 }}, array_filters=[{
-                                                     'element.shard': shardId
-                                                 }]))
+            self.configDb.chunks.update_many({'history.shard': shardId},
+                                             {'$set': {
+                                                 'history.$[element].shard': shardIdTo
+                                             }}, array_filters=[{
+                                                 'element.shard': shardId
+                                             }])
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
     def fixUpShards(self):
         for shard in self.configDb.shards.find({}):
-            print('Creating shard key indexes on shard ' + shard['_id'])
+            logging.info(f"Creating shard key indexes on shard {shard['_id']}")
 
             shardConnParts = shard['host'].split('/', 1)
             shardConnection = MongoClient(shardConnParts[1], replicaset=shardConnParts[0])
@@ -322,11 +308,9 @@ class MlaunchCluster:
                 if collUUID:
                     applyOpsCommand['applyOps'][0]['ui'] = collUUID
 
-                self._config.log_line("db.adminCommand(" + str(applyOpsCommand) + ");")
-                self._config.log_line(
-                    db.command(
-                        applyOpsCommand, codec_options=CodecOptions(
-                            uuid_representation=UuidRepresentation.STANDARD)))
+                db.command(
+                    applyOpsCommand,
+                    codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
 
                 createIndexesCommand = {
                     'createIndexes': collName,
@@ -335,9 +319,7 @@ class MlaunchCluster:
                         'name': 'Shard key index'
                     }]
                 }
-                self._config.log_line("db.getSiblingDB(" + dbName + ").runCommand(" +
-                                      str(createIndexesCommand) + ");")
-                self._config.log_line(db.command(createIndexesCommand))
+                db.command(createIndexesCommand)
 
             shardConnection.close()
 
@@ -370,7 +352,7 @@ class MlaunchCluster:
                 else:
                     res_dict[name] = int(random.uniform(-1024 * 1024, 128 * 1024 * 1024))
 
-            print('Generating data for ', collection['_id'])
+            logging.info(f"Generating data for collection {collection['_id']}")
 
             batch = []
             for x in range(1024 * 1024):
@@ -382,11 +364,10 @@ class MlaunchCluster:
                 if x % (32 * 1024) == 0:
                     coll.insert_many(batch)
                     batch = []
-                    print('Generated ', x, " documents")
+                    logging.info(f'Generated {x} documents')
 
 
-# Main entrypoint for the application
-def main():
+if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
         description=
         'Tool to interpret an export of a cluster config database and construct a new cluster with '
@@ -418,7 +399,11 @@ def main():
                             help='Directory containing a dump of the cluster config database',
                             metavar='configdumpdir', type=str, nargs=1)
 
-    config = ToolConfiguration(argsParser.parse_args())
+    args = argsParser.parse_args()
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+    # Prepare the configuration and the workspace where the instances will be started
+    config = ToolConfiguration(args)
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
     introspect = ClusterIntrospect(config)
@@ -438,11 +423,3 @@ def main():
     mlaunch.restartCluster()
 
     mlaunch.generateData()
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print('Command failed due to:', str(e))
-        sys.exit(-1)
