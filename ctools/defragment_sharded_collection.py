@@ -63,7 +63,7 @@ class ShardedCollection:
 
     async def split_chunk_middle(self, chunk):
         await self.cluster.adminDb.command({
-                'splitChunk': self.name,
+                'split': self.name,
                 'bounds': [chunk['min'], chunk['max']]
             }, codec_options=self.cluster.client.codec_options)
 
@@ -83,7 +83,7 @@ class ShardedCollection:
 
         if len(res['splitKeys']) > 0:
             await self.cluster.adminDb.command({
-                    'splitChunk': self.name,
+                    'split': self.name,
                     'bounds': [chunk['min'], chunk['max']],
                     'splitKeys': res['splitKeys']
                 }, codec_options=self.cluster.client.codec_options)
