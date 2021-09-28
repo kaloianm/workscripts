@@ -82,8 +82,8 @@ class ShardedCollection:
             }, codec_options=self.cluster.client.codec_options)
 
         if len(res['splitKeys']) > 0:
-            await self.cluster.adminDb.command({
-                    'split': self.name,
+            await conn.adminDb.command({
+                    'splitChunk': self.name,
                     'bounds': [chunk['min'], chunk['max']],
                     'splitKeys': res['splitKeys']
                 }, codec_options=self.cluster.client.codec_options)
