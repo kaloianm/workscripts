@@ -27,7 +27,7 @@ async def main(args):
     await cluster.check_is_mongos(warn_only=False)
 
     fcv = await cluster.FCV
-    shard_key_as_string = True if (fcv == '4.0' or fcv == '4.2') else False
+    shard_key_as_string = fcv <= '4.2'
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
     epoch = bson.objectid.ObjectId()
