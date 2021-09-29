@@ -346,7 +346,6 @@ async def main(args):
         else:
             progress.write('Merge will start with a major version bump')
 
-        consecutive_chunks = []
         num_lock_busy_errors_encountered = 0
 
         def get_chunk_size(ch):
@@ -384,7 +383,39 @@ async def main(args):
             # Report the last value.
             yield last, False
 
+        class ChunkBatch:
+            def __init__(self, chunk_size_estimation):
+                self.chunk_size_estimation = chunk_size_estimation
+                self.batch = []
+                self.batch_size_estimation = 0
+                self.trust_batch_estimation = True
+
+            # Append a chunk to the batch and update the size estimation
+            def append(self, ch):
+                self.batch.append(ch)
+                if 'defrag_collection_est_size' not in ch:
+                    self.trust_batch_estimation = False
+                    self.batch_size_estimation += self.chunk_size_estimation
+                else:
+                    self.batch_size_estimation += ch['defrag_collection_est_size']
+
+            # Update batch size estimation             
+            def update_size(self, size):
+                self.batch_size_estimation = size
+                self.trust_batch_estimation = True
+
+            # Reset the batch and the size estimation
+            def reset(self):
+                self.batch = []
+                self.batch_size_estimation = 0
+                self.trust_batch_estimation = True
+
+            def __len__(self):
+                return len(self.batch)
+
+        consecutive_chunks = ChunkBatch(args.phase_1_estimated_chunk_size_kb)
         remain_chunks = []
+
         for c, has_more in lookahead(shard_chunks):
             progress.update()
 
@@ -401,26 +432,25 @@ async def main(args):
                     await update_chunk_size_estimation(c)
                     remain_chunks.append(c)
                 else:
-                    consecutive_chunks = [c]
-                    estimated_size_of_consecutive_chunks = get_chunk_size(c)
+                    consecutive_chunks.append(c)
 
                 continue
 
             merge_consecutive_chunks_without_size_check = False
 
-            if consecutive_chunks[-1]['max'] == c['min']:
+            if consecutive_chunks.batch[-1]['max'] == c['min']:
                 consecutive_chunks.append(c)
-                estimated_size_of_consecutive_chunks += get_chunk_size(c)
             elif len(consecutive_chunks) == 1:
-                await update_chunk_size_estimation(consecutive_chunks[0])
-                remain_chunks.append(consecutive_chunks[0])
+                await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                remain_chunks.append(consecutive_chunks.batch[0])
+                consecutive_chunks.reset()
 
-                consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = get_chunk_size(c)
+                consecutive_chunks.append(c)
 
                 if not has_more:
-                    await update_chunk_size_estimation(consecutive_chunks[0])
-                    remain_chunks.append(consecutive_chunks[0])
+                    await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                    remain_chunks.append(consecutive_chunks.batch[0])
+                    consecutive_chunks.reset()
                     
                 continue
             else:
@@ -433,28 +463,26 @@ async def main(args):
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
             # chunk size, invoke `dataSize` in order to determine whether we can merge them or if
             # we should continue adding more chunks to be merged
-            if (estimated_size_of_consecutive_chunks < target_chunk_size_kb * 0.90
+            if (consecutive_chunks.batch_size_estimation < target_chunk_size_kb * 0.90
                 ) and not merge_consecutive_chunks_without_size_check and has_more:
                 continue
 
-            merge_bounds = [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
+            merge_bounds = [consecutive_chunks.batch[0]['min'], consecutive_chunks.batch[-1]['max']]
 
             # Determine the "exact" (not 100% exact because we use the 'estimate' option) size of
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
-            actual_size_of_consecutive_chunks = estimated_size_of_consecutive_chunks
-            if not args.dryrun:
-                actual_size_of_consecutive_chunks = await coll.data_size_kb_from_shard(merge_bounds)
+            if not consecutive_chunks.trust_batch_estimation and not args.dryrun:
+                consecutive_chunks.update_size(await coll.data_size_kb_from_shard(merge_bounds))
 
             if merge_consecutive_chunks_without_size_check or not has_more:
                 pass
-            elif actual_size_of_consecutive_chunks < target_chunk_size_kb * 0.75:
+            elif consecutive_chunks.batch_size_estimation < target_chunk_size_kb * 0.75:
                 # If the actual range size is sill 25% less than the target size, continue adding
                 # consecutive chunks
-                estimated_size_of_consecutive_chunks = actual_size_of_consecutive_chunks
                 continue
 
-            elif actual_size_of_consecutive_chunks > target_chunk_size_kb * 1.10:
+            elif consecutive_chunks.batch_size_estimation > target_chunk_size_kb * 1.10:
                 # TODO: If the actual range size is 10% more than the target size, use `splitVector`
                 # to determine a better merge/split sequence so as not to generate huge chunks which
                 # will have to be split later on
@@ -464,17 +492,17 @@ async def main(args):
             sem = (sem_at_collection_version
                         if shard_is_at_collection_version else sem_at_less_than_collection_version)
             async with sem:
-                new_chunk = consecutive_chunks[0].copy()
-                new_chunk['max'] = consecutive_chunks[-1]['max']
-                new_chunk['defrag_collection_est_size'] = actual_size_of_consecutive_chunks
+                new_chunk = consecutive_chunks.batch[0].copy()
+                new_chunk['max'] = consecutive_chunks.batch[-1]['max']
+                new_chunk['defrag_collection_est_size'] = consecutive_chunks.batch_size_estimation
                 remain_chunks.append(new_chunk)
                         
                 if not args.dryrun:
                     try:
-                        await coll.merge_chunks(consecutive_chunks,
+                        await coll.merge_chunks(consecutive_chunks.batch,
                                                 args.phase_1_perform_unsafe_merge)
                         await coll.try_write_chunk_size(merge_bounds, shard,
-                                                        actual_size_of_consecutive_chunks)
+                                                        consecutive_chunks.batch_size_estimation)
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
@@ -492,15 +520,12 @@ async def main(args):
             # Reset the accumulator so far. If we are merging due to
             # merge_consecutive_chunks_without_size_check, need to make sure that we don't forget
             # the current entry since it is not part of the run
+            consecutive_chunks.reset()
             if merge_consecutive_chunks_without_size_check:
-                consecutive_chunks = [c]
-                estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
+                consecutive_chunks.append(c)
                 if not has_more:
                     await update_chunk_size_estimation(c)
                     remain_chunks.append(c)
-            else:
-                consecutive_chunks = []
-                estimated_size_of_consecutive_chunks = 0
 
             shard_entry['num_merges_performed'] += 1
             shard_is_at_collection_version = True
