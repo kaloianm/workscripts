@@ -357,16 +357,16 @@ async def main(args):
 
         async def update_chunk_size_estimation(ch):
             size_label = 'defrag_collection_est_size'
-            if size_label in c:
+            if size_label in ch:
                 return
 
             if args.dryrun:
-                c[size_label] = args.phase_1_estimated_chunk_size_kb
+                ch[size_label] = args.phase_1_estimated_chunk_size_kb
                 return
 
-            chunk_range = [c['min'], c['max']]
-            c[size_label] = await coll.data_size_kb_from_shard(chunk_range)
-            await coll.try_write_chunk_size(chunk_range, shard, c[size_label])
+            chunk_range = [ch['min'], ch['max']]
+            ch[size_label] = await coll.data_size_kb_from_shard(chunk_range)
+            await coll.try_write_chunk_size(chunk_range, shard, ch[size_label])
 
         def lookahead(iterable):
             """Pass through all values from the given iterable, augmented by the
