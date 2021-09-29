@@ -385,7 +385,6 @@ async def main(args):
                     skip_chunk = c['defrag_collection_est_size'] >= target_chunk_size_kb * 0.75
 
                 if skip_chunk or not has_more:
-                    remain_chunks.append(c)
                     if 'defrag_collection_est_size' not in c:
                         if args.dryrun:
                             c['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
@@ -393,6 +392,9 @@ async def main(args):
                             chunk_range = [c['min'], c['max']]
                             c['defrag_collection_est_size'] = await coll.data_size_kb_from_shard(chunk_range)
                             await coll.try_write_chunk_size(chunk_range, shard, c['defrag_collection_est_size'])
+
+                    remain_chunks.append(c)
+
                 else:
                     consecutive_chunks = [c]
                     estimated_size_of_consecutive_chunks = get_chunk_size(c)
@@ -405,31 +407,34 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += get_chunk_size(c)
             elif len(consecutive_chunks) == 1:
-                if 'defrag_collection_est_size' not in consecutive_chunks[0]:
+                lonely_chunk = consecutive_chunks[0]
+                if 'defrag_collection_est_size' not in lonely_chunk:
                     if args.dryrun:
-                        consecutive_chunks[0]['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
+                        lonely_chunk['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
                     else:
-                        chunk_range = [consecutive_chunks[0]['min'], consecutive_chunks[0]['max']]
+                        chunk_range = [lonely_chunk['min'], lonely_chunk['max']]
                         data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
                         await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
-                        consecutive_chunks[0]['defrag_collection_est_size'] = data_size_kb
+                        lonely_chunk['defrag_collection_est_size'] = data_size_kb
 
-                remain_chunks.append(consecutive_chunks[0])
+                remain_chunks.append(lonely_chunk)
 
                 consecutive_chunks = [c]
                 estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
                 if not has_more:
-                    remain_chunks.append(c)
-                    if 'defrag_collection_est_size' not in consecutive_chunks[0]:
+                    lonely_chunk = consecutive_chunks[0]
+                    if 'defrag_collection_est_size' not in lonely_chunk:
                         if args.dryrun:
-                            consecutive_chunks[0]['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
+                            lonley_chunk['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
                         else:
-                            chunk_range = [consecutive_chunks[0]['min'], consecutive_chunks[0]['max']]
+                            chunk_range = [lonely_chunk['min'], lonely_chunk['max']]
                             data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
                             await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
-                            c['defrag_collection_est_size'] = data_size_kb
+                            lonely_chunk['defrag_collection_est_size'] = data_size_kb
 
+                    remain_chunks.append(lonely_chunk)
+                    
                 continue
             else:
                 merge_consecutive_chunks_without_size_check = True
