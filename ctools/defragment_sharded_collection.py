@@ -387,7 +387,7 @@ async def main(args):
                 if skip_chunk or not has_more:
                     remain_chunks.append(c)
                     if 'defrag_collection_est_size' not in c:
-                        if not args.dryrun:
+                        if args.dryrun:
                             c['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
                         else:
                             chunk_range = [c['min'], c['max']]
