@@ -438,8 +438,8 @@ async def main(args):
 
             merge_consecutive_chunks_without_size_check = False
 
-            if consecutive_chunks.batch[-1]['max'] == c['min']:
-                consecutive_chunks.append(c)
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not ( consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c and consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20)):
+                    consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
                 remain_chunks.append(consecutive_chunks.batch[0])
