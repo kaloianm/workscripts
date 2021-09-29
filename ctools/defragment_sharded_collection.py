@@ -355,6 +355,19 @@ async def main(args):
             else:
                 return args.phase_1_estimated_chunk_size_kb
 
+        async def update_chunk_size_estimation(ch):
+            size_label = 'defrag_collection_est_size'
+            if size_label in c:
+                return
+
+            if args.dryrun:
+                c[size_label] = args.phase_1_estimated_chunk_size_kb
+                return
+
+            chunk_range = [c['min'], c['max']]
+            c[size_label] = await coll.data_size_kb_from_shard(chunk_range)
+            await coll.try_write_chunk_size(chunk_range, shard, c[size_label])
+
         def lookahead(iterable):
             """Pass through all values from the given iterable, augmented by the
             information if there are more values to come after the current one
@@ -385,16 +398,8 @@ async def main(args):
                     skip_chunk = c['defrag_collection_est_size'] >= target_chunk_size_kb * 0.75
 
                 if skip_chunk or not has_more:
-                    if 'defrag_collection_est_size' not in c:
-                        if args.dryrun:
-                            c['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
-                        else:
-                            chunk_range = [c['min'], c['max']]
-                            c['defrag_collection_est_size'] = await coll.data_size_kb_from_shard(chunk_range)
-                            await coll.try_write_chunk_size(chunk_range, shard, c['defrag_collection_est_size'])
-
+                    await update_chunk_size_estimation(c)
                     remain_chunks.append(c)
-
                 else:
                     consecutive_chunks = [c]
                     estimated_size_of_consecutive_chunks = get_chunk_size(c)
@@ -407,33 +412,15 @@ async def main(args):
                 consecutive_chunks.append(c)
                 estimated_size_of_consecutive_chunks += get_chunk_size(c)
             elif len(consecutive_chunks) == 1:
-                lonely_chunk = consecutive_chunks[0]
-                if 'defrag_collection_est_size' not in lonely_chunk:
-                    if args.dryrun:
-                        lonely_chunk['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
-                    else:
-                        chunk_range = [lonely_chunk['min'], lonely_chunk['max']]
-                        data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
-                        await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
-                        lonely_chunk['defrag_collection_est_size'] = data_size_kb
-
-                remain_chunks.append(lonely_chunk)
+                await update_chunk_size_estimation(consecutive_chunks[0])
+                remain_chunks.append(consecutive_chunks[0])
 
                 consecutive_chunks = [c]
                 estimated_size_of_consecutive_chunks = get_chunk_size(c)
 
                 if not has_more:
-                    lonely_chunk = consecutive_chunks[0]
-                    if 'defrag_collection_est_size' not in lonely_chunk:
-                        if args.dryrun:
-                            lonley_chunk['defrag_collection_est_size'] = args.phase_1_estimated_chunk_size_kb
-                        else:
-                            chunk_range = [lonely_chunk['min'], lonely_chunk['max']]
-                            data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
-                            await coll.try_write_chunk_size(chunk_range, shard, data_size_kb)
-                            lonely_chunk['defrag_collection_est_size'] = data_size_kb
-
-                    remain_chunks.append(lonely_chunk)
+                    await update_chunk_size_estimation(consecutive_chunks[0])
+                    remain_chunks.append(consecutive_chunks[0])
                     
                 continue
             else:
@@ -509,6 +496,7 @@ async def main(args):
                 consecutive_chunks = [c]
                 estimated_size_of_consecutive_chunks = args.phase_1_estimated_chunk_size_kb
                 if not has_more:
+                    await update_chunk_size_estimation(c)
                     remain_chunks.append(c)
             else:
                 consecutive_chunks = []
