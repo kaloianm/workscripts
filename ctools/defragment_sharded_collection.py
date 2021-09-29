@@ -755,6 +755,12 @@ async def main(args):
         # </for c in sorted_chunks:>
         return total_moved_data_kb
 
+    '''
+    for each chunk C in the shard:
+    - No split if chunk size < 120% target chunk size
+    - Split in the middle if chunk size between 120% and 240% target chunk size
+    - Split according to split vector otherwise
+    '''
     async def split_oversized_chunks(shard, progress):
         shard_entry = shard_to_chunks[shard]
         shard_chunks = shard_entry['chunks']
