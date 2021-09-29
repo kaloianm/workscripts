@@ -390,8 +390,8 @@ async def main(args):
                 self.batch_size_estimation = 0
                 self.trust_batch_estimation = True
 
-            # Append a chunk to the batch and update the size estimation
             def append(self, ch):
+                """Append a chunk to the batch and update the size estimation"""
                 self.batch.append(ch)
                 if 'defrag_collection_est_size' not in ch:
                     self.trust_batch_estimation = False
@@ -399,13 +399,13 @@ async def main(args):
                 else:
                     self.batch_size_estimation += ch['defrag_collection_est_size']
 
-            # Update batch size estimation             
             def update_size(self, size):
+                """Update batch size estimation"""             
                 self.batch_size_estimation = size
                 self.trust_batch_estimation = True
 
-            # Reset the batch and the size estimation
             def reset(self):
+                """Reset the batch and the size estimation"""
                 self.batch = []
                 self.batch_size_estimation = 0
                 self.trust_batch_estimation = True
@@ -438,8 +438,20 @@ async def main(args):
 
             merge_consecutive_chunks_without_size_check = False
 
-            if consecutive_chunks.batch[-1]['max'] == c['min'] and not ( consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c and consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20)):
-                    consecutive_chunks.append(c)
+            
+            def will_overflow_target_size():
+                """Returns true if merging the `consecutive_chunks` with the current one `c` will
+                produce a chunk that is 20% bigger that the target chunk size.
+
+                If we don't trust the estimation of `consecutive_chunks` or 
+                we don't know the size of `c` this function will always return false.
+                """
+                trust_estimations = consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c
+                return (trust_estimations and
+                        consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20))
+
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size():
+                consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
                 remain_chunks.append(consecutive_chunks.batch[0])
