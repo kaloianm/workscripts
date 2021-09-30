@@ -27,7 +27,7 @@ eventual exceptions, without stopping the execution.
 @decorator.decorator
 async def wrap_command(func, *args, **kwargs):
     try:
-        res = await func(*args, **kwargs)
+        await func(*args, **kwargs)
     except Exception as e:
         print("Command failed. Function: {} . Params: {}. Exception: {}".format(func.__name__, args[1:], e))
 
