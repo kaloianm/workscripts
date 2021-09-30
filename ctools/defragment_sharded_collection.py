@@ -41,13 +41,21 @@ class ShardedCollection:
         }, codec_options=self.cluster.client.codec_options)
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
-    # TODO this method does not work as is now
-    async def data_size_kb_entire_shard(self, shard):
-        pipeline = [{"$collStats": {"storageStats": {}}},
-                    {"$match": {"shard": shard}}]
-        list = await self.cluster.client[self.ns['db']][self.ns['coll']].aggregate(pipeline).to_list(1)
-        size = list[0]['storageStats']['size']
-        return math.ceil(max(float(size), 1024.0) / 1024.0)
+    async def data_size_kb_per_shard(self):
+        """Returns an dict:
+        {<shard_id>: <size>}
+        with collection size in KiB for each shard
+        """
+        pipeline = [{'$collStats': {'storageStats': {}}},
+                    {'$project': {'shard': True, 'storageStats': {'size': True}}}]
+        storage_stats = await self.cluster.client[self.ns['db']][self.ns['coll']].aggregate(pipeline).to_list(300)
+        def bytes_to_kb(size):
+            return max(float(size), 1024.0) / 1024.0
+        sizes = {}
+        for s in storage_stats:
+            shard_id = s['shard']
+            sizes[shard_id] = bytes_to_kb(s['storageStats']['size'])
+        return sizes
 
     async def data_size_kb_from_shard(self, range):
         data_size_response = await self.cluster.client[self.ns['db']].command({
@@ -194,12 +202,6 @@ async def main(args):
     coll = ShardedCollection(cluster, args.ns)
     await coll.init()
 
-    num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
-    logging.info(
-        f"""Collection {coll.name} has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks. """
-        f"""For optimisation and for dry runs will assume a chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
-    )
-
     ###############################################################################################
     # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
     # MaxChunkSize has been configured appropriately
@@ -238,8 +240,9 @@ async def main(args):
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
 
     if args.dryrun:
-        logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)}.
-                        No actual modifications to the cluster will occur.""")
+        logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)} """
+                f"""and an estimated chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
+                f"""No actual modifications to the cluster will occur.""")
     else:
         yes_no(
             f'The next steps will perform an actual merge with target chunk size of {fmt_kb(target_chunk_size_kb)}.'
@@ -253,6 +256,9 @@ async def main(args):
     # Initialisation (Read-Only): Fetch all chunks in memory and calculate the collection version
     # in preparation for the subsequent write phase.
     ###############################################################################################
+
+    num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
+    logging.info(f"""Collection '{coll.name}' has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks""")
 
     async def load_chunks():
         global shard_to_chunks, collectionVersion
@@ -272,6 +278,13 @@ async def main(args):
                 shard = shard_to_chunks[shard_id]
                 shard['chunks'].append(c)
                 progress.update()
+    
+        if not args.dryrun:
+            sizes = await coll.data_size_kb_per_shard()
+            assert (len(sizes) == len(shard_to_chunks))
+            for shard_id in shard_to_chunks:
+                assert (shard_id in sizes)
+                shard_to_chunks[shard_id]['size'] = sizes[shard_id]
 
     await load_chunks()
     assert (len(shard_to_chunks) > 1)
@@ -337,9 +350,13 @@ async def main(args):
         if len(shard_chunks) == 0:
             return
 
+        estimated_chunk_size_kb = args.phase_1_estimated_chunk_size_kb
+        if not args.dryrun:
+            estimated_chunk_size_kb = shard_entry['size'] / float(len(shard_entry['chunks']))
         chunk_at_shard_version = max(shard_chunks, key=lambda c: c['lastmod'])
         shard_version = chunk_at_shard_version['lastmod']
         shard_is_at_collection_version = shard_version.time == collection_version.time
+        progress.write(f'{shard}: avg chunk size {fmt_kb(estimated_chunk_size_kb)}')
         progress.write(f'{shard}: {shard_version}: ', end='')
         if shard_is_at_collection_version:
             progress.write('Merge will start without major version bump')
@@ -352,7 +369,7 @@ async def main(args):
             if 'defrag_collection_est_size' in ch:
                 return ch['defrag_collection_est_size']
             else:
-                return args.phase_1_estimated_chunk_size_kb
+                return estimated_chunk_size_kb
 
         async def update_chunk_size_estimation(ch):
             size_label = 'defrag_collection_est_size'
@@ -360,7 +377,7 @@ async def main(args):
                 return
 
             if args.dryrun:
-                ch[size_label] = args.phase_1_estimated_chunk_size_kb
+                ch[size_label] = estimated_chunk_size_kb
                 return
 
             chunk_range = [ch['min'], ch['max']]
@@ -413,7 +430,7 @@ async def main(args):
             def __len__(self):
                 return len(self.batch)
 
-        consecutive_chunks = ChunkBatch(args.phase_1_estimated_chunk_size_kb)
+        consecutive_chunks = ChunkBatch(estimated_chunk_size_kb)
         remain_chunks = []
 
         for c, has_more in lookahead(shard_chunks):
@@ -783,14 +800,17 @@ async def main(args):
     coll_size_kb = await coll.data_size_kb()
 
     sum_coll_size = 0
-    for s in shard_to_chunks:
+    for shard_id, entry in shard_to_chunks.items():
+        estimated_chunk_size_kb = args.phase_1_estimated_chunk_size_kb
+        if not args.dryrun:
+            estimated_chunk_size_kb = entry['size'] / float(len(entry['chunks']))
         data_size = 0
-        for c in shard_to_chunks[s]['chunks']:
+        for c in entry['chunks']:
             if 'defrag_collection_est_size' in c:
                 data_size += c['defrag_collection_est_size']
             else:
-                data_size += args.phase_1_estimated_chunk_size_kb
-        total_shard_size[s] = data_size
+                data_size += estimated_chunk_size_kb
+        total_shard_size[shard_id] = data_size
         sum_coll_size += data_size
     
     # If we run on a dummy cluster assume collection size
@@ -911,22 +931,13 @@ if __name__ == "__main__":
         and merge progress which may have been made by an earlier invocation""",
         action='store_true')
     argsParser.add_argument(
-        '--phase_1_estimated_chunk_size_mb',
-        help="""Applies only to Phase 1 and specifies the amount of data to estimate per chunk
-           (in MB) before invoking dataSize in order to obtain the exact size. This value is just an
-           optimisation under Phase 1 order to collect as large of a candidate range to merge as
-           possible before invoking dataSize on the entire candidate range. Otherwise, the script
-           would be invoking dataSize for every single chunk and blocking for the results, which
-           would reduce its parallelism.
+        '--estimated_chunk_size_mb',
+        help="""Only used in dry-runs to estimate the chunk size (in MiB) instead of calling dataSize.
 
            The default is chosen as 40%% of 64MB, which states that we project that under the
            current 64MB chunkSize default and the way the auto-splitter operates, the collection's
            chunks are only about 40%% full.
-
-           For dry-runs, because dataSize is not invoked, this parameter is also used to simulate
-           the exact chunk size (i.e., instead of actually calling dataSize, the script pretends
-           that it returned phase_1_estimated_chunk_size_mb).
-           """, metavar='phase_1_estimated_chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
+           """, metavar='chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
         type=lambda x: int(x) * 1024, default=64 * 1024 * 0.40)
     argsParser.add_argument(
         '--phase_1_perform_unsafe_merge',
