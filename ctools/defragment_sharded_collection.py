@@ -884,10 +884,6 @@ async def main(args):
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
 
-    # after a run of split_chunks we need to reload all chunks
-    await load_chunks()
-    build_chunk_index()
-
     print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
