@@ -869,8 +869,12 @@ async def main(args):
 
         if num_chunks < math.ceil(ideal_num_chunks * 1.25) or moved_data_kb == 0:
             break
+        
+        pass # while max_iterations > 0:
 
-        logging.info(f'Phase 2.2: Splitting oversized chunks, moved {fmt_kb(moved_data_kb)} of data')
+
+    if args.exec_phase == 'phase3' or args.exec_phase == 'all':
+        logging.info(f'Phase III : Splitting oversized chunks')
 
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks') as progress:
@@ -879,10 +883,6 @@ async def main(args):
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
-
-        # after a run of split_chunks we need to reload all chunks
-        await load_chunks()
-        build_chunk_index()
 
     print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
@@ -951,7 +951,7 @@ if __name__ == "__main__":
         '--phases',
         help="""Which phase of the defragmentation algorithm to execute.""",
         metavar='phase', dest="exec_phase", type=str, default='all', choices=[
-            'all', 'phase1', 'phase2'
+            'all', 'phase1', 'phase2', 'phase3'
         ])
     argsParser.add_argument(
         '--phase_2_min_migration_period',
