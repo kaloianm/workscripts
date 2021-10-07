@@ -365,12 +365,6 @@ async def main(args):
 
         num_lock_busy_errors_encountered = 0
 
-        def get_chunk_size(ch):
-            if 'defrag_collection_est_size' in ch:
-                return ch['defrag_collection_est_size']
-            else:
-                return estimated_chunk_size_kb
-
         async def update_chunk_size_estimation(ch):
             size_label = 'defrag_collection_est_size'
             if size_label in ch:
@@ -642,7 +636,7 @@ async def main(args):
                 raise Exception("Max number of migrations exceeded")
 
         async def get_remain_chunk_imbalance(center, target_chunk):
-            if (target_chunk is None) or target_chunk['shard'] == shard:
+            if target_chunk is None:
                 return sys.maxsize
 
             combined = await get_chunk_size(center) + await get_chunk_size(target_chunk)
@@ -688,15 +682,9 @@ async def main(args):
             right_chunk = chunks_min_index.get(frozenset(c['max'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'min': c['max']})
 #                if not args.dryrun:
 #                    assert(left_chunk is None or (await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']}))['shard'] == left_chunk['shard'])
-
-            # skip chunks on same shard
-            if left_chunk is not None and left_chunk['shard'] == shard:
-                left_chunk = None
-            if right_chunk is not None and right_chunk['shard'] == shard:
-                right_chunk = None
             
             # Exclude overweight target shards
-            if left_chunk is not None and right_chunk is not None:
+            if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
                 if total_shard_size[left_chunk['shard']] > total_shard_size[right_chunk['shard']] * args.shard_imbalance_frac:
                     left_chunk = None
                 elif total_shard_size[right_chunk['shard']] > total_shard_size[left_chunk['shard']] * args.shard_imbalance_frac:
@@ -708,17 +696,24 @@ async def main(args):
                 target_shard = left_chunk['shard']
                 left_size = await get_chunk_size(left_chunk)
                 new_size = left_size + center_size_kb
-                is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+                is_overweight = False
+                if shard != target_shard:
+                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+                
                 # only move a smaller chunk unless shard is bigger
                 if (center_size_kb <= left_size or is_overweight) and (
                     await get_remain_chunk_imbalance(c, left_chunk)) < (await get_remain_chunk_imbalance(c, right_chunk)):
 
+                    merge_bounds = [left_chunk['min'], c['max']]
                     if not args.dryrun:
-                        await coll.move_chunk(c, target_shard)
+                        if shard != target_shard:
+                            await coll.move_chunk(c, target_shard)
+                        
                         await coll.merge_chunks([left_chunk, c], args.phase_1_perform_unsafe_merge)
+                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
-                        bounds = [left_chunk['min'], c['max']]
-                        progress.write(f'Moving chunk left from {shard} to {target_shard}, merging {bounds}, new size: {fmt_kb(new_size)}')
+                        progress.write(f'Moving chunk left from {shard} to {target_shard}, '
+                                        'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map, 
                     chunks_id_index.pop(c['_id']) # only first chunk is kept
@@ -741,16 +736,23 @@ async def main(args):
                 target_shard = right_chunk['shard']
                 right_size = await get_chunk_size(right_chunk)
                 new_size = right_size + center_size_kb
-                is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+                is_overweight = False
+                if shard != target_shard:
+                    total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+                
                 if center_size_kb <= right_size or is_overweight:
                     # TODO abort if target shard has too much data already
 
+                    merge_bounds = [c['min'], right_chunk['max']]
                     if not args.dryrun:
-                        await coll.move_chunk(c, target_shard)
+                        if shard != target_shard:
+                            await coll.move_chunk(c, target_shard)
+                        
                         await coll.merge_chunks([c, right_chunk], args.phase_1_perform_unsafe_merge)
+                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
-                        bounds = [c['min'], right_chunk['max']]
-                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, merging {bounds}, new size: {fmt_kb(new_size)}')
+                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
+                                        'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map
                     chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
