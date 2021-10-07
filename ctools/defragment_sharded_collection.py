@@ -79,7 +79,19 @@ class ShardedCollection:
         shard_entry = await self.cluster.configDb.shards.find_one({'_id': chunk['shard']})
         if shard_entry is None:
             raise Exception(f"cannot resolve shard {chunk['shard']}")
-            
+
+        chunk_size_kb = c['defrag_collection_est_size']
+        if chunk_size_kb <= maxChunkSize_kb:
+            return
+
+        num_split_points = int(chunk_size_kb / maxChunkSize_kb)
+        surplus = chunk_size_kb - num_split_points * maxChunkSize_kb
+        new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
+
+        if surplus >= maxChunkSize_kb - new_maxChunkSize_kb && surplus < maxChunkSize_kb * 0.8:
+            # add 5% more to avoid creating a last chunk with few documents
+            maxChunkSize_kb = new_maxChunkSize_kb * 0.05
+
         conn = await self.cluster.make_direct_shard_connection(shard_entry)
         res = await conn.admin.command({
                 'splitVector': self.name,
