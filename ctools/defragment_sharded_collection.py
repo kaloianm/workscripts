@@ -871,6 +871,18 @@ async def main(args):
             break
         
         pass # while max_iterations > 0:
+       
+    if args.exec_phase == 'phase2' or args.exec_phase == 'all':
+        async def write_size(ch):
+            bounds = [ch['min'], ch['max']]
+            size = await coll.data_size_kb_from_shard(bounds)
+            await coll.try_write_chunk_size(bounds, ch['shard'], size)
+
+        tasks = []
+        async for ch in cluster.configDb.chunks.find({'ns': coll.name, 'defrag_collection_est_size': {'$exists': 0}}):
+            tasks.append(
+                    asyncio.ensure_future(write_size(ch)))
+        await asyncio.gather(*tasks)
 
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
