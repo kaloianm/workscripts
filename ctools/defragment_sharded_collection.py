@@ -890,8 +890,9 @@ async def main(args):
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
+        avg_chunk_size_shard = data_size / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
         print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
-                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(data_size / num_chunks_per_shard): >9}")
+                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}")
     
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
