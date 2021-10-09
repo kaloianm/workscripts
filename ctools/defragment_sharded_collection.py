@@ -622,7 +622,7 @@ async def main(args):
 
         return data_size_kb
 
-    async def move_merge_chunks_by_size(shard, idealNumChunks, progress):
+    async def move_merge_chunks_by_size(shard, progress):
         global num_small_chunks
         total_moved_data_kb = 0
 
@@ -665,11 +665,6 @@ async def main(args):
 
         for c in sorted_chunks:
             progress.update()
-
-            # Abort if we have too few chunks already
-            if num_chunks <= idealNumChunks + 1:
-                progress.write(f"too few chunks already on shard {shard}: {num_chunks} < {idealNumChunks} + 1")
-                break
 
             # this chunk might no longer exist due to a move
             if c['_id'] not in chunks_id_index:
@@ -848,7 +843,7 @@ async def main(args):
             tasks = []
             # TODO balancer logic prevents us from donating / receiving more than once per shard
             for s in shard_to_chunks:
-                moved_data_kb += await move_merge_chunks_by_size(s, ideal_num_chunks_per_shard, progress)
+                moved_data_kb += await move_merge_chunks_by_size(s, progress)
 #                tasks.append(
 #                    asyncio.ensure_future(move_merge_chunks_by_size(s, ideal_num_chunks_per_shard, progress)))
 #            await asyncio.gather(*tasks)
@@ -867,7 +862,7 @@ async def main(args):
             num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
             assert(num_chunks_actual == num_chunks)
 
-        if num_chunks < math.ceil(ideal_num_chunks * 1.25) or moved_data_kb == 0:
+        if moved_data_kb == 0:
             break
         
         pass # while max_iterations > 0:
