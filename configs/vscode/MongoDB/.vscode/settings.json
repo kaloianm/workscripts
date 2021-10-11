@@ -126,4 +126,5 @@
     "search.useIgnoreFiles": false,
     "editor.suggestSelection": "first",
     "python.pythonPath": "python",
+    "C_Cpp.intelliSenseMemoryLimit": 8096,
 }

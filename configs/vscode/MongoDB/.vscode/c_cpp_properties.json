@@ -217,7 +217,8 @@
                 "${workspaceFolder}/src/third_party/zstandard-1.4.4/zstd/contrib/pzstd"
             ],
             "defines": [],
-            "intelliSenseMode": "clang-x64",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/opt/mongodbtoolchain/v3/bin/gcc",
             "browse": {
                 "path": [
                     "/usr/include",
