@@ -713,7 +713,7 @@ async def main(args):
                         await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
                         progress.write(f'Moving chunk left from {shard} to {target_shard}, '
-                                        'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
+                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map, 
                     chunks_id_index.pop(c['_id']) # only first chunk is kept
@@ -752,7 +752,7 @@ async def main(args):
                         await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
                         progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
-                                        'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
+                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map
                     chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
