@@ -14,12 +14,30 @@ from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
 from bson.objectid import ObjectId
 from common import Cluster
-from pymongo import InsertOne
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
+
+maxInteger = sys.maxsize
+minInteger = -sys.maxsize - 1
+
+
+def fmt_bytes(num):
+    suffix = "B"
+    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f}Yi{suffix}"
+
+
+def chunk_size_desc():
+    if args.chunk_size_min == args.chunk_size_max:
+        return fmt_bytes(args.chunk_size_min)
+    else:
+        return f'[min: {fmt_bytes(args.chunk_size_min)}, max: {fmt_bytes(args.chunk_size_max)}]'
 
 
 async def main(args):
@@ -40,6 +58,8 @@ async def main(args):
     print(
         f'Placing {args.num_chunks} chunks over {shardIds} for collection {args.ns} with a shard key of {args.shard_key_type}'
     )
+
+    print(f'Chunk size: {chunk_size_desc()}, document size: {fmt_bytes(args.doc_size)}')
 
     uuid_shard_key_byte_order = None
     if args.shard_key_type == 'uuid':
@@ -107,81 +127,98 @@ async def main(args):
         else:
             return i
 
-    def gen_chunk(i):
-        sortedShardIdx = math.floor(i / (args.num_chunks / len(shardIds)))
-        shardId = random.choice(
-            shardIds[:sortedShardIdx] + shardIds[sortedShardIdx + 1:]
-        ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
+    def gen_chunks(num_chunks):
+        for i in range(num_chunks):
+            if len(shardIds) == 1:
+                shardId = shardIds[0]
+            else:
+                sortedShardIdx = math.floor(i / (num_chunks / len(shardIds)))
+                shardId = random.choice(
+                    shardIds[:sortedShardIdx] + shardIds[sortedShardIdx + 1:]
+                ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
 
-        obj = {
-            '_id': make_chunk_id(i),
-            'ns': args.ns,
-            'lastmodEpoch': epoch,
-            'lastmod': bson.timestamp.Timestamp(i + 1, 0),
-            'shard': shardId
-        }
+            obj = {
+                '_id': make_chunk_id(i),
+                'ns': args.ns,
+                'lastmodEpoch': epoch,
+                'lastmod': bson.timestamp.Timestamp(i + 1, 0),
+                'shard': shardId
+            }
 
-        if i == 0:
-            obj = {
-                **obj,
-                **{
-                    'min': {
-                        'shardKey': bson.min_key.MinKey
-                    },
-                    'max': {
-                        'shardKey': make_shard_key(i * 10000)
-                    },
-                }
-            }
-        elif i == args.num_chunks - 1:
-            obj = {
-                **obj,
-                **{
-                    'min': {
-                        'shardKey': make_shard_key((i - 1) * 10000)
-                    },
-                    'max': {
-                        'shardKey': bson.max_key.MaxKey
-                    },
-                }
-            }
-        else:
-            obj = {
-                **obj,
-                **{
-                    'min': {
-                        'shardKey': make_shard_key((i - 1) * 10000)
-                    },
-                    'max': {
-                        'shardKey': make_shard_key(i * 10000)
+            if i == 0:
+                obj = {
+                    **obj,
+                    **{
+                        'min': {
+                            'shardKey': bson.min_key.MinKey
+                        },
+                        'max': {
+                            'shardKey': make_shard_key(i * 10000)
+                        },
                     }
                 }
-            }
+            elif i == num_chunks - 1:
+                obj = {
+                    **obj,
+                    **{
+                        'min': {
+                            'shardKey': make_shard_key((i - 1) * 10000)
+                        },
+                        'max': {
+                            'shardKey': bson.max_key.MaxKey
+                        },
+                    }
+                }
+            else:
+                obj = {
+                    **obj,
+                    **{
+                        'min': {
+                            'shardKey': make_shard_key((i - 1) * 10000)
+                        },
+                        'max': {
+                            'shardKey': make_shard_key(i * 10000)
+                        }
+                    }
+                }
 
-        return obj
+            yield obj
 
-    chunk_objs = list(map(gen_chunk, range(args.num_chunks)))
+    def generate_inserts(chunks_subset):
+        chunk_size = random.randint(args.chunk_size_min, args.chunk_size_max)
+        doc_size = args.doc_size
+        num_of_docs_per_chunk = chunk_size // doc_size
+        long_string = 'X' * math.ceil(doc_size / 2)
+
+        for c in chunks_subset:
+            minKey = c['min'][
+                'shardKey'] if c['min']['shardKey'] is not bson.min_key.MinKey else minInteger
+            maxKey = c['max'][
+                'shardKey'] if c['max']['shardKey'] is not bson.max_key.MaxKey else maxInteger
+            gap = ((maxKey - minKey) // (num_of_docs_per_chunk + 1))
+            key = minKey
+            for i in range(num_of_docs_per_chunk):
+                yield {'shardKey': key, long_string: long_string}
+                key += gap
+                assert key < maxKey, f'key: {key}, maxKey: {maxKey}'
 
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
-            config_and_shard_insert = await asyncio.gather(*[
-                asyncio.ensure_future(
-                    cluster.configDb.chunks.bulk_write(
-                        list(map(lambda x: InsertOne(x), chunks_subset)), ordered=False)),
-                asyncio.ensure_future(shard_connections[shard][ns['db']][ns['coll']].bulk_write(
-                    list(
-                        map(lambda x: InsertOne(dict(x['min'], **{'originalChunk': x})),
-                            chunks_subset)), ordered=False))
-            ])
+            write_chunks_entries = asyncio.ensure_future(
+                cluster.configDb.chunks.insert_many(chunks_subset, ordered=False))
+            write_data = asyncio.ensure_future(
+                shard_connections[shard][ns['db']][ns['coll']].insert_many(
+                    generate_inserts(chunks_subset), ordered=False))
 
-            progress.update(config_and_shard_insert[0].inserted_count)
+            await asyncio.gather(write_chunks_entries, write_data)
+            progress.update(len(chunks_subset))
 
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
         progress.write('Writing chunks entries ...')
-        batch_size = 5000
+        batch_size = 1
         shard_to_chunks = {}
         tasks = []
-        for c in chunk_objs:
+        for c in gen_chunks(args.num_chunks):
             shard = c['shard']
             if not shard in shard_to_chunks:
                 shard_to_chunks[shard] = [c]
@@ -216,18 +253,26 @@ async def main(args):
 
 
 if __name__ == "__main__":
+    def kb_to_bytes(kilo):
+        return int(kilo) * 1024
+
     argsParser = argparse.ArgumentParser(
         description='Tool to generated a sharded collection with various degree of fragmentation')
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)
-    argsParser.add_argument('--ns', help='The namespace to create', metavar='ns', type=str,
+    argsParser.add_argument('--ns', help='The namespace to create', metavar='neamspace', type=str,
                             required=True)
-    argsParser.add_argument('--num_chunks', help='The number of chunks to create',
-                            metavar='num_chunks', type=int, required=True)
-    argsParser.add_argument('--shard_key_type', help='The type to use for a shard key',
-                            metavar='shard_key_type', type=str, default='uuid',
-                            choices=['integer', 'uuid'])
+    argsParser.add_argument('--num-chunks', help='The number of chunks to create', metavar='num',
+                            type=int, required=True)
+    argsParser.add_argument('--chunk-size-kb', help='Final chunk size (in KiB)', metavar='num',
+                            dest='chunk_size', type=lambda x: kb_to_bytes(x), nargs='+',
+                            default=kb_to_bytes(1024))
+    argsParser.add_argument('--doc-size-kb', help='Size of the generated documents (in KiB)',
+                            metavar='num', dest='doc_size', type=lambda x: kb_to_bytes(x),
+                            default=kb_to_bytes(8))
+    argsParser.add_argument('--shard-key-type', help='The type to use for a shard key',
+                            metavar='type', type=str, default='uuid', choices=['integer', 'uuid'])
     argsParser.add_argument(
         '--fragmentation',
         help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
@@ -236,5 +281,21 @@ if __name__ == "__main__":
         metavar='fragmentation', type=float, default=0.10)
 
     args = argsParser.parse_args()
+
+    if len(args.chunk_size) == 1:
+        args.chunk_size_min = args.chunk_size_max = args.chunk_size[0]
+    elif len(args.chunk_size) == 2:
+        args.chunk_size_min = args.chunk_size[0]
+        args.chunk_size_max = args.chunk_size[1]
+    else:
+        raise Exception(f'Too many chunk sizes values provided, maximum 2 allowed')
+
+    del args.chunk_size
+
+    if args.doc_size > min(args.chunk_size_min, args.chunk_size_max):
+        raise Exception(
+            f'''Specified document size is too big. It needs to be smaller than the chunk size: '''
+            f'''Doc size : {fmt_bytes(args.doc_size)}, Chunk size: {chunk_size_desc()}''')
+
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main(args))
