@@ -22,15 +22,19 @@ from pymongo import MongoClient
 if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
+# Global script configuration
+mongorestore_num_insertion_workers_per_collection = 16
 
-# Class to abstract the tool's command line parameters configuration
+
+# Read-only class which abstracts the tool's command line parameters configuration.
 class ToolConfiguration:
 
     # Class initialization. The 'args' parameter contains the parsed tool command line arguments.
     def __init__(self, args):
         self.binarypath = args.binarypath
-        self.introspectRoot = os.path.join(args.dir, 'introspect')
-        self.clusterRoot = os.path.join(args.dir, 'cluster')
+        self.root = args.dir
+        self.introspectRoot = os.path.join(self.root, 'introspect')
+        self.clusterRoot = os.path.join(self.root, 'cluster')
         self.configdump = args.configdumpdir[0]
         self.numShards = args.numshards
         self.genData = args.gen_data
@@ -40,129 +44,113 @@ class ToolConfiguration:
         self.clusterIntrospectMongoDPort = 20000
         self.clusterStartingPort = 27017
 
-        self.mongoRestoreNumInsertionWorkers = 16
-
         logging.info(f'Running cluster import with binaries located at: {self.binarypath}')
         logging.info(f'Config dump directory at: {self.configdump}')
-        logging.info(f'Data directory root at: {args.dir}')
+        logging.info(f'Reconstruction root at: {self.root}')
         logging.info(f'Introspect directory at: {self.introspectRoot}')
         logging.info(f'Cluster directory at: {self.clusterRoot}')
 
-        self.__cleanup_previous_runs()
 
-        os.makedirs(self.introspectRoot)
-        os.makedirs(self.clusterRoot)
+# Class which abstracts the invocations of external tools on which this script depends, such as
+# mlaunch or mongorestore.
+class ExternalProcessManager:
+
+    # Class initialization. The 'config' parameter is an instance of ToolConfiguration.
+    def __init__(self, config):
+        self._config = config
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(os.path.join(args.dir, 'reconstruct.log'), 'w',
-                                   kOutputLogFileBufSize)
+        self._outputLogFile = open(
+            os.path.join(self._config.root, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
 
-    # Invokes mongorestore of the config database dump against an instance running on 'restorePort'.
-    def restore_config_db_to_port(self, restorePort):
-        mongorestoreCommand = [
-            self.mongoRestoreBinary, '--port',
-            str(restorePort), '--numInsertionWorkersPerCollection',
-            str(self.mongoRestoreNumInsertionWorkers)
+    # Invokes mongorestore of the config database dump against the instance running on
+    # 'instance_port'
+    def mongorestore_config_db_to_port(self, instance_port):
+        # yapf: disable
+        mongorestore_command = [
+            self._config.mongoRestoreBinary,
+            '--port', str(instance_port),
+            '--numInsertionWorkersPerCollection', str(mongorestore_num_insertion_workers_per_collection)
         ]
+        # yapf: enable
 
-        if (os.path.isdir(self.configdump)):
-            # Discover if there are compressed files in order to decide whether to add the '--gzip'
-            # prefix.
+        if (os.path.isdir(self._config.configdump)):
+            # Discover if there are compressed files in order in order to decide whether to add the
+            # '--gzip' prefix to mongorestore
             if (os.path.exists(
-                    os.path.join(os.path.join(self.configdump, 'config'), 'databases.bson.gz'))):
-                self._outputLogFile.write(
-                    'Discovered gzipped contents, adding the --gzip option to mongorestore\n')
-                mongorestoreCommand += ['--gzip']
-            mongorestoreCommand += ['--dir', self.configdump]
+                    os.path.join(
+                        os.path.join(self._config.configdump, 'config'), 'databases.bson.gz'))):
+                logging.info(
+                    'Discovered gzipped contents, adding the --gzip option to mongorestore')
+                mongorestore_command += ['--gzip']
+            mongorestore_command += ['--dir', self._config.configdump]
         else:
-            mongorestoreCommand += ['--gzip', '--archive={}'.format(self.configdump)]
+            mongorestore_command += ['--gzip', f'--archive={self._config.configdump}']
 
-        logging.info(f'Executing mongorestore command: {" ".join(mongorestoreCommand)}')
-        subprocess.check_call(mongorestoreCommand, stdout=self._outputLogFile,
+        logging.info(f'Executing mongorestore command: {" ".join(mongorestore_command)}')
+        subprocess.check_call(mongorestore_command, stdout=self._outputLogFile,
                               stderr=self._outputLogFile)
 
     # Invokes the specified 'action' of mlaunch with 'dir' as the environment directory. All the
     # remaining 'args' are just appended to the thus constructed command line.
-    def mlaunch_action(self, action, dir, args=[]):
+    def mlaunch(self, action, dir, args=[]):
         if (not isinstance(args, list)):
             raise TypeError('args must be of type list.')
 
-        mlaunchPrefix = [
-            'mlaunch',
-            action,
-            '--binarypath',
-            self.binarypath,
-            '--dir',
-            dir,
+        # yapf: disable
+        mlaunch_command = [
+            'mlaunch', action,
+            '--binarypath', self._config.binarypath,
+            '--dir', dir,
             '--bind_ip_all',
         ]
+        # yapf: enable
 
-        if (set(mlaunchPrefix) & set(args)):
-            raise ValueError('args duplicates values in mlaunchPrefix')
+        if (set(mlaunch_command) & set(args)):
+            raise ValueError('args duplicates values in mlaunchCommand')
 
-        mlaunchCommand = mlaunchPrefix + args
+        mlaunch_command += args
 
-        logging.info(f'Executing mlaunch command: {" ".join(mlaunchCommand)}')
-        subprocess.check_call(mlaunchCommand, stdout=self._outputLogFile,
+        logging.info(f'Executing mlaunch command: {" ".join(mlaunch_command)}')
+        subprocess.check_call(mlaunch_command, stdout=self._outputLogFile,
                               stderr=self._outputLogFile)
 
-    # Performs cleanup by killing all potentially running mongodb processes and deleting any
-    # leftover files. Basically leaves '--dir' empty.
-    def __cleanup_previous_runs(self):
-        yes_no('The next step will kill all MongoDB processes and wipe out the data path.')
 
-        # Iterate through all processes and kill mongod and mongos
-        for process in psutil.process_iter():
-            try:
-                processExecutable = os.path.basename(process.exe())
-            except psutil.NoSuchProcess:
-                pass
-            except psutil.AccessDenied:
-                pass
-            else:
-                if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
-                    process.kill()
-                    process.wait()
-
-        # Remove the output directories
-        try:
-            shutil.rmtree(self.introspectRoot)
-        except FileNotFoundError:
-            pass
-
-        try:
-            shutil.rmtree(self.clusterRoot)
-        except FileNotFoundError:
-            pass
-
-
-# Abstracts management of the 'introspect' mongod instance which is used to read the cluster
-# configuration to instantiate
+# Class which abstracts interations with the introspect mongod instance which is used to read the
+# cluster configuration, based on which the final cluster will be instantiated.
 class ClusterIntrospect:
 
     # Class initialization. The 'config' parameter is an instance of ToolConfiguration.
-    def __init__(self, config):
+    def __init__(self, config, external_process):
         logging.info(
             f'Introspecting config dump using instance at port {config.clusterIntrospectMongoDPort}'
         )
 
-        # Start the instance and restore the config server dump
-        config.mlaunch_action(
-            'init', config.introspectRoot,
-            ['--single', '--port', str(config.clusterIntrospectMongoDPort)])
+        self._config = config
+        self._external_process = external_process
 
-        config.restore_config_db_to_port(config.clusterIntrospectMongoDPort)
+    def restore(self):
+        # Start the introspect instance and restore the config server dump
+        # yapf: disable
+        self._external_process.mlaunch('init', self._config.introspectRoot, [
+            '--single',
+            '--port', str(self._config.clusterIntrospectMongoDPort),
+        ])
+        # yapf: disable
+
+        self._external_process.mongorestore_config_db_to_port(self._config.clusterIntrospectMongoDPort)
 
         # Open a connection to the introspect instance
-        mongoDb = MongoClient('localhost', config.clusterIntrospectMongoDPort)
+        mongoDb = MongoClient('localhost', self._config.clusterIntrospectMongoDPort)
 
         self.configDb = mongoDb.config
 
-        self.numZones = self.configDb.tags.count_documents({})
-        self.numShards = self.configDb.shards.count_documents({})
-        self.FCV = mongoDb.admin.system.version.find_one({'_id': 'featureCompatibilityVersion'
-                                                          })['version']
+        self.num_shards = self.configDb.shards.count_documents({})
+        self.num_zones = self.configDb.tags.count_documents({})
+
+        self.FCV = mongoDb.admin.system.version.find_one(
+            {'_id': 'featureCompatibilityVersion'})['version']
 
 
 # Abstracts the manipulations of the mlaunch-started cluster
@@ -170,95 +158,93 @@ class MlaunchCluster:
 
     # Class initialization. The 'config' parameter is an instance of ToolConfiguration and
     # 'introspect' is an instance of ClusterIntrospect.
-    def __init__(self, config, introspect):
+    def __init__(self, config, introspect, external_process):
         self._config = config
         self._introspect = introspect
+        self._external_process = external_process
+        self._num_shards_to_start = self._introspect.num_shards if self._config.numShards is None else self._config.numShards
 
-        if config.numShards is None:
-            numShards = introspect.configDb.shards.count_documents({})
-        else:
-            numShards = config.numShards
-
-        if (numShards > 10):
+    # Uses mlaunch to start a cluster which matches that of the config dump.
+    def start_and_restore_destination_cluster(self):
+        if (self._num_shards_to_start > 10):
             yes_no(
-                f'The imported configuration data contains {str(numShards)} shards. Proceeding will start a large number of mongod processes.'
+                f'The imported configuration data contains {str(self._num_shards_to_start)} shards. Proceeding will start a large number of mongod processes.'
             )
 
-        config.mlaunch_action('init', config.clusterRoot, [
-            '--sharded',
-            str(numShards),
-            '--replicaset',
-            '--nodes',
-            '1',
+        # yapf: disable
+        self._external_process.mlaunch('init', self._config.clusterRoot, [
+            '--sharded', str(self._num_shards_to_start),
+            '--port', str(self._config.clusterStartingPort),
+            '--replicaset', '--nodes', '1',
             '--csrs',
-            '--mongos',
-            '1',
-            '--port',
-            str(config.clusterStartingPort),
-            '--wiredTigerCacheSizeGB',
-            '0.25',
-            '--oplogSize',
-            '50',
-            '--hostname',
-            socket.gethostname(),
+            '--mongos', '1',
+            '--wiredTigerCacheSizeGB', '0.25',
+            '--oplogSize', '40',
+            '--hostname', socket.gethostname(),
         ])
+        # yapf: enable
 
-        # Set the correct FCV on the cluster being reconstructed
-        clusterConnection = MongoClient('localhost', config.clusterStartingPort)
-        clusterConnection.admin.command('setFeatureCompatibilityVersion', introspect.FCV)
+        # Set the FCV on the cluster being reconstructed to match that of the dump
+        cluster_connection = MongoClient('localhost', config.clusterStartingPort)
+        cluster_connection.admin.command('setFeatureCompatibilityVersion', introspect.FCV)
 
         # TODO: Find a better way to determine the port of the config server's primary
-        self.configServerPort = config.clusterStartingPort + (numShards + 1)
+        self.configServerPort = config.clusterStartingPort + (self._num_shards_to_start + 1)
+        config_server_connection = MongoClient('localhost', self.configServerPort)
+        self.configDb = config_server_connection.config
 
-        configServerConnection = MongoClient('localhost', self.configServerPort)
-        self.configDb = configServerConnection.config
+        # Snapshot the shards from mlaunch before running restore
+        self._shards_from_mlaunch_snapshot = list(self.configDb.shards.find({}).sort('_id', 1))
+        logging.info(f'Original shards:\n{str(self._shards_from_mlaunch_snapshot)}')
+        self.configDb.shards.delete_many({})
+
+        self._external_process.mongorestore_config_db_to_port(self.configServerPort)
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the shards collection)
-    def restoreAndFixUpShardIds(self):
-        shardsFromDump = list(self._introspect.configDb.shards.find({}).sort('_id', 1))
-        shardsFromMlaunch = list(self.configDb.shards.find({}).sort('_id', 1))
+    def fixup_shard_ids(self):
+        logging.info('Renaming shard ids in the config.shards collection:')
 
-        self._config.restore_config_db_to_port(self.configServerPort)
+        shards_from_dump = list(self._introspect.configDb.shards.find({}).sort('_id', 1))
 
-        logging.info('Renaming shards in the shards collection:')
+        self._shardid_remap = {}
 
-        self._shardIdRemap = {}
+        if len(shards_from_dump) <= len(self._shards_from_mlaunch_snapshot):
+            for from_shard, to_shard in zip(
+                    deepcopy(shards_from_dump), deepcopy(self._shards_from_mlaunch_snapshot)):
+                self.configDb.shards.delete_one({'_id': from_shard['_id']})
 
-        if len(shardsFromDump) <= len(shardsFromMlaunch):
-            for shardFromDump, shardFromMlaunch in zip(deepcopy(shardsFromDump), shardsFromMlaunch):
-                self.configDb.shards.delete_one({'_id': shardFromDump['_id']})
-                self.configDb.shards.delete_one({'_id': shardFromMlaunch['_id']})
+                self._shardid_remap[from_shard['_id']] = to_shard['_id']
+                from_shard['_id'] = to_shard['_id']
+                from_shard['host'] = to_shard['host']
 
-                self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
+                self.configDb.shards.insert_one(from_shard)
 
-                shardFromDump['_id'] = shardFromMlaunch['_id']
-                shardFromDump['host'] = shardFromMlaunch['host']
-
-                self.configDb.shards.insert_one(shardFromDump)
-
-        elif len(shardsFromDump) > len(shardsFromMlaunch):
+        elif len(shards_from_dump) > len(self._shards_from_mlaunch_snapshot):
             # If the dump has more shards than the mlaunch cluster (--numshards was specified with
             # smaller number), assign the dump shards to the mlaunch shards in round-robin fashion
-            def roundRobin(arr):
+            def round_robin(arr):
                 i = 0
                 while True:
                     yield arr[i % len(arr)]
                     i += 1
 
-            for shardFromDump, shardFromMlaunch in zip(shardsFromDump,
-                                                       roundRobin(shardsFromMlaunch)):
-                self.configDb.shards.delete_one({'_id': shardFromDump['_id']})
+            for from_shard, to_shard in zip(shards_from_dump,
+                                            round_robin(self._shards_from_mlaunch_snapshot)):
+                self.configDb.shards.delete_one({'_id': from_shard['_id']})
 
-                self._shardIdRemap[shardFromDump['_id']] = shardFromMlaunch['_id']
+                self._shardid_remap[from_shard['_id']] = to_shard['_id']
+
+        logging.info(f'Mappings after rename:\n{str(self._shardid_remap)}')
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the databases and
     # chunks collections)
-    def fixUpRoutingMetadata(self):
-        logging.info('Renaming shards in the routing metadata:')
+    def fixup_routing_table(self):
+        logging.info(
+            'Renaming shard ids in the routing table (config.databases, config.collections, config.chunks):'
+        )
 
-        for shardId in self._shardIdRemap:
-            shardIdTo = self._shardIdRemap.get(shardId)
-            logging.info(f'Shard {shardId} becomes {shardIdTo}')
+        for shardId in self._shardid_remap:
+            shardIdTo = self._shardid_remap.get(shardId)
 
             # Rename the primary shard for all databases
             self.configDb.databases.update_many({'primary': shardId},
@@ -278,7 +264,7 @@ class MlaunchCluster:
                                              }])
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
-    def fixUpShards(self):
+    def fixup_shard_instances(self):
         for shard in self.configDb.shards.find({}):
             logging.info(f"Creating shard key indexes on shard {shard['_id']}")
 
@@ -323,10 +309,10 @@ class MlaunchCluster:
 
             shardConnection.close()
 
-    def restartCluster(self):
-        self._config.mlaunch_action('restart', self._config.clusterRoot)
+    def restart(self):
+        self._external_process.mlaunch('restart', self._config.clusterRoot)
 
-    def generateData(self):
+    def generate_data(self):
         if not self._config.genData:
             return
 
@@ -367,6 +353,39 @@ class MlaunchCluster:
                     logging.info(f'Generated {x} documents')
 
 
+# Performs cleanup by killing all potentially running mongodb processes and deleting any leftover
+# files. The end result is that '--dir' will be empty.
+def create_empty_work_directories(config):
+    yes_no('The next step will kill all MongoDB processes and wipe out the data path.')
+
+    # Iterate through all processes and kill mongod and mongos
+    for process in psutil.process_iter():
+        try:
+            processExecutable = os.path.basename(process.exe())
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.AccessDenied:
+            pass
+        else:
+            if (processExecutable in [exe_name('mongod'), exe_name('mongos')]):
+                process.kill()
+                process.wait()
+
+    # Remove the output directories
+    try:
+        shutil.rmtree(config.introspectRoot)
+    except FileNotFoundError:
+        pass
+
+    try:
+        shutil.rmtree(config.clusterRoot)
+    except FileNotFoundError:
+        pass
+
+    os.makedirs(config.introspectRoot)
+    os.makedirs(config.clusterRoot)
+
+
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
         description=
@@ -388,7 +407,6 @@ if __name__ == "__main__":
     argsParser.add_argument(
         '--dir', help='Directory in which to place the data files (will create subdirectories)',
         metavar='dir', type=str, required=True)
-
     argsParser.add_argument(
         '--gen_data',
         help="""Generate random data in the collection after reconstructing the cluster""",
@@ -404,22 +422,29 @@ if __name__ == "__main__":
 
     # Prepare the configuration and the workspace where the instances will be started
     config = ToolConfiguration(args)
+    create_empty_work_directories(config)
+
+    external_process = ExternalProcessManager(config)
 
     # Read the cluster configuration from the preprocess instance and construct the new cluster
-    introspect = ClusterIntrospect(config)
+    introspect = ClusterIntrospect(config, external_process)
+    introspect.restore()
 
-    if (config.numShards is not None and introspect.numZones > 0
-            and config.numShards < introspect.numShards):
+    logging.info(
+        f'Cluster contains {introspect.num_shards} shards and is running at FCV {introspect.FCV}')
+
+    if (config.numShards is not None and introspect.num_zones > 0
+            and config.numShards < introspect.num_shards):
         raise ValueError('Cannot use `--numshards` with smaller number of shards than those in the '
                          'dump in the case when zones are defined')
 
-    mlaunch = MlaunchCluster(config, introspect)
-
-    mlaunch.restoreAndFixUpShardIds()
-    mlaunch.fixUpRoutingMetadata()
-    mlaunch.fixUpShards()
+    cluster = MlaunchCluster(config, introspect, external_process)
+    cluster.start_and_restore_destination_cluster()
+    cluster.fixup_shard_ids()
+    cluster.fixup_routing_table()
+    cluster.fixup_shard_instances()
 
     # Restart the cluster so it picks up the new configuration cleanly
-    mlaunch.restartCluster()
+    cluster.restart()
 
-    mlaunch.generateData()
+    cluster.generate_data()
