@@ -668,7 +668,7 @@ async def main(args):
             center_size_kb = await get_chunk_size(c)
             # Use < 0.6 so that we do not move chunks which were split before
             if center_size_kb > target_chunk_size_kb * args.small_chunk_frac:
-                # lets not break out of the loop, a chunk without a size estimate might
+                # do not break, a chunk without a size estimate might
                 # trigger this condition accidentally
                 continue
 
