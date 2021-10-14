@@ -666,10 +666,15 @@ async def main(args):
 
             # avoid moving larger chunks
             center_size_kb = await get_chunk_size(c)
+
             # Use < 0.6 so that we do not move chunks which were split before
-            if center_size_kb > target_chunk_size_kb * args.small_chunk_frac:
-                # do not break, a chunk without a size estimate might
-                # trigger this condition accidentally
+            has_local_est_size = True if 'defrag_collection_est_size' in c else False
+            if has_local_est_size and center_size_kb > target_chunk_size_kb * args.small_chunk_frac:
+                # encountered the first chunk with size estimate larter than the move threshold
+                break
+            elif not has_local_est_size and center_size_kb > target_chunk_size_kb * args.small_chunk_frac:
+                # a chunk without an estimate was sorted to the beginning of the list
+                # still need to process the remaining list, it may contain small chunks
                 continue
 
             # chunks should be on other shards, but if this script was executed multiple times or 
