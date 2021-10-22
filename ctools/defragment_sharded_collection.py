@@ -289,6 +289,30 @@ async def main(args):
                 assert (shard_id in sizes)
                 shard_to_chunks[shard_id]['size'] = sizes[shard_id]
 
+    async def write_all_missing_chunk_size():
+        if args.dryrun:
+            return
+
+        async def write_size(ch, progress):
+            bounds = [ch['min'], ch['max']]
+            size = await coll.data_size_kb_from_shard(bounds)
+            await coll.try_write_chunk_size(bounds, ch['shard'], size)
+            progress.update()
+
+        missing_size_query = {'ns': coll.name, 'defrag_collection_est_size': {'$exists': 0}}
+        num_chunks_missing_size = await cluster.configDb.chunks.count_documents(missing_size_query)
+
+        if not num_chunks_missing_size:
+            return
+
+        logging.info("Calculating missing chunk size estimations") 
+        with tqdm(total=num_chunks_missing_size, unit=' chunks') as progress:
+            tasks = []
+            async for ch in cluster.configDb.chunks.find(missing_size_query):
+                tasks.append(
+                        asyncio.ensure_future(write_size(ch, progress)))
+            await asyncio.gather(*tasks)
+
     await load_chunks()
     assert (len(shard_to_chunks) > 1)
 
@@ -876,17 +900,8 @@ async def main(args):
         
         pass # while max_iterations > 0:
        
-    if args.exec_phase == 'phase2' or args.exec_phase == 'all':
-        async def write_size(ch):
-            bounds = [ch['min'], ch['max']]
-            size = await coll.data_size_kb_from_shard(bounds)
-            await coll.try_write_chunk_size(bounds, ch['shard'], size)
-
-        tasks = []
-        async for ch in cluster.configDb.chunks.find({'ns': coll.name, 'defrag_collection_est_size': {'$exists': 0}}):
-            tasks.append(
-                    asyncio.ensure_future(write_size(ch)))
-        await asyncio.gather(*tasks)
+    if not args.dryrun and (args.exec_phase == 'phase2' or args.exec_phase == 'all'):
+        write_all_missing_chunk_size()
 
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
