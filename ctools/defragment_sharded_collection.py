@@ -800,12 +800,11 @@ async def main(args):
     
     async def phase_2():
         # Move and merge small chunks. The way this is written it might need to run multiple times
-        max_iterations = 25
         total_moved_data_kb = 0
-        while max_iterations > 0:
-            max_iterations -= 1
-            logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on"""
-                         f""" collection size is {ideal_num_chunks}  ({ideal_num_chunks_per_shard} per shard)""")
+        iteration = 0
+        while iteration < 25:
+            iteration += 1
+            logging.info(f"""Phase II: iteration {iteration}. Number of small chunks {num_small_chunks}/{len(chunks_id_index)}""")
 
             moved_data_kb = 0
             with tqdm(total=num_small_chunks, unit=' chunks') as progress:
@@ -927,13 +926,15 @@ async def main(args):
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
+    else:
+        logging.info("Skipping Phase III")
     
 
     if not args.dryrun and args.write_size_on_exit:
         await write_all_missing_chunk_size()
 
 
-    print("\nReached convergence:\n")
+    print("\n")
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
