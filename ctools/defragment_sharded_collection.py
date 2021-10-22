@@ -310,6 +310,26 @@ async def main(args):
                         asyncio.ensure_future(write_size(ch, progress)))
             await asyncio.gather(*tasks)
 
+    # Mirror the config.chunks indexes in memory
+    def build_chunk_index():
+        global chunks_id_index, chunks_min_index, chunks_max_index, num_small_chunks
+        chunks_id_index = {}
+        chunks_min_index = {}
+        chunks_max_index = {}
+        num_small_chunks = 0
+        for s in shard_to_chunks:
+            for c in shard_to_chunks[s]['chunks']:
+                assert(chunks_id_index.get(c['_id']) == None)
+                chunks_id_index[c['_id']] = c
+                chunks_min_index[frozenset(c['min'].items())] = c
+                chunks_max_index[frozenset(c['max'].items())] = c
+                if 'defrag_collection_est_size' in c:
+                    if c['defrag_collection_est_size'] < target_chunk_size_kb * args.small_chunk_frac:
+                        num_small_chunks += 1
+#                else:
+#                    logging.warning("need to perform a chunk size estimation")
+
+
     await load_chunks()
     assert (len(shard_to_chunks) > 1)
 
@@ -603,25 +623,6 @@ async def main(args):
     #
 
     total_shard_size = {}
-
-    # Mirror the config.chunks indexes in memory
-    def build_chunk_index():
-        global chunks_id_index, chunks_min_index, chunks_max_index, num_small_chunks
-        chunks_id_index = {}
-        chunks_min_index = {}
-        chunks_max_index = {}
-        num_small_chunks = 0
-        for s in shard_to_chunks:
-            for c in shard_to_chunks[s]['chunks']:
-                assert(chunks_id_index.get(c['_id']) == None)
-                chunks_id_index[c['_id']] = c
-                chunks_min_index[frozenset(c['min'].items())] = c
-                chunks_max_index[frozenset(c['max'].items())] = c
-                if 'defrag_collection_est_size' in c:
-                    if c['defrag_collection_est_size'] < target_chunk_size_kb * args.small_chunk_frac:
-                        num_small_chunks += 1
-#                else:
-#                    logging.warning("need to perform a chunk size estimation")
 
     build_chunk_index()
 
