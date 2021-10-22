@@ -793,30 +793,6 @@ async def main(args):
         # </for c in sorted_chunks:>
         return total_moved_data_kb
 
-    '''
-    for each chunk C in the shard:
-    - No split if chunk size < 120% target chunk size
-    - Split in the middle if chunk size between 120% and 240% target chunk size
-    - Split according to split vector otherwise
-    '''
-    async def split_oversized_chunks(shard, progress):
-        shard_entry = shard_to_chunks[shard]
-        shard_chunks = shard_entry['chunks']
-        if args.dryrun or len(shard_chunks) == 0:
-            return
-
-        for c in shard_chunks:
-            progress.update()
-
-            if 'defrag_collection_est_size' not in c:
-                continue
-
-            local_c = chunks_id_index[c['_id']]
-            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 2.4:
-                await coll.split_chunk(local_c, target_chunk_size_kb * 2)
-            elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
-                await coll.split_chunk_middle(local_c)
-
     num_shards = await cluster.configDb.shards.count_documents({})
     coll_size_kb = await coll.data_size_kb()
 
@@ -896,6 +872,30 @@ async def main(args):
     if not args.dryrun and (args.exec_phase == 'phase2' or args.exec_phase == 'all'):
         write_all_missing_chunk_size()
 
+
+    '''
+    for each chunk C in the shard:
+    - No split if chunk size < 120% target chunk size
+    - Split in the middle if chunk size between 120% and 240% target chunk size
+    - Split according to split vector otherwise
+    '''
+    async def split_oversized_chunks(shard, progress):
+        shard_entry = shard_to_chunks[shard]
+        shard_chunks = shard_entry['chunks']
+        if args.dryrun or len(shard_chunks) == 0:
+            return
+
+        for c in shard_chunks:
+            progress.update()
+
+            if 'defrag_collection_est_size' not in c:
+                continue
+
+            local_c = chunks_id_index[c['_id']]
+            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 2.4:
+                await coll.split_chunk(local_c, target_chunk_size_kb * 2)
+            elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
+                await coll.split_chunk_middle(local_c)
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
