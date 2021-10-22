@@ -927,8 +927,11 @@ async def main(args):
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
-    else:
-        logging.info("Skipping Phase III")
+    
+
+    if not args.dryrun and args.write_size_on_exit:
+        await write_all_missing_chunk_size()
+
 
     print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
@@ -1017,6 +1020,11 @@ if __name__ == "__main__":
         '--phase_2_max_migrations',
         help="""Maximum number of migrations.""",
         metavar='max_migrations', dest="max_migrations", type=int, default=-1)
+    
+    argsParser.add_argument(
+        '--write-size-on-exit',
+        help="""Used for debugging purposes, write all missing data size estimation on disk before exit.""",
+        dest="write_size_on_exit", action='store_true')
 
     list = " ".join(sys.argv[1:])
     
