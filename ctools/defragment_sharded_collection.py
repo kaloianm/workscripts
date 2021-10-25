@@ -259,11 +259,12 @@ async def main(args):
 
     num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
     logging.info(f"""Collection '{coll.name}' has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks""")
+    shard_to_chunks = {}
 
     async def load_chunks():
-        global shard_to_chunks, collectionVersion
+        global collectionVersion
         logging.info('Preperation: Loading chunks into memory')
-        shard_to_chunks = {}
+        assert not shard_to_chunks
         collectionVersion = None
         with tqdm(total=num_chunks, unit=' chunk') as progress:
             async for c in cluster.configDb.chunks.find({'ns': coll.name}, sort=[('min',
@@ -329,13 +330,6 @@ async def main(args):
 #                else:
 #                    logging.warning("need to perform a chunk size estimation")
 
-
-    await load_chunks()
-    assert (len(shard_to_chunks) > 1)
-
-    logging.info(
-        f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
-    )
 
     ###############################################################################################
     #
@@ -602,7 +596,14 @@ async def main(args):
 
     # Conditionally execute phase 1
     if args.exec_phase == 'phase1' or args.exec_phase == 'all':
-        logging.info('Phase 1: Merging consecutive chunks on shards')
+        logging.info('Phase I: Merging consecutive chunks on shards')
+
+        await load_chunks()
+        assert (len(shard_to_chunks) > 1)
+
+        logging.info(
+            f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
+        )
         
         with tqdm(total=num_chunks, unit=' chunk') as progress:
             tasks = []
@@ -621,10 +622,6 @@ async def main(args):
     # This stage relies on the 'defrag_collection_est_size' fields written to every chunk from
     # Phase 1 in order to calculate the most optimal move strategy.
     #
-
-    total_shard_size = {}
-
-    build_chunk_index()
 
     # might be called with a chunk document without size estimation
     async def get_chunk_size(ch):
@@ -793,9 +790,54 @@ async def main(args):
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
+    
+    async def phase_2():
+        # Move and merge small chunks. The way this is written it might need to run multiple times
+        max_iterations = 25
+        total_moved_data_kb = 0
+        while max_iterations > 0:
+            max_iterations -= 1
+            logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on"""
+                         f""" collection size is {ideal_num_chunks}  ({ideal_num_chunks_per_shard} per shard)""")
 
-    num_shards = await cluster.configDb.shards.count_documents({})
-    coll_size_kb = await coll.data_size_kb()
+            moved_data_kb = 0
+            with tqdm(total=num_small_chunks, unit=' chunks') as progress:
+                tasks = []
+                for s in shard_to_chunks:
+                    moved_data_kb += await move_merge_chunks_by_size(s, progress)
+
+            total_moved_data_kb += moved_data_kb
+            # update shard_to_chunks
+            for s in shard_to_chunks:
+                shard_to_chunks[s]['chunks'] = []
+            
+            for cid in chunks_id_index:
+                c = chunks_id_index[cid]
+                shard_to_chunks[c['shard']]['chunks'].append(c)
+            
+            num_chunks = len(chunks_id_index)
+            if not args.dryrun:
+                num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
+                assert(num_chunks_actual == num_chunks)
+
+            if moved_data_kb == 0:
+                return total_moved_data_kb
+            
+            pass # while max_iterations > 0:
+
+
+    if not shard_to_chunks:
+        # all subsequent phases assumes we have sizes for all chunks
+        # and all the chunks loaded in memory
+        await write_all_missing_chunk_size()
+        await load_chunks()
+
+    build_chunk_index()
+
+
+    ###############  Calculate stats #############
+    
+    total_shard_size = {}
 
     sum_coll_size = 0
     for shard_id, entry in shard_to_chunks.items():
@@ -811,69 +853,39 @@ async def main(args):
         total_shard_size[shard_id] = data_size
         sum_coll_size += data_size
     
+    coll_size_kb = await coll.data_size_kb()
     # If we run on a dummy cluster assume collection size
     if args.dryrun and coll_size_kb == 1:
         coll_size_kb = sum_coll_size
 
+    num_shards = len(shard_to_chunks)
     avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
     ideal_num_chunks = max(math.ceil(coll_size_kb / target_chunk_size_kb), num_shards)
     ideal_num_chunks_per_shard = max(math.ceil(ideal_num_chunks / num_shards), 1)
 
-    logging.info('Phase 2: Moving and merging small chunks')
-    logging.info(f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}')
+    ###############  End stats calculation #############
+    
 
-    orig_shard_sizes = total_shard_size.copy()
+    logging.info(f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}')
+    
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
         logging.info(f"Number chunks on shard {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9}")
 
-    # Move and merge small chunks. The way this is written it might need to run multiple times
-    max_iterations = 25
-    total_moved_data_kb = 0
-    while max_iterations > 0:
-        max_iterations -= 1
-        logging.info(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks based on"""
-                     f""" collection size is {ideal_num_chunks}  ({ideal_num_chunks_per_shard} per shard)""")
+    
+    orig_shard_sizes = total_shard_size.copy()
 
-        # Only conditionally execute phase2, break here to get above log lines
-        if args.exec_phase != 'phase2' and args.exec_phase != 'all':
-            logging.info("Skipping Phase II")
-            break
-
-        moved_data_kb = 0
-        with tqdm(total=num_small_chunks, unit=' chunks') as progress:
-            tasks = []
-            # TODO balancer logic prevents us from donating / receiving more than once per shard
-            for s in shard_to_chunks:
-                moved_data_kb += await move_merge_chunks_by_size(s, progress)
-#                tasks.append(
-#                    asyncio.ensure_future(move_merge_chunks_by_size(s, ideal_num_chunks_per_shard, progress)))
-#            await asyncio.gather(*tasks)
-
-        total_moved_data_kb += moved_data_kb
-        # update shard_to_chunks
-        for s in shard_to_chunks:
-            shard_to_chunks[s]['chunks'] = []
+    # Only conditionally execute phase2, break here to get above log lines
+    if args.exec_phase == 'phase2' or args.exec_phase == 'all':
+        logging.info('Phase II: Moving and merging small chunks')
         
-        for cid in chunks_id_index:
-            c = chunks_id_index[cid]
-            shard_to_chunks[c['shard']]['chunks'].append(c)
-        
-        num_chunks = len(chunks_id_index)
-        if not args.dryrun:
-            num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
-            assert(num_chunks_actual == num_chunks)
+        total_moved_data_kb = await phase_2()
+    else:
+        logging.info("Skipping Phase II")
+        total_moved_data_kb = 0
 
-        if moved_data_kb == 0:
-            break
-        
-        pass # while max_iterations > 0:
        
-    if not args.dryrun and (args.exec_phase == 'phase2' or args.exec_phase == 'all'):
-        write_all_missing_chunk_size()
-
-
     '''
     for each chunk C in the shard:
     - No split if chunk size < 120% target chunk size
@@ -900,7 +912,7 @@ async def main(args):
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
-
+ 
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks') as progress:
             tasks = []
@@ -908,6 +920,8 @@ async def main(args):
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
+    else:
+        logging.info("Skipping Phase III")
 
     print("\nReached convergence:\n")
     avg_chunk_size_phase_2 = 0
