@@ -239,6 +239,9 @@ async def main(args):
     if args.shard_imbalance_frac <= 1.0 or args.shard_imbalance_frac > 1.5:
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
 
+    if args.threshold_for_size_calculation < 0.0 or args.threshold_for_size_calculation > 1.0:
+        raise Exception("The value for --phase_1_calc_size_threshold must be between 0 and 1.0")
+
     if args.dryrun:
         logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)} """
                 f"""and an estimated chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
@@ -486,8 +489,8 @@ async def main(args):
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
             # chunk size, invoke `dataSize` in order to determine whether we can merge them or if
             # we should continue adding more chunks to be merged
-            if (consecutive_chunks.batch_size_estimation < target_chunk_size_kb * 0.90
-                ) and not merge_consecutive_chunks_without_size_check and has_more:
+            if consecutive_chunks.batch_size_estimation < target_chunk_size_kb * args.threshold_for_size_calculation \
+                and not merge_consecutive_chunks_without_size_check and has_more:
                 continue
 
             merge_bounds = [consecutive_chunks.batch[0]['min'], consecutive_chunks.batch[-1]['max']]
@@ -949,6 +952,15 @@ if __name__ == "__main__":
            chunks are only about 40%% full.
            """, metavar='chunk_size_mb', dest='phase_1_estimated_chunk_size_kb',
         type=lambda x: int(x) * 1024, default=64 * 1024 * 0.40)
+    argsParser.add_argument(
+        '--phase_1_calc_size_threshold',
+        help="""Applies only to Phase 1: when the estimated size of a batch surpasses this threshold
+        (expressed as a percentage of the target chunk size), a real calculation of the batch size
+        will be triggered. Fractional value between 0.0 and 1.0""",
+        metavar="fraction_of_chunk_size",
+        dest='threshold_for_size_calculation',
+        type=float,
+        default=0.9)
     argsParser.add_argument(
         '--phase_1_perform_unsafe_merge',
         help="""Applies only to Phase 1 and instructs the script to directly write the merged chunks
