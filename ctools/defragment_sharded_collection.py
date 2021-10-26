@@ -627,6 +627,10 @@ async def main(args):
     # Phase 1 in order to calculate the most optimal move strategy.
     #
 
+    def has_size(ch):
+        return 'defrag_collection_est_size' in ch or \
+                'defrag_collection_est_size' in chunks_id_index[ch['_id']]
+
     # might be called with a chunk document without size estimation
     async def get_chunk_size(ch):
         if 'defrag_collection_est_size' in ch:
@@ -683,11 +687,19 @@ async def main(args):
             if c['_id'] not in chunks_id_index:
                 continue
 
-            # avoid moving larger chunks
+            had_size = has_size(c)
+            # size should miss only in dryrun mode
+            assert had_size or args.dryrun
+
             center_size_kb = await get_chunk_size(c)
-            # Use < 0.6 so that we do not move chunks which were split before
+            
+            # chunk are sorted so if we encounter a chunk too big that has not being previously merged
+            # we can safely exit from the loop since all the subsequent chunks will be bigger
             if center_size_kb > small_chunk_size_kb:
-                break
+                if 'merged' in c or not had_size:
+                    continue
+                else:
+                    break
 
             # chunks should be on other shards, but if this script was executed multiple times or 
             # due to parallelism the chunks might now be on the same shard            
@@ -734,6 +746,7 @@ async def main(args):
                     chunks_min_index.pop(frozenset(c['min'].items()))
                     chunks_max_index.pop(frozenset(left_chunk['max'].items()))
                     chunks_max_index[frozenset(c['max'].items())] = left_chunk
+                    left_chunk['merged'] = True
                     left_chunk['max'] = c['max']
                     left_chunk['defrag_collection_est_size'] = new_size
 
@@ -779,6 +792,7 @@ async def main(args):
                     chunks_min_index.pop(frozenset(right_chunk['min'].items()))
                     chunks_max_index.pop(frozenset(c['max'].items()))
                     chunks_max_index[frozenset(right_chunk['max'].items())] = c
+                    c['merged'] = True
                     c['shard'] = target_shard
                     c['max'] = right_chunk['max']
                     c['defrag_collection_est_size'] = new_size
