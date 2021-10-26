@@ -750,7 +750,10 @@ async def main(args):
                         total_moved_data_kb += center_size_kb
 
                     num_chunks -= 1
-                    num_small_chunks -= 1
+                    small_chunks_vanished = 1
+                    if left_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
+                        small_chunks_vanished += 1
+                    num_small_chunks -= small_chunks_vanished
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
@@ -792,7 +795,10 @@ async def main(args):
                         total_moved_data_kb += center_size_kb
 
                     num_chunks -= 1
-                    num_small_chunks -= 1
+                    small_chunks_vanished = 1
+                    if right_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
+                        small_chunks_vanished += 1
+                    num_small_chunks -= small_chunks_vanished
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
