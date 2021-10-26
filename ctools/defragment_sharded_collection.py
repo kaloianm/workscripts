@@ -235,6 +235,7 @@ async def main(args):
 
     if args.small_chunk_frac <= 0 or args.small_chunk_frac > 0.5:
         raise Exception("The value for --small-chunk-threshold must be between 0 and 0.5")
+    small_chunk_size_kb = target_chunk_size_kb * args.small_chunk_frac
 
     if args.shard_imbalance_frac <= 1.0 or args.shard_imbalance_frac > 1.5:
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
@@ -328,7 +329,7 @@ async def main(args):
                 chunks_min_index[frozenset(c['min'].items())] = c
                 chunks_max_index[frozenset(c['max'].items())] = c
                 if 'defrag_collection_est_size' in c:
-                    if c['defrag_collection_est_size'] < target_chunk_size_kb * args.small_chunk_frac:
+                    if c['defrag_collection_est_size'] < small_chunk_size_kb:
                         num_small_chunks += 1
 #                else:
 #                    logging.warning("need to perform a chunk size estimation")
@@ -692,7 +693,7 @@ async def main(args):
             # avoid moving larger chunks
             center_size_kb = await get_chunk_size(c)
             # Use < 0.6 so that we do not move chunks which were split before
-            if center_size_kb > target_chunk_size_kb * args.small_chunk_frac:
+            if center_size_kb > small_chunk_size_kb:
                 break
 
             # chunks should be on other shards, but if this script was executed multiple times or 
