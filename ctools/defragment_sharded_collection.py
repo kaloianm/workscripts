@@ -721,9 +721,11 @@ async def main(args):
                     left_chunk['max'] = c['max']
                     left_chunk['defrag_collection_est_size'] = new_size
 
-                    total_shard_size[shard] -= center_size_kb
-                    total_shard_size[target_shard] += center_size_kb
-                    total_moved_data_kb += center_size_kb
+                    if shard != target_shard:
+                        total_shard_size[shard] -= center_size_kb
+                        total_shard_size[target_shard] += center_size_kb
+                        total_moved_data_kb += center_size_kb
+
                     num_chunks -= 1
                     num_small_chunks -= 1
                     await exec_throttle()
@@ -761,9 +763,11 @@ async def main(args):
                     c['max'] = right_chunk['max']
                     c['defrag_collection_est_size'] = new_size
 
-                    total_shard_size[shard] -= center_size_kb
-                    total_shard_size[target_shard] += center_size_kb
-                    total_moved_data_kb += center_size_kb
+                    if shard != target_shard:
+                        total_shard_size[shard] -= center_size_kb
+                        total_shard_size[target_shard] += center_size_kb
+                        total_moved_data_kb += center_size_kb
+
                     num_chunks -= 1
                     num_small_chunks -= 1
                     await exec_throttle()
