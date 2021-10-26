@@ -823,8 +823,12 @@ async def main(args):
 
                 moved_data_kb = 0
                 tasks = []
-                for s in shard_to_chunks:
-                    moved_data_kb += await move_merge_chunks_by_size(s, progress)
+                shards_to_process = [s for s in shard_to_chunks]
+                while(shards_to_process):
+                    # get the shard with most data
+                    shard_id = max(shards_to_process, key=lambda s: total_shard_size[s])
+                    moved_data_kb += await move_merge_chunks_by_size(shard_id, progress)
+                    shards_to_process.remove(shard_id)
 
                 total_moved_data_kb += moved_data_kb
                 # update shard_to_chunks
