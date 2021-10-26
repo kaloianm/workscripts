@@ -239,7 +239,7 @@ async def main(args):
     if args.shard_imbalance_frac <= 1.0 or args.shard_imbalance_frac > 1.5:
         raise Exception("The value for --shard-imbalance-threshold must be between 1.0 and 1.5")
 
-    if args.threshold_for_size_calculation < 0.0 or args.threshold_for_size_calculation > 1.0:
+    if args.threshold_for_size_calculation < 0 or args.threshold_for_size_calculation > 1:
         raise Exception("The value for --phase_1_calc_size_threshold must be between 0 and 1.0")
 
     if args.dryrun:
