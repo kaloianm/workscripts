@@ -706,8 +706,6 @@ async def main(args):
 
             left_chunk = chunks_max_index.get(frozenset(c['min'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']})
             right_chunk = chunks_min_index.get(frozenset(c['max'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'min': c['max']})
-#                if not args.dryrun:
-#                    assert(left_chunk is None or (await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']}))['shard'] == left_chunk['shard'])
             
             # Exclude overweight target shards
             if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
@@ -774,7 +772,6 @@ async def main(args):
                     total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
                 
                 if center_size_kb <= right_size or is_overweight:
-                    # TODO abort if target shard has too much data already
 
                     merge_bounds = [c['min'], right_chunk['max']]
                     if not args.dryrun:
