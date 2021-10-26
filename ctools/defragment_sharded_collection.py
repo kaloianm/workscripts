@@ -675,13 +675,8 @@ async def main(args):
 
         progress.write(f'Moving small chunks off shard {shard}')
 
-        def get_chunk_size_or_0(ch):
-            if 'defrag_collection_est_size' in ch:
-                return ch['defrag_collection_est_size']
-            else:
-                 return 0
         sorted_chunks = shard_chunks.copy()
-        sorted_chunks.sort(key = get_chunk_size_or_0)
+        sorted_chunks.sort(key = lambda c: c.get('defrag_collection_est_size', 0))
 
         for c in sorted_chunks:
             # this chunk might no longer exist due to a move
