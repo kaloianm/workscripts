@@ -85,16 +85,20 @@ class ShardedCollection:
 
         remove_last_split_point = False
         if surplus >= maxChunkSize_kb * 0.8:
+            # The last resulting chunk will have a size gte(80% maxChunkSize) and lte(maxChunkSize)
             pass
         elif surplus < maxChunkSize_kb - new_maxChunkSize_kb:
+            # The last resulting chunk will be slightly bigger than maxChunkSize
             remove_last_split_point = True
         else:
+            # Fairly distribute split points so resulting chunks will be of similar sizes
             maxChunkSize_kb = new_maxChunkSize_kb
 
         conn = await self.cluster.make_direct_shard_connection(shard_entry)
         res = await conn.admin.command({
                 'splitVector': self.name,
                 'keyPattern': self.shard_key_pattern,
+                # Double size because splitVector splits at half maxChunkSize
                 'maxChunkSizeBytes': maxChunkSize_kb * 2 * 1024,
                 'min': chunk['min'], 
                 'max': chunk['max']
@@ -925,9 +929,8 @@ async def main(args):
        
     '''
     for each chunk C in the shard:
-    - No split if chunk size < 120% target chunk size
-    - Split in the middle if chunk size between 120% and 240% target chunk size
-    - Split according to split vector otherwise
+    - No split if chunk size < 133% target chunk size
+    - Split otherwise
     '''
     async def split_oversized_chunks(shard, progress):
         shard_entry = shard_to_chunks[shard]
