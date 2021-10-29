@@ -952,12 +952,12 @@ async def main(args):
         logging.info(f'Phase III : Splitting oversized chunks')
 
         num_chunks = len(chunks_id_index)
-        with tqdm(total=num_chunks, unit=' chunks', disable=True) as progress:
+        with tqdm(total=num_chunks, unit=' chunks') as progress:
+            tasks = []
             for s in shard_to_chunks:
-                tasks = []
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
-                await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
     else:
         logging.info("Skipping Phase III")
     
