@@ -73,7 +73,7 @@ class ShardedCollection:
         shard_entry = await self.cluster.configDb.shards.find_one({'_id': chunk['shard']})
         if shard_entry is None:
             raise Exception(f"cannot resolve shard {chunk['shard']}")
-           
+
         chunk_size_kb = chunk['defrag_collection_est_size']
         if chunk_size_kb <= maxChunkSize_kb:
             return
@@ -82,10 +82,6 @@ class ShardedCollection:
         surplus = chunk_size_kb - num_split_points * maxChunkSize_kb
 
         new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
-
-        logging.info(f"chunk size: {fmt_kb(chunk_size_kb)}")
-        logging.info(f"chunk size: {fmt_kb(maxChunkSize_kb)}, num_split_points: {num_split_points}, surplus: {fmt_kb(surplus)}")
-        logging.info(f"chunk size: {fmt_kb(new_maxChunkSize_kb)}, num_split_points: {num_split_points + 1}, surplus: {fmt_kb(maxChunkSize_kb - new_maxChunkSize_kb)}")
 
         remove_last_split = False
         if surplus >= maxChunkSize_kb * 0.8:
@@ -104,7 +100,6 @@ class ShardedCollection:
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
 
-        print(f"Num split points: {len(res['splitKeys'])}, size: {fmt_kb(maxChunkSize_kb * 2)}")
         if len(res['splitKeys']) > 0:
             split_keys = res['splitKeys']
 
@@ -118,11 +113,6 @@ class ShardedCollection:
                 }, codec_options=self.cluster.client.codec_options)
 
         conn.close()
-        idx = 0
-        async for c in self.cluster.configDb.chunks.find({'ns': self.name, 'min': {'$gte': chunk['min']}, 'max': {'$lte': chunk['max']}}):
-            size = await self.data_size_kb_from_shard([c['min'], c['max']])
-            logging.info(f'c_{idx} size: {fmt_kb(size)}')
-            idx += 1
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
