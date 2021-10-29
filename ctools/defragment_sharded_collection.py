@@ -69,12 +69,6 @@ class ShardedCollection:
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
-    async def split_chunk_middle(self, chunk):
-        await self.cluster.adminDb.command({
-                'split': self.name,
-                'bounds': [chunk['min'], chunk['max']]
-            }, codec_options=self.cluster.client.codec_options)
-
     async def split_chunk(self, chunk, maxChunkSize_kb):
         shard_entry = await self.cluster.configDb.shards.find_one({'_id': chunk['shard']})
         if shard_entry is None:
@@ -961,12 +955,10 @@ async def main(args):
             local_c = chunks_id_index[c['_id']]
             if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.33:
                 await coll.split_chunk(local_c, target_chunk_size_kb)
-            #elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
-            #    await coll.split_chunk_middle(local_c)
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
- 
+
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks', disable=True) as progress:
             for s in shard_to_chunks:
