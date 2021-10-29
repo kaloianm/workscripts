@@ -99,7 +99,6 @@ class ShardedCollection:
         elif surplus < maxChunkSize_kb - new_maxChunkSize_kb:
             remove_last_split = True
         else:
-            # add 5% more to avoid creating a last chunk with few documents
             maxChunkSize_kb = new_maxChunkSize_kb
 
         conn = await self.cluster.make_direct_shard_connection(shard_entry)
