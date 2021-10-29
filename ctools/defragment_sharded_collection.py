@@ -69,27 +69,46 @@ class ShardedCollection:
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
-    async def split_chunk_middle(self, chunk):
-        await self.cluster.adminDb.command({
-                'split': self.name,
-                'bounds': [chunk['min'], chunk['max']]
-            }, codec_options=self.cluster.client.codec_options)
-
     async def split_chunk(self, chunk, maxChunkSize_kb):
         shard_entry = await self.cluster.configDb.shards.find_one({'_id': chunk['shard']})
         if shard_entry is None:
             raise Exception(f"cannot resolve shard {chunk['shard']}")
-            
+
+        chunk_size_kb = chunk['defrag_collection_est_size']
+        if chunk_size_kb <= maxChunkSize_kb:
+            return
+
+        num_split_points = chunk_size_kb // maxChunkSize_kb
+        surplus = chunk_size_kb - num_split_points * maxChunkSize_kb
+
+        new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
+
+        remove_last_split_point = False
+        if surplus >= maxChunkSize_kb * 0.8:
+            # The last resulting chunk will have a size gte(80% maxChunkSize) and lte(maxChunkSize)
+            pass
+        elif surplus < maxChunkSize_kb - new_maxChunkSize_kb:
+            # The last resulting chunk will be slightly bigger than maxChunkSize
+            remove_last_split_point = True
+        else:
+            # Fairly distribute split points so resulting chunks will be of similar sizes
+            maxChunkSize_kb = new_maxChunkSize_kb
+
         conn = await self.cluster.make_direct_shard_connection(shard_entry)
         res = await conn.admin.command({
                 'splitVector': self.name,
                 'keyPattern': self.shard_key_pattern,
-                'maxChunkSizeBytes': maxChunkSize_kb * 1024,
+                # Double size because splitVector splits at half maxChunkSize
+                'maxChunkSizeBytes': maxChunkSize_kb * 2 * 1024,
                 'min': chunk['min'], 
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
 
-        if len(res['splitKeys']) > 0:
+        split_keys = res['splitKeys']
+        if len(split_keys) > 0:
+            if remove_last_split_point:
+                split_keys.pop()
+
             for key in res['splitKeys']:
                 res = await self.cluster.adminDb.command({
                     'split': self.name,
@@ -910,9 +929,8 @@ async def main(args):
        
     '''
     for each chunk C in the shard:
-    - No split if chunk size < 120% target chunk size
-    - Split in the middle if chunk size between 120% and 240% target chunk size
-    - Split according to split vector otherwise
+    - No split if chunk size < 133% target chunk size
+    - Split otherwise
     '''
     async def split_oversized_chunks(shard, progress):
         shard_entry = shard_to_chunks[shard]
@@ -927,14 +945,12 @@ async def main(args):
                 continue
 
             local_c = chunks_id_index[c['_id']]
-            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 2.4:
-                await coll.split_chunk(local_c, target_chunk_size_kb * 2)
-            elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
-                await coll.split_chunk_middle(local_c)
+            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.33:
+                await coll.split_chunk(local_c, target_chunk_size_kb)
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
- 
+
         num_chunks = len(chunks_id_index)
         with tqdm(total=num_chunks, unit=' chunks') as progress:
             tasks = []
