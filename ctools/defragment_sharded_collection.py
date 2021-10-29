@@ -113,6 +113,11 @@ class ShardedCollection:
                 }, codec_options=self.cluster.client.codec_options)
 
         conn.close()
+        idx = 0
+        async for c in self.cluster.configDb.chunks.find({'ns': self.name, 'min': {'$gte': chunk['min']}, 'max': {'$lte': chunk['max']}}):
+            size = await self.data_size_kb_from_shard([c['min'], c['max']])
+            logging.info(f'c_{idx} size: {fmt_kb(size)}')
+            idx += 1
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
