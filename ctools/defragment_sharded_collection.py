@@ -106,7 +106,7 @@ class ShardedCollection:
 
         split_keys = res['splitKeys']
         if len(split_keys) > 0:
-            if remove_last_split_point_point:
+            if remove_last_split_point:
                 split_keys.pop()
 
             for key in res['splitKeys']:
