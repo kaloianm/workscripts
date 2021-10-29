@@ -99,7 +99,7 @@ class ShardedCollection:
         res = await conn.admin.command({
                 'splitVector': self.name,
                 'keyPattern': self.shard_key_pattern,
-                'maxChunkSizeBytes': maxChunkSize_kb * 1024,
+                'maxChunkSizeBytes': maxChunkSize_kb * 2 * 1024,
                 'min': chunk['min'], 
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
@@ -949,7 +949,7 @@ async def main(args):
 
             local_c = chunks_id_index[c['_id']]
             if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.33:
-                await coll.split_chunk(local_c, target_chunk_size_kb * 2)
+                await coll.split_chunk(local_c, target_chunk_size_kb)
             #elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
             #    await coll.split_chunk_middle(local_c)
 
