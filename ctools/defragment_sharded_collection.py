@@ -952,8 +952,7 @@ async def main(args):
         logging.info(f'Phase III : Splitting oversized chunks')
  
         num_chunks = len(chunks_id_index)
-        with tqdm(total=num_chunks, unit=' chunks') as progress:
-            tasks = []
+        with tqdm(total=num_chunks, unit=' chunks', disable=True) as progress:
             for s in shard_to_chunks:
                 tasks = []
                 tasks.append(
