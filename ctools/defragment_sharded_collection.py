@@ -940,10 +940,10 @@ async def main(args):
                 continue
 
             local_c = chunks_id_index[c['_id']]
-            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 2.4:
+            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
                 await coll.split_chunk(local_c, target_chunk_size_kb * 2)
-            elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
-                await coll.split_chunk_middle(local_c)
+            #elif local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.2:
+            #    await coll.split_chunk_middle(local_c)
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
