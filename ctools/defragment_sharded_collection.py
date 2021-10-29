@@ -83,11 +83,11 @@ class ShardedCollection:
 
         new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
 
-        remove_last_split = False
+        remove_last_split_point = False
         if surplus >= maxChunkSize_kb * 0.8:
             pass
         elif surplus < maxChunkSize_kb - new_maxChunkSize_kb:
-            remove_last_split = True
+            remove_last_split_point = True
         else:
             maxChunkSize_kb = new_maxChunkSize_kb
 
@@ -100,10 +100,9 @@ class ShardedCollection:
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
 
-        if len(res['splitKeys']) > 0:
-            split_keys = res['splitKeys']
-
-            if remove_last_split:
+        split_keys = res['splitKeys']
+        if len(split_keys) > 0:
+            if remove_last_split_point_point:
                 split_keys.pop()
 
             for key in res['splitKeys']:
