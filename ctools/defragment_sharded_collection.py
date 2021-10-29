@@ -89,11 +89,11 @@ class ShardedCollection:
 
         new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
 
-        print(f"XOXO chosen new chunk size. chunk size: {chunk_size_kb}")
+        logging.info(f"chunk size: {fmt_kb(chunk_size_kb)}, num_split_points: {num_split_points}, surplus: {fmt_kb(surplus)}")
         if surplus >= maxChunkSize_kb - new_maxChunkSize_kb and surplus < maxChunkSize_kb * 0.8:
             # add 5% more to avoid creating a last chunk with few documents
             maxChunkSize_kb = new_maxChunkSize_kb + new_maxChunkSize_kb * 0.05
-            print(f"XOXO chosen new chunk size. chunk size: {chunk_size_kb} - new max chunk size {maxChunkSize_kb}")
+            logging.info(f"New chunk size: {fmt_kb(maxChunkSize_kb)}")
 
         conn = await self.cluster.make_direct_shard_connection(shard_entry)
         res = await conn.admin.command({
@@ -104,7 +104,7 @@ class ShardedCollection:
                 'max': chunk['max']
             }, codec_options=self.cluster.client.codec_options)
 
-        print(f"XOXO num split points {len(res['splitKeys'])}")
+        print(f"Num split points: {len(res['splitKeys'])}")
         if len(res['splitKeys']) > 0:
             for key in res['splitKeys']:
                 res = await self.cluster.adminDb.command({
