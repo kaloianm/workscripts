@@ -69,11 +69,7 @@ class ShardedCollection:
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
-    async def split_chunk(self, chunk, maxChunkSize_kb):
-        shard_entry = await self.cluster.configDb.shards.find_one({'_id': chunk['shard']})
-        if shard_entry is None:
-            raise Exception(f"cannot resolve shard {chunk['shard']}")
-
+    async def split_chunk(self, chunk, maxChunkSize_kb, conn):
         chunk_size_kb = chunk['defrag_collection_est_size']
         if chunk_size_kb <= maxChunkSize_kb:
             return
@@ -94,7 +90,6 @@ class ShardedCollection:
             # Fairly distribute split points so resulting chunks will be of similar sizes
             maxChunkSize_kb = new_maxChunkSize_kb
 
-        conn = await self.cluster.make_direct_shard_connection(shard_entry)
         res = await conn.admin.command({
                 'splitVector': self.name,
                 'keyPattern': self.shard_key_pattern,
@@ -114,8 +109,6 @@ class ShardedCollection:
                     'split': self.name,
                     'middle': key
                 }, codec_options=self.cluster.client.codec_options)
-
-        conn.close()
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
@@ -938,6 +931,11 @@ async def main(args):
         if args.dryrun or len(shard_chunks) == 0:
             return
 
+        shard_entry = await coll.cluster.configDb.shards.find_one({'_id': shard})
+        if shard_entry is None:
+            raise Exception(f"cannot resolve shard {chunk['shard']}")
+
+        conn = await coll.cluster.make_direct_shard_connection(shard_entry)
         for c in shard_chunks:
             progress.update()
 
@@ -946,7 +944,9 @@ async def main(args):
 
             local_c = chunks_id_index[c['_id']]
             if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.33:
-                await coll.split_chunk(local_c, target_chunk_size_kb)
+                await coll.split_chunk(local_c, target_chunk_size_kb, conn)
+
+        conn.close()
 
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
