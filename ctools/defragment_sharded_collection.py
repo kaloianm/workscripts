@@ -110,6 +110,8 @@ class ShardedCollection:
                     'middle': key
                 }, codec_options=self.cluster.client.codec_options)
 
+            splits_performed_per_shard[chunk['shard']] += len(split_keys);
+
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
                 'moveChunk': self.name,
@@ -919,7 +921,6 @@ async def main(args):
         logging.info("Skipping Phase II")
         total_moved_data_kb = 0
 
-       
     '''
     for each chunk C in the shard:
     - No split if chunk size < 133% target chunk size
@@ -948,6 +949,8 @@ async def main(args):
 
         conn.close()
 
+    global splits_performed_per_shard
+    splits_performed_per_shard = {}
     if args.exec_phase == 'phase3' or args.exec_phase == 'all':
         logging.info(f'Phase III : Splitting oversized chunks')
 
@@ -955,9 +958,11 @@ async def main(args):
         with tqdm(total=num_chunks, unit=' chunks') as progress:
             tasks = []
             for s in shard_to_chunks:
+                splits_performed_per_shard[s] = 0;
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
             await asyncio.gather(*tasks)
+
     else:
         logging.info("Skipping Phase III")
     
@@ -973,9 +978,11 @@ async def main(args):
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
         avg_chunk_size_shard = data_size / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
+        num_splits_per_shard = splits_performed_per_shard[s] if s in splits_performed_per_shard else 0
         print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
-                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}")
-    
+                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
+                f"  Splits performed {num_splits_per_shard}")
+
     avg_chunk_size_phase_2 /= len(chunks_id_index)
 
     print("\n");
