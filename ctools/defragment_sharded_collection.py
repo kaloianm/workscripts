@@ -975,6 +975,8 @@ async def main(args):
     avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
+        if s in splits_performed_per_shard:
+            num_chunks_per_shard += splits_performed_per_shard[s]
         data_size = total_shard_size[s]
         avg_chunk_size_phase_2 += data_size
         avg_chunk_size_shard = data_size / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
