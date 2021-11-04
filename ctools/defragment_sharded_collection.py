@@ -989,7 +989,7 @@ async def main(args):
 
     print("\n");
     print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(coll_size_kb)}""")
-    print(f'Average chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)} average chunk size Phase II {fmt_kb(avg_chunk_size_phase_2)}')
+    print(f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_shard)}')
     print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / coll_size_kb):.2f} %")
 
 if __name__ == "__main__":
