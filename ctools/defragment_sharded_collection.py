@@ -9,6 +9,7 @@ from motor.frameworks.asyncio import is_event_loop
 import pymongo
 import sys
 import time
+import pickle
 
 from common import Cluster, yes_no
 from copy import deepcopy
@@ -338,8 +339,8 @@ async def main(args):
             for c in shard_to_chunks[s]['chunks']:
                 assert(chunks_id_index.get(c['_id']) == None)
                 chunks_id_index[c['_id']] = c
-                chunks_min_index[frozenset(c['min'].items())] = c
-                chunks_max_index[frozenset(c['max'].items())] = c
+                chunks_min_index[pickle.dumps(c['min'])] = c
+                chunks_max_index[pickle.dumps(c['max'])] = c
                 if 'defrag_collection_est_size' in c:
                     if c['defrag_collection_est_size'] < small_chunk_size_kb:
                         num_small_chunks += 1
@@ -716,8 +717,8 @@ async def main(args):
             # chunks should be on other shards, but if this script was executed multiple times or 
             # due to parallelism the chunks might now be on the same shard            
 
-            left_chunk = chunks_max_index.get(frozenset(c['min'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'max': c['min']})
-            right_chunk = chunks_min_index.get(frozenset(c['max'].items())) # await cluster.configDb.chunks.find_one({'ns':coll.name, 'min': c['max']})
+            left_chunk = chunks_max_index.get(pickle.dumps(c['min']))
+            right_chunk = chunks_min_index.get(pickle.dumps(c['max']))
             
             # Exclude overweight target shards
             if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
@@ -753,9 +754,9 @@ async def main(args):
 
                     # update local map, 
                     chunks_id_index.pop(c['_id']) # only first chunk is kept
-                    chunks_min_index.pop(frozenset(c['min'].items()))
-                    chunks_max_index.pop(frozenset(left_chunk['max'].items()))
-                    chunks_max_index[frozenset(c['max'].items())] = left_chunk
+                    chunks_min_index.pop(pickle.dumps(c['min']))
+                    chunks_max_index.pop(pickle.dumps(c['max']))
+                    chunks_max_index[pickle.dumps(c['max'])] = left_chunk
                     left_chunk['merged'] = True
                     left_chunk['max'] = c['max']
                     left_chunk['defrag_collection_est_size'] = new_size
@@ -798,9 +799,9 @@ async def main(args):
 
                     # update local map
                     chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
-                    chunks_min_index.pop(frozenset(right_chunk['min'].items()))
-                    chunks_max_index.pop(frozenset(c['max'].items()))
-                    chunks_max_index[frozenset(right_chunk['max'].items())] = c
+                    chunks_min_index.pop(pickle.dumps(right_chunk['min']))
+                    chunks_max_index.pop(pickle.dumps(c['max']))
+                    chunks_max_index[pickle.dumps(right_chunk['max'])] = c
                     c['merged'] = True
                     c['shard'] = target_shard
                     c['max'] = right_chunk['max']
