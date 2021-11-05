@@ -977,8 +977,8 @@ async def main(args):
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks']) + num_splits_per_shard
         avg_chunk_size_shard = total_shard_size[s] / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
         num_splits_per_shard = splits_performed_per_shard[s] if s in splits_performed_per_shard else 0
-        print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
-                f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
+        print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(total_shard_size[s]): >9} "
+                f" ({fmt_kb(total_shard_size[s] - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
                 f"  Splits performed {num_splits_per_shard}")
 
     total_cluster_size = sum(total_shard_size.values())
