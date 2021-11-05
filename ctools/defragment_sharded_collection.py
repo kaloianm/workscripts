@@ -896,7 +896,6 @@ async def main(args):
 
     num_shards = len(shard_to_chunks)
     avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
-    ideal_num_chunks = math.ceil(coll_size_kb / target_chunk_size_kb)
 
     ###############  End stats calculation #############
     
@@ -984,6 +983,7 @@ async def main(args):
     avg_chunk_size_phase_2 = total_coll_size_kb / total_num_chunks_phase_2
     total_num_chunks_phase_3 = total_num_chunks_phase_2 + sum(splits_performed_per_shard.values())
     avg_chunk_size_phase_3 = total_coll_size_kb / total_num_chunks_phase_3
+    ideal_num_chunks = math.ceil(total_coll_size_kb / target_chunk_size_kb)
 
     print("\n");
     print(f"""Number of chunks is {total_num_chunks_phase_3} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(total_coll_size_kb)}""")
