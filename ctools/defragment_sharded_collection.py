@@ -972,20 +972,17 @@ async def main(args):
 
 
     print("\n")
-    avg_chunk_size_phase_2 = 0
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         if s in splits_performed_per_shard:
             num_chunks_per_shard += splits_performed_per_shard[s]
-        data_size = total_shard_size[s]
-        avg_chunk_size_phase_2 += data_size
-        avg_chunk_size_shard = data_size / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
+        avg_chunk_size_shard = total_shard_size[s] / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
         num_splits_per_shard = splits_performed_per_shard[s] if s in splits_performed_per_shard else 0
         print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
                 f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
                 f"  Splits performed {num_splits_per_shard}")
 
-    avg_chunk_size_phase_2 /= len(chunks_id_index)
+    avg_chunk_size_phase_2 = sum(total_shard_size.values()) / len(chunks_id_index)
 
     print("\n");
     print(f"""Number of chunks is {len(chunks_id_index)} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(coll_size_kb)}""")
