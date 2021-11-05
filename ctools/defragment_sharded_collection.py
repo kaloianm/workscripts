@@ -981,8 +981,9 @@ async def main(args):
                 f"  Splits performed {num_splits_per_shard}")
 
     total_cluster_size = sum(total_shard_size.values())
-    avg_chunk_size_phase_2 = total_cluster_size / len(chunks_id_index)
-    total_num_chunks = len(chunks_id_index) + sum(splits_performed_per_shard.values())
+    total_num_chunks_phase_2 = len(chunks_id_index)
+    avg_chunk_size_phase_2 = total_coll_size_kb / total_num_chunks_phase2
+    total_num_chunks_phase_3 = total_num_chunks_phase2 + sum(splits_performed_per_shard.values())
     avg_chunk_size_phase_3 = total_cluster_size / total_num_chunks
 
     print("\n");
