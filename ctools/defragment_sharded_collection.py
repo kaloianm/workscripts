@@ -973,9 +973,8 @@ async def main(args):
 
     print("\n")
     for s in shard_to_chunks:
-        num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
-        if s in splits_performed_per_shard:
-            num_chunks_per_shard += splits_performed_per_shard[s]
+        num_splits_per_shard = splits_performed_per_shard.get(s, 0)
+        num_chunks_per_shard = len(shard_to_chunks[s]['chunks']) + num_splits_per_shard
         avg_chunk_size_shard = total_shard_size[s] / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
         num_splits_per_shard = splits_performed_per_shard[s] if s in splits_performed_per_shard else 0
         print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9} "
