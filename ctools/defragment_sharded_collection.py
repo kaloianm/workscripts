@@ -896,8 +896,7 @@ async def main(args):
 
     num_shards = len(shard_to_chunks)
     avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
-    ideal_num_chunks = max(math.ceil(coll_size_kb / target_chunk_size_kb), num_shards)
-    ideal_num_chunks_per_shard = max(math.ceil(ideal_num_chunks / num_shards), 1)
+    ideal_num_chunks = math.ceil(coll_size_kb / target_chunk_size_kb)
 
     ###############  End stats calculation #############
     
