@@ -989,7 +989,7 @@ async def main(args):
     print("\n");
     print(f"""Number of chunks is {total_num_chunks} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(coll_size_kb)}""")
     print(f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_phase_3)}')
-    print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / coll_size_kb):.2f} %")
+    print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / total_coll_size_kb):.2f} %")
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
