@@ -982,12 +982,14 @@ async def main(args):
                 f" ({fmt_kb(data_size - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
                 f"  Splits performed {num_splits_per_shard}")
 
-    avg_chunk_size_phase_2 = sum(total_shard_size.values()) / len(chunks_id_index)
+    total_cluster_size = sum(total_shard_size.values())
+    avg_chunk_size_phase_2 = total_cluster_size / len(chunks_id_index)
     total_num_chunks = len(chunks_id_index) + sum(splits_performed_per_shard.values())
+    avg_chunk_size_phase_3 = total_cluster_size / total_num_chunks
 
     print("\n");
     print(f"""Number of chunks is {total_num_chunks} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(coll_size_kb)}""")
-    print(f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_shard)}')
+    print(f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_phase_3)}')
     print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / coll_size_kb):.2f} %")
 
 if __name__ == "__main__":
