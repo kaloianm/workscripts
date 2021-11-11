@@ -218,13 +218,19 @@ async def main(args):
     await coll.init()
 
     ###############################################################################################
-    # Sanity checks (Read-Only): Ensure that the balancer and auto-splitter are stopped and that the
-    # MaxChunkSize has been configured appropriately
+    # Sanity checks (Read-Only). Ensure that:
+    # - The balancer and auto-splitter are stopped
+    # - No zones are associated to the collection
+    # - MaxChunkSize has been configured appropriately
     #
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
     if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
         raise Exception("""The balancer must be stopped before running this script. Please run:
                            sh.stopBalancer()""")
+
+    tags_doc = await cluster.configDb.tags.find_one({'ns': args.ns})
+    if tags_doc is not None:
+        raise Exception("""There can be no zones associated with the collection to defragment""")
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
     if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
