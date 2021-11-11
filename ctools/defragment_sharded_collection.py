@@ -219,15 +219,12 @@ async def main(args):
 
     ###############################################################################################
     # Sanity checks (Read-Only). Ensure that:
-    # - The mongo version is lower than 5.0
+    # - The current FCV mode is lower than 5.0
     # - The balancer and auto-splitter are stopped
     # - No zones are associated to the collection
     # - MaxChunkSize has been configured appropriately
     #
-    server_status = await cluster.adminDb.command({'serverStatus': 1},
-                           codec_options=cluster.client.codec_options)
-    major_version = int(server_status['version'].split('.')[0])
-    if major_version >= 5:
+    if await cluster.FCV >= '5.0':
         raise Exception("The script is only compatible with MongoDB versions < 5.0")
 
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
