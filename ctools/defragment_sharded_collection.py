@@ -219,10 +219,17 @@ async def main(args):
 
     ###############################################################################################
     # Sanity checks (Read-Only). Ensure that:
+    # - The mongo version is lower than 5.0
     # - The balancer and auto-splitter are stopped
     # - No zones are associated to the collection
     # - MaxChunkSize has been configured appropriately
     #
+    server_status = await cluster.adminDb.command({'serverStatus': 1},
+                           codec_options=cluster.client.codec_options)
+    major_version = int(server_status['version'].split('.')[0])
+    if major_version >= 5:
+        raise Exception("The script is only compatible with MongoDB versions < 5.0")
+
     balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
     if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
         raise Exception("""The balancer must be stopped before running this script. Please run:
@@ -230,7 +237,7 @@ async def main(args):
 
     tags_doc = await cluster.configDb.tags.find_one({'ns': args.ns})
     if tags_doc is not None:
-        raise Exception("""There can be no zones associated with the collection to defragment""")
+        raise Exception("There can be no zones associated with the collection to defragment")
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
     if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
