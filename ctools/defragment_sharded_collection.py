@@ -970,13 +970,12 @@ async def main(args):
         conn = await coll.cluster.make_direct_shard_connection(shard_entry)
         for c in shard_chunks:
             progress.update()
+            
+            chunk_size = await get_chunk_size(c)
 
-            if 'defrag_collection_est_size' not in c:
-                continue
+            if chunk_size > target_chunk_size_kb * 1.33:
+                await coll.split_chunk(c, target_chunk_size_kb, conn)
 
-            local_c = chunks_id_index[c['_id']]
-            if local_c['defrag_collection_est_size'] > target_chunk_size_kb * 1.33:
-                await coll.split_chunk(local_c, target_chunk_size_kb, conn)
 
         conn.close()
 
