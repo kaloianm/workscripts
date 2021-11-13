@@ -120,59 +120,13 @@ class ShardedCollection:
                 'to': to
             }, codec_options=self.cluster.client.codec_options)
 
-    async def merge_chunks(self, consecutive_chunks, unsafe_mode):
+    async def merge_chunks(self, consecutive_chunks):
         assert (len(consecutive_chunks) > 1)
 
-        if unsafe_mode == 'no':
-            await self.cluster.adminDb.command({
-                'mergeChunks': self.name,
-                'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
-            }, codec_options=self.cluster.client.codec_options)
-        elif unsafe_mode == 'unsafe_direct_commit_against_configsvr':
-            if not self._direct_config_connection:
-                self._direct_config_connection = await self.cluster.make_direct_config_server_connection(
-                )
-
-            # TODO: Implement the unsafe_direct_commit_against_configsvr option
-            raise NotImplementedError(
-                'The unsafe_direct_commit_against_configsvr option is not yet implemented')
-        elif unsafe_mode == 'super_unsafe_direct_apply_ops_aginst_configsvr':
-            first_chunk = deepcopy(consecutive_chunks[0])
-            first_chunk['max'] = consecutive_chunks[-1]['max']
-            # TODO: Bump first_chunk['version'] to the collection version
-            first_chunk.pop('history', None)
-
-            first_chunk_update = [{
-                'op': 'u',
-                'b': False,  # No upsert
-                'ns': 'config.chunks',
-                'o': first_chunk,
-                'o2': {
-                    '_id': first_chunk['_id']
-                },
-            }]
-            remaining_chunks_delete = list(
-                map(lambda x: {
-                    'op': 'd',
-                    'ns': 'config.chunks',
-                    'o': {
-                        '_id': x['_id']
-                    },
-                }, consecutive_chunks[1:]))
-            precondition = [
-                # TODO: Include the precondition
-            ]
-            apply_ops_cmd = {
-                'applyOps': first_chunk_update + remaining_chunks_delete,
-                'preCondition': precondition,
-            }
-
-            if not self._direct_config_connection:
-                self._direct_config_connection = await self.cluster.make_direct_config_server_connection(
-                )
-
-            await self._direct_config_connection.admin.command(
-                apply_ops_cmd, codec_options=self.cluster.client.codec_options)
+        await self.cluster.adminDb.command({
+            'mergeChunks': self.name,
+            'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
+        }, codec_options=self.cluster.client.codec_options)
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write_kb):
         try:
@@ -598,8 +552,7 @@ async def main(args):
                         
                 if not args.dryrun:
                     try:
-                        await coll.merge_chunks(consecutive_chunks.batch,
-                                                args.phase_1_perform_unsafe_merge)
+                        await coll.merge_chunks(consecutive_chunks.batch)
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, shard,
                                                             consecutive_chunks.batch_size_estimation)
@@ -770,7 +723,7 @@ async def main(args):
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
                         
-                        await coll.merge_chunks([left_chunk, c], args.phase_1_perform_unsafe_merge)
+                        await coll.merge_chunks([left_chunk, c])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
@@ -818,7 +771,7 @@ async def main(args):
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
                         
-                        await coll.merge_chunks([c, right_chunk], args.phase_1_perform_unsafe_merge)
+                        await coll.merge_chunks([c, right_chunk])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
@@ -1074,14 +1027,6 @@ if __name__ == "__main__":
         dest='threshold_for_size_calculation',
         type=float,
         default=0.9)
-    argsParser.add_argument(
-        '--phase_1_perform_unsafe_merge',
-        help="""Applies only to Phase 1 and instructs the script to directly write the merged chunks
-           to the config.chunks collection rather than going through the `mergeChunks` command.""",
-        metavar='phase_1_perform_unsafe_merge', type=str, default='no', choices=[
-            'no', 'unsafe_direct_commit_against_configsvr',
-            'super_unsafe_direct_apply_ops_aginst_configsvr'
-        ])
     argsParser.add_argument(
         '--phases',
         help="""Which phase of the defragmentation algorithm to execute.""",
