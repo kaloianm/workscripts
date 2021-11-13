@@ -656,10 +656,6 @@ async def main(args):
     # Phase 1 in order to calculate the most optimal move strategy.
     #
 
-    def has_size(ch):
-        return 'defrag_collection_est_size' in ch or \
-                'defrag_collection_est_size' in chunks_id_index[ch['_id']]
-
     # might be called with a chunk document without size estimation
     async def get_chunk_size(ch):
         if 'defrag_collection_est_size' in ch:
@@ -671,6 +667,7 @@ async def main(args):
 
         chunk_range = [ch['min'], ch['max']]
         data_size_kb = await coll.data_size_kb_from_shard(chunk_range)
+        ch['phase2_calculated_size'] = True
         chunks_id_index[ch['_id']]['defrag_collection_est_size'] = data_size_kb
 
         return data_size_kb
@@ -716,11 +713,12 @@ async def main(args):
             if c['_id'] not in chunks_id_index:
                 continue
 
-            had_size = has_size(c)
+            center_size_kb = await get_chunk_size(c)
+            
+            had_size = 'phase2_calculated_size' not in c
+
             # size should miss only in dryrun mode
             assert had_size or args.dryrun
-
-            center_size_kb = await get_chunk_size(c)
             
             # chunk are sorted so if we encounter a chunk too big that has not being previously merged
             # we can safely exit from the loop since all the subsequent chunks will be bigger
