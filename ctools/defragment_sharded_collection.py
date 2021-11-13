@@ -857,7 +857,11 @@ async def main(args):
         total_moved_data_kb = 0
 
         total_chunks_to_process = num_small_chunks + num_chunks_no_size
+
         logging.info(f"Number of small chunks: {num_small_chunks}, Number of chunks with unkown size: {num_chunks_no_size}")
+        if not total_chunks_to_process:
+            return total_moved_data_kb
+
         with tqdm(total=total_chunks_to_process, unit=' chunks') as progress:
             iteration = 0
             while iteration < 25:
