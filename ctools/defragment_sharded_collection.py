@@ -227,8 +227,12 @@ async def main(args):
     if await cluster.FCV >= '5.0':
         raise Exception("The script is only compatible with MongoDB versions < 5.0")
 
-    balancer_doc = await cluster.configDb.settings.find_one({'_id': 'balancer'})
-    if not args.dryrun and (balancer_doc is None or balancer_doc['mode'] != 'off'):
+    async def balancer_enabled():
+        balancer_status = await cluster.adminDb.command({'balancerStatus': 1})
+        assert 'mode' in balancer_status, f"Unrecognized balancer status response: {balancer_status}"
+        return balancer_status['mode'] != 'off'
+
+    if not args.dryrun and await balancer_enabled():
         raise Exception("""The balancer must be stopped before running this script. Please run:
                            sh.stopBalancer()""")
 
