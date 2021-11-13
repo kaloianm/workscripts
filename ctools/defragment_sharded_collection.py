@@ -348,11 +348,12 @@ async def main(args):
 
     # Mirror the config.chunks indexes in memory
     def build_chunk_index():
-        global chunks_id_index, chunks_min_index, chunks_max_index, num_small_chunks
+        global chunks_id_index, chunks_min_index, chunks_max_index, num_small_chunks, num_chunks_no_size
         chunks_id_index = {}
         chunks_min_index = {}
         chunks_max_index = {}
         num_small_chunks = 0
+        num_chunks_no_size = 0
         for s in shard_to_chunks:
             for c in shard_to_chunks[s]['chunks']:
                 assert(chunks_id_index.get(c['_id']) == None)
@@ -362,8 +363,8 @@ async def main(args):
                 if 'defrag_collection_est_size' in c:
                     if c['defrag_collection_est_size'] < small_chunk_size_kb:
                         num_small_chunks += 1
-#                else:
-#                    logging.warning("need to perform a chunk size estimation")
+                else:
+                    num_chunks_no_size += 1
 
 
     ###############################################################################################
@@ -679,6 +680,7 @@ async def main(args):
 
     async def move_merge_chunks_by_size(shard, progress):
         global num_small_chunks
+        global num_chunks_no_size
         total_moved_data_kb = 0
 
         shard_entry = shard_to_chunks[shard]
@@ -728,7 +730,10 @@ async def main(args):
             # chunk are sorted so if we encounter a chunk too big that has not being previously merged
             # we can safely exit from the loop since all the subsequent chunks will be bigger
             if center_size_kb > small_chunk_size_kb:
-                if 'merged' in c or not had_size:
+                if 'merged' in c:
+                    continue
+                elif not had_size:
+                    progress.update(1)
                     continue
                 else:
                     break
@@ -787,11 +792,13 @@ async def main(args):
                         total_moved_data_kb += center_size_kb
 
                     num_chunks -= 1
-                    small_chunks_vanished = 1
+
+                    # update stats for merged chunk (source)
+                    progress.update(1)
+                    #update stats for merged chunk (destination)
                     if left_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
-                        small_chunks_vanished += 1
-                    num_small_chunks -= small_chunks_vanished
-                    progress.update(small_chunks_vanished)
+                        progress.update(1)
+
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
@@ -833,12 +840,12 @@ async def main(args):
                         total_shard_size[target_shard] += center_size_kb
                         total_moved_data_kb += center_size_kb
 
-                    num_chunks -= 1
-                    small_chunks_vanished = 1
+                    # update stats for merged chunk (source)
+                    progress.update(1)
+                    #update stats for merged chunk (destination)
                     if right_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
-                        small_chunks_vanished += 1
-                    num_small_chunks -= small_chunks_vanished
-                    progress.update(small_chunks_vanished)
+                        progress.update(1)
+
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
@@ -849,11 +856,13 @@ async def main(args):
         # Move and merge small chunks. The way this is written it might need to run multiple times
         total_moved_data_kb = 0
 
-        with tqdm(total=num_small_chunks, unit=' chunks') as progress:
+        total_chunks_to_process = num_small_chunks + num_chunks_no_size
+        logging.info(f"Number of small chunks: {num_small_chunks}, Number of chunks with unkown size: {num_chunks_no_size}")
+        with tqdm(total=total_chunks_to_process, unit=' chunks') as progress:
             iteration = 0
             while iteration < 25:
                 iteration += 1
-                progress.write(f"""Phase II: iteration {iteration}. Number of small chunks {num_small_chunks}, total chunks {len(chunks_id_index)}""")
+                progress.write(f"""Phase II: iteration {iteration}. Remainging chunks to process {progress.total - progress.n}, total chunks {len(chunks_id_index)}""")
 
                 moved_data_kb = 0
                 tasks = []
@@ -878,7 +887,7 @@ async def main(args):
                     num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
                     assert(num_chunks_actual == num_chunks)
 
-                if moved_data_kb == 0 or num_small_chunks == 0:
+                if moved_data_kb == 0 or progress.n == progress.total:
                     return total_moved_data_kb
 
 
