@@ -272,6 +272,8 @@ async def main(args):
     if args.threshold_for_size_calculation < 0 or args.threshold_for_size_calculation > 1:
         raise Exception("The value for --phase_1_calc_size_threshold must be between 0 and 1.0")
 
+    args.write_chunk_size = not args.no_write_chunk_size
+
     if args.dryrun:
         logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)} """
                 f"""and an estimated chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
@@ -321,7 +323,7 @@ async def main(args):
                 shard_to_chunks[shard_id]['size'] = sizes[shard_id]
 
     async def write_all_missing_chunk_size():
-        if args.dryrun:
+        if args.dryrun or not args.write_chunk_size:
             return
 
         async def write_size(ch, progress):
@@ -447,7 +449,9 @@ async def main(args):
 
             chunk_range = [ch['min'], ch['max']]
             ch[size_label] = await coll.data_size_kb_from_shard(chunk_range)
-            await coll.try_write_chunk_size(chunk_range, shard, ch[size_label])
+            
+            if args.write_chunk_size:
+                await coll.try_write_chunk_size(chunk_range, shard, ch[size_label])
 
         def lookahead(iterable):
             """Pass through all values from the given iterable, augmented by the
@@ -595,8 +599,9 @@ async def main(args):
                     try:
                         await coll.merge_chunks(consecutive_chunks.batch,
                                                 args.phase_1_perform_unsafe_merge)
-                        await coll.try_write_chunk_size(merge_bounds, shard,
-                                                        consecutive_chunks.batch_size_estimation)
+                        if args.write_chunk_size:
+                            await coll.try_write_chunk_size(merge_bounds, shard,
+                                                            consecutive_chunks.batch_size_estimation)
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             num_lock_busy_errors_encountered += 1
@@ -718,7 +723,7 @@ async def main(args):
             had_size = 'phase2_calculated_size' not in c
 
             # size should miss only in dryrun mode
-            assert had_size or args.dryrun
+            assert had_size or args.dryrun or not args.write_chunk_size
             
             # chunk are sorted so if we encounter a chunk too big that has not being previously merged
             # we can safely exit from the loop since all the subsequent chunks will be bigger
@@ -761,7 +766,8 @@ async def main(args):
                             await coll.move_chunk(c, target_shard)
                         
                         await coll.merge_chunks([left_chunk, c], args.phase_1_perform_unsafe_merge)
-                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                        if args.write_chunk_size:
+                            await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
                         progress.write(f'Moving chunk left from {shard} to {target_shard}, '
                                         f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
@@ -806,7 +812,8 @@ async def main(args):
                             await coll.move_chunk(c, target_shard)
                         
                         await coll.merge_chunks([c, right_chunk], args.phase_1_perform_unsafe_merge)
-                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                        if args.write_chunk_size:
+                            await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                     else:
                         progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
                                         f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
@@ -1028,6 +1035,10 @@ if __name__ == "__main__":
     argsParser.add_argument('--shard-imbalance-threshold', help="""Threshold for the size difference 
         between two shards where chunks can be moved to. Fractional value between 1.0 and 1.5""",
         metavar='fraction', dest="shard_imbalance_frac", type=float, default=1.2)
+    argsParser.add_argument(
+            '--no-write-chunk-size',
+            help="""Store chunk sizes in `config.chunks`""",
+            dest="no_write_chunk_size", action='store_true')
     argsParser.add_argument(
         '--phase_1_reset_progress',
         help="""Applies only to Phase 1 and instructs the script to clear the chunk size estimation
