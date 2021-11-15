@@ -1,8 +1,9 @@
-# Helper utilities used by the ctools scripts
+# Helper utilities to be used by the ctools scripts
 #
 
 import asyncio
 import motor.motor_asyncio
+import subprocess
 import sys
 
 from bson.binary import UuidRepresentation
@@ -31,6 +32,9 @@ def exe_name(name):
     return name
 
 
+# Abstracts the connection to and some administrative operations against a MongoDB cluster. This
+# class is highly tailored to the usage in the ctools scripts in the same directory and is not a
+# generic utility.
 class Cluster:
     def __init__(self, uri, loop):
         uri_options = uri_parser.parse_uri(uri)['options']
@@ -104,3 +108,38 @@ class Cluster:
             '_id': 'config',
             'host': await self.configsvrConnectionString
         })
+
+
+# This class implements an iterable wrapper around the 'mgeneratejs' script from
+# https://github.com/rueckstiess/mgeneratejs. It allows custom-shaped MongoDB documents to be
+# generated in a streaming fashion for scripts which need to generate some data according to a given
+# shard key.
+#
+# The mgeneratejs script must be installed in advance and must be on the system's PATH.
+#
+# Example usages:
+#   it = iter(common.MGenerateJSGenerator("{a:\'\"$name\"\'}", 100)
+#       This will generate 100 documents with the form `{a:'John Smith'}`
+class MGenerateJSGenerator:
+    def __init__(self, doc_pattern, num_docs):
+        self.doc_pattern = doc_pattern
+        self.num_docs = num_docs
+
+    def __iter__(self):
+        self.mgeneratejs_process = subprocess.Popen(
+            f'mgeneratejs --number {self.num_docs} {self.doc_pattern}', shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
+
+        self.stdout_iter = iter(self.mgeneratejs_process.stdout.readline, '')
+        return self
+
+    def __next__(self):
+        try:
+            return next(self.stdout_iter).strip()
+        except StopIteration:
+            if self.mgeneratejs_process.returncode == 0:
+                raise
+            else:
+                raise Exception(
+                    f"Error occurred running mgeneratejs {''.join(self.mgeneratejs_process.stderr.readlines())}"
+                )
