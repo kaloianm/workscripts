@@ -33,9 +33,10 @@ def exe_name(name):
 
 class Cluster:
     def __init__(self, uri, loop):
-        self.uri_options = uri_parser.parse_uri(uri)['options']
-        if 'uuidRepresentation' in self.uri_options:
-            self.uuid_representation = self.uri_options['uuidRepresentation']
+        self.str_uri_options = uri.split('?')[1]
+        uri_options = uri_parser.parse_uri(uri)['options']
+        if 'uuidRepresentation' in uri_options:
+            self.uuid_representation = uri_options['uuidRepresentation']
         else:
             self.uuid_representation = None
 
@@ -78,9 +79,7 @@ class Cluster:
 
     async def make_direct_shard_connection(self, shard):
         conn_parts = shard['host'].split('/', 1)
-        options = [key + '=' + str(self.uri_options[key]) for key in self.uri_options]
-        str_options = '&'.join(options).replace('=True', '=true').replace('=False', '=false')
-        uri = 'mongodb://' + conn_parts[1] + '/?' + str_options
+        uri = 'mongodb://' + conn_parts[1] + '/?' + self.str_uri_options
         if self.uuid_representation:
             UUID_REPRESENTATIONS = {
                 UuidRepresentation.UNSPECIFIED: 'unspecified',
