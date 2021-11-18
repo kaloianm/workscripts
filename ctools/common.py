@@ -33,9 +33,9 @@ def exe_name(name):
 
 class Cluster:
     def __init__(self, uri, loop):
-        uri_options = uri_parser.parse_uri(uri)['options']
-        if 'uuidRepresentation' in uri_options:
-            self.uuid_representation = uri_options['uuidRepresentation']
+        self.uri_options = uri_parser.parse_uri(uri)['options']
+        if 'uuidRepresentation' in self.uri_options:
+            self.uuid_representation = self.uri_options['uuidRepresentation']
         else:
             self.uuid_representation = None
 
@@ -78,6 +78,9 @@ class Cluster:
 
     async def make_direct_shard_connection(self, shard):
         conn_parts = shard['host'].split('/', 1)
+        options = [key + '=' + str(self.uri_options[key]) for key in self.uri_options]
+        str_options = '&'.join(options).replace('=True', '=true').replace('=False', '=false')
+        uri = 'mongodb://' + conn_parts[1] + '/?' + str_options
         if self.uuid_representation:
             UUID_REPRESENTATIONS = {
                 UuidRepresentation.UNSPECIFIED: 'unspecified',
@@ -87,10 +90,10 @@ class Cluster:
                 UuidRepresentation.CSHARP_LEGACY: 'csharpLegacy'
             }
             return motor.motor_asyncio.AsyncIOMotorClient(
-                conn_parts[1], replicaset=conn_parts[0],
+                uri, replicaset=conn_parts[0],
                 uuidRepresentation=UUID_REPRESENTATIONS[self.uuid_representation])
         else:
-            return motor.motor_asyncio.AsyncIOMotorClient(conn_parts[1], replicaset=conn_parts[0])
+            return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0])
 
     async def on_each_shard(self, fn):
         tasks = []
