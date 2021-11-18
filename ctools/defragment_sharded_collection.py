@@ -661,8 +661,6 @@ async def main(args):
                 return 0
             return min(combined, abs(remain - target_chunk_size_kb))
 
-        num_chunks = len(shard_chunks)
-
         progress.write(f'Moving small chunks off shard {shard}')
 
         sorted_chunks = shard_chunks.copy()
@@ -744,8 +742,6 @@ async def main(args):
                         total_shard_size[target_shard] += center_size_kb
                         total_moved_data_kb += center_size_kb
 
-                    num_chunks -= 1
-
                     # update stats for merged chunk (source)
                     progress.update(1)
                     #update stats for merged chunk (destination)
@@ -762,7 +758,7 @@ async def main(args):
                 new_size = right_size + center_size_kb
                 is_overweight = False
                 if shard != target_shard:
-                    total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
                 
                 if center_size_kb <= right_size or is_overweight:
 
@@ -822,7 +818,6 @@ async def main(args):
                 progress.write(f"""Phase II: iteration {iteration}. Remainging chunks to process {progress.total - progress.n}, total chunks {len(chunks_id_index)}""")
 
                 moved_data_kb = 0
-                tasks = []
                 shards_to_process = [s for s in shard_to_chunks]
                 while(shards_to_process):
                     # get the shard with most data
