@@ -729,86 +729,84 @@ async def main(args):
                 target_shard = left_chunk['shard']
                 left_size = await get_chunk_size(left_chunk)
                 new_size = left_size + center_size_kb
-                if True:
-                    merge_bounds = [left_chunk['min'], c['max']]
-                    if not args.dryrun:
-                        if shard != target_shard:
-                            await coll.move_chunk(c, target_shard)
-                        
-                        await coll.merge_chunks([left_chunk, c])
-                        if args.write_chunk_size:
-                            await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
-                    else:
-                        progress.write(f'Moving chunk left from {shard} to {target_shard}, '
-                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
-
-                    # update local map, 
-                    chunks_id_index.pop(c['_id']) # only first chunk is kept
-                    chunks_min_index.pop(pickle.dumps(c['min']))
-                    chunks_max_index.pop(pickle.dumps(c['max']))
-                    chunks_max_index[pickle.dumps(c['max'])] = left_chunk
-                    left_chunk['merged'] = True
-                    left_chunk['max'] = c['max']
-                    left_chunk['defrag_collection_est_size'] = new_size
-
+                merge_bounds = [left_chunk['min'], c['max']]
+                if not args.dryrun:
                     if shard != target_shard:
-                        total_shard_size[shard] -= center_size_kb
-                        total_shard_size[target_shard] += center_size_kb
-                        max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
-                        total_moved_data_kb += center_size_kb
+                        await coll.move_chunk(c, target_shard)
+                    
+                    await coll.merge_chunks([left_chunk, c])
+                    if args.write_chunk_size:
+                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                else:
+                    progress.write(f'Moving chunk left from {shard} to {target_shard}, '
+                                    f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
-                    # update stats for merged chunk (source)
+                # update local map, 
+                chunks_id_index.pop(c['_id']) # only first chunk is kept
+                chunks_min_index.pop(pickle.dumps(c['min']))
+                chunks_max_index.pop(pickle.dumps(c['max']))
+                chunks_max_index[pickle.dumps(c['max'])] = left_chunk
+                left_chunk['merged'] = True
+                left_chunk['max'] = c['max']
+                left_chunk['defrag_collection_est_size'] = new_size
+
+                if shard != target_shard:
+                    total_shard_size[shard] -= center_size_kb
+                    total_shard_size[target_shard] += center_size_kb
+                    max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
+                    total_moved_data_kb += center_size_kb
+
+                # update stats for merged chunk (source)
+                progress.update(1)
+                #update stats for merged chunk (destination)
+                if left_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
                     progress.update(1)
-                    #update stats for merged chunk (destination)
-                    if left_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
-                        progress.update(1)
 
-                    await exec_throttle()
-                    begin_time = time.monotonic()
-                    continue
+                await exec_throttle()
+                begin_time = time.monotonic()
+                continue
             
             if right_chunk is not None:
                 target_shard = right_chunk['shard']
                 right_size = await get_chunk_size(right_chunk)
                 new_size = right_size + center_size_kb
-                if True:
-                    merge_bounds = [c['min'], right_chunk['max']]
-                    if not args.dryrun:
-                        if shard != target_shard:
-                            await coll.move_chunk(c, target_shard)
-                        
-                        await coll.merge_chunks([c, right_chunk])
-                        if args.write_chunk_size:
-                            await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
-                    else:
-                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
-                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
-
-                    # update local map
-                    chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
-                    chunks_min_index.pop(pickle.dumps(right_chunk['min']))
-                    chunks_max_index.pop(pickle.dumps(c['max']))
-                    chunks_max_index[pickle.dumps(right_chunk['max'])] = c
-                    c['merged'] = True
-                    c['shard'] = target_shard
-                    c['max'] = right_chunk['max']
-                    c['defrag_collection_est_size'] = new_size
-
+                merge_bounds = [c['min'], right_chunk['max']]
+                if not args.dryrun:
                     if shard != target_shard:
-                        total_shard_size[shard] -= center_size_kb
-                        total_shard_size[target_shard] += center_size_kb
-                        max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
-                        total_moved_data_kb += center_size_kb
+                        await coll.move_chunk(c, target_shard)
+                    
+                    await coll.merge_chunks([c, right_chunk])
+                    if args.write_chunk_size:
+                        await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                else:
+                    progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
+                                    f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
-                    # update stats for merged chunk (source)
+                # update local map
+                chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
+                chunks_min_index.pop(pickle.dumps(right_chunk['min']))
+                chunks_max_index.pop(pickle.dumps(c['max']))
+                chunks_max_index[pickle.dumps(right_chunk['max'])] = c
+                c['merged'] = True
+                c['shard'] = target_shard
+                c['max'] = right_chunk['max']
+                c['defrag_collection_est_size'] = new_size
+
+                if shard != target_shard:
+                    total_shard_size[shard] -= center_size_kb
+                    total_shard_size[target_shard] += center_size_kb
+                    max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
+                    total_moved_data_kb += center_size_kb
+
+                # update stats for merged chunk (source)
+                progress.update(1)
+                #update stats for merged chunk (destination)
+                if right_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
                     progress.update(1)
-                    #update stats for merged chunk (destination)
-                    if right_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
-                        progress.update(1)
 
-                    await exec_throttle()
-                    begin_time = time.monotonic()
-                    continue
+                await exec_throttle()
+                begin_time = time.monotonic()
+                continue
 
         # </for c in sorted_chunks:>
         return total_moved_data_kb
