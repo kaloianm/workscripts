@@ -643,6 +643,7 @@ async def main(args):
         global num_small_chunks
         global num_chunks_no_size
         total_moved_data_kb = 0
+        max_shard_size = max(total_shard_size.values())
 
         shard_entry = shard_to_chunks[shard]
         shard_chunks = shard_entry['chunks']
@@ -658,16 +659,6 @@ async def main(args):
                 args.max_migrations -= 1
             if args.max_migrations == 0:
                 raise Exception("Max number of migrations exceeded")
-
-        async def get_remain_chunk_imbalance(center, target_chunk):
-            if target_chunk is None:
-                return sys.maxsize
-
-            combined = await get_chunk_size(center) + await get_chunk_size(target_chunk)
-            remain = (combined % target_chunk_size_kb)
-            if remain == 0:
-                return 0
-            return min(combined, abs(remain - target_chunk_size_kb))
 
         progress.write(f'Moving small chunks off shard {shard}')
 
@@ -696,6 +687,9 @@ async def main(args):
                     continue
                 else:
                     break
+                
+            if total_shard_size[shard] * args.shard_imbalance_frac < max_shard_size and not center_size_kb == 0:
+                continue
 
             # chunks should be on other shards, but if this script was executed multiple times or 
             # due to parallelism the chunks might now be on the same shard            
@@ -703,27 +697,39 @@ async def main(args):
             left_chunk = chunks_max_index.get(pickle.dumps(c['min']))
             right_chunk = chunks_min_index.get(pickle.dumps(c['max']))
             
-            # Exclude overweight target shards
-            if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
-                if total_shard_size[left_chunk['shard']] > total_shard_size[right_chunk['shard']] * args.shard_imbalance_frac:
+            if left_chunk and right_chunk:
+                for dest_chunk in [left_chunk, right_chunk]:
+                    dest_chunk['votes'] = 0
+
+                    if dest_chunk['shard'] == shard:
+                        dest_chunk['votes'] += 1 << 5 
+                    dest_size = await get_chunk_size(dest_chunk)
+
+                    if center_size_kb <= dest_size:
+                        dest_chunk['votes'] += 1 << 4
+
+                    combined_size = center_size_kb + dest_size
+                    if combined_size > small_chunk_size_kb:
+                        if dest_size < small_chunk_size_kb:
+                            dest_chunk['votes'] += 1 << 3
+                        else:
+                            dest_chunk['votes'] += 1 << 1
+                    
+                if left_chunk['votes'] == right_chunk['votes']:
+                    if total_shard_size[left_chunk['shard']] < total_shard_size[right_chunk['shard']]:
+                        left_chunk['votes'] += 1 << 2
+                    elif total_shard_size[left_chunk['shard']] > total_shard_size[right_chunk['shard']]:
+                        right_chunk['votes'] += 1 << 2
+                
+                if right_chunk['votes'] > left_chunk['votes']:
                     left_chunk = None
-                elif total_shard_size[right_chunk['shard']] > total_shard_size[left_chunk['shard']] * args.shard_imbalance_frac:
-                    right_chunk = None
-                else:
-                    pass
+
 
             if left_chunk is not None:
                 target_shard = left_chunk['shard']
                 left_size = await get_chunk_size(left_chunk)
                 new_size = left_size + center_size_kb
-                is_overweight = False
-                if shard != target_shard:
-                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
-                
-                # only move a smaller chunk unless shard is bigger
-                if (center_size_kb <= left_size or is_overweight) and (
-                    await get_remain_chunk_imbalance(c, left_chunk)) < (await get_remain_chunk_imbalance(c, right_chunk)):
-
+                if True:
                     merge_bounds = [left_chunk['min'], c['max']]
                     if not args.dryrun:
                         if shard != target_shard:
@@ -748,6 +754,7 @@ async def main(args):
                     if shard != target_shard:
                         total_shard_size[shard] -= center_size_kb
                         total_shard_size[target_shard] += center_size_kb
+                        max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
                         total_moved_data_kb += center_size_kb
 
                     # update stats for merged chunk (source)
@@ -764,12 +771,7 @@ async def main(args):
                 target_shard = right_chunk['shard']
                 right_size = await get_chunk_size(right_chunk)
                 new_size = right_size + center_size_kb
-                is_overweight = False
-                if shard != target_shard:
-                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
-                
-                if center_size_kb <= right_size or is_overweight:
-
+                if True:
                     merge_bounds = [c['min'], right_chunk['max']]
                     if not args.dryrun:
                         if shard != target_shard:
@@ -795,6 +797,7 @@ async def main(args):
                     if shard != target_shard:
                         total_shard_size[shard] -= center_size_kb
                         total_shard_size[target_shard] += center_size_kb
+                        max_shard_size = max(max_shard_size, total_shard_size[target_shard]) 
                         total_moved_data_kb += center_size_kb
 
                     # update stats for merged chunk (source)
@@ -806,6 +809,7 @@ async def main(args):
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
+
         # </for c in sorted_chunks:>
         return total_moved_data_kb
     
