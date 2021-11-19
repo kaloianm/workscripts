@@ -37,7 +37,7 @@ def exe_name(name):
 # generic utility.
 class Cluster:
     def __init__(self, uri, loop):
-        self.str_uri_options = uri.split('?')[1]
+        self.str_uri_options = uri.split('?')[1] if '?' in uri else ''
         uri_options = uri_parser.parse_uri(uri)['options']
         if 'uuidRepresentation' in uri_options:
             self.uuid_representation = uri_options['uuidRepresentation']
