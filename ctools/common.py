@@ -6,7 +6,6 @@ import motor.motor_asyncio
 import subprocess
 import sys
 
-from bson.binary import UuidRepresentation
 from pymongo import uri_parser
 
 
@@ -37,13 +36,7 @@ def exe_name(name):
 # generic utility.
 class Cluster:
     def __init__(self, uri, loop):
-        self.str_uri_options = uri.split('?')[1]
-        uri_options = uri_parser.parse_uri(uri)['options']
-        if 'uuidRepresentation' in uri_options:
-            self.uuid_representation = uri_options['uuidRepresentation']
-        else:
-            self.uuid_representation = None
-
+        self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
         self.adminDb = self.client.admin
@@ -83,20 +76,8 @@ class Cluster:
 
     async def make_direct_shard_connection(self, shard):
         conn_parts = shard['host'].split('/', 1)
-        uri = 'mongodb://' + conn_parts[1] + '/?' + self.str_uri_options
-        if self.uuid_representation:
-            UUID_REPRESENTATIONS = {
-                UuidRepresentation.UNSPECIFIED: 'unspecified',
-                UuidRepresentation.STANDARD: 'standard',
-                UuidRepresentation.PYTHON_LEGACY: 'pythonLegacy',
-                UuidRepresentation.JAVA_LEGACY: 'javaLegacy',
-                UuidRepresentation.CSHARP_LEGACY: 'csharpLegacy'
-            }
-            return motor.motor_asyncio.AsyncIOMotorClient(
-                uri, replicaset=conn_parts[0],
-                uuidRepresentation=UUID_REPRESENTATIONS[self.uuid_representation])
-        else:
-            return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0])
+        uri = 'mongodb://' + conn_parts[1]
+        return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0], **self.uri_options)
 
     async def on_each_shard(self, fn):
         tasks = []
