@@ -823,7 +823,7 @@ async def main(args):
 
         with tqdm(total=total_chunks_to_process, unit=' chunks') as progress:
             iteration = 0
-            while iteration < 25:
+            while True:
                 iteration += 1
                 progress.write(f"""Phase II: iteration {iteration}. Remainging chunks to process {progress.total - progress.n}, total chunks {len(chunks_id_index)}""")
 
