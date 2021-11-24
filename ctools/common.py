@@ -7,6 +7,8 @@ import subprocess
 import sys
 
 from pymongo import uri_parser
+from bson.codec_options import CodecOptions
+from bson.binary import UuidRepresentation
 
 
 # Function for a Yes/No result based on the answer provided as an argument
@@ -40,7 +42,8 @@ class Cluster:
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
         self.adminDb = self.client.admin
-        self.configDb = self.client.config
+        std_codec_options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
+        self.configDb = self.client.get_database('config', codec_options=std_codec_options)
 
     class NotMongosException(Exception):
         pass
