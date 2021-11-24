@@ -71,8 +71,6 @@ async def main(args):
     print(f'Cleaning up old entries for {args.ns} ...')
     dbName, collName = args.ns.split('.', 1)
     await cluster.client[dbName][collName].drop()
-    assert await cluster.configDb.collections.count_documents({'_id': args.ns}) == 0
-    assert await cluster.configDb.chunks.count_documents({'ns': args.ns}) == 0
     print(f'Cleaned up old entries for {args.ns}')
 
     sem = asyncio.Semaphore(10)
