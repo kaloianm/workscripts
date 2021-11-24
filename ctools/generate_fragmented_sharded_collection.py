@@ -249,7 +249,6 @@ async def main(args):
     print('Writing collection entry')
     coll_obj = {
             '_id': args.ns,
-            'lastmodEpoch': epoch,
             'lastmod': collection_creation_time,
             'key': {
                 'shardKey': 1
@@ -264,6 +263,7 @@ async def main(args):
             })
     else:
         coll_obj.update({
+            'lastmodEpoch': epoch,
             'dropped': False
             })
 
