@@ -2,5 +2,5 @@ argparse == 1.4.0
 motor == 2.4.0
 mtools == 1.6.4
 psutil == 5.7.0
-pymongo == 3.11.2
+pymongo == 3.12.1
 tqdm == 4.60.0
