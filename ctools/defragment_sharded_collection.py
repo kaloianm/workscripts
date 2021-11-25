@@ -35,6 +35,13 @@ class ShardedCollection:
 
         self.uuid = collection_entry['uuid']
         self.shard_key_pattern = collection_entry['key']
+        self.fcv = await self.cluster.FCV
+
+    def chunks_query_filter(self):
+        if self.fcv >= '5.0':
+            return {'uuid': self.uuid}
+        else:
+            return {'ns': self.name}
 
     async def data_size_kb(self):
         data_size_response = await self.cluster.client[self.ns['db']].command({
@@ -130,14 +137,16 @@ class ShardedCollection:
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write_kb):
         try:
-            update_result = await self.cluster.configDb.chunks.update_one({
-                'ns': self.name,
+            chunk_selector = self.chunks_query_filter()
+            chunk_selector.update({
                 'min': range[0],
                 'max': range[1],
                 'shard': expected_owning_shard
-            }, {'$set': {
-                'defrag_collection_est_size': size_to_write_kb
-            }})
+                })
+            update_result = await self.cluster.configDb.chunks.update_one(
+                chunk_selector,
+                {'$set': {'defrag_collection_est_size': size_to_write_kb}}
+                )
 
             if update_result.matched_count != 1:
                 raise Exception(
@@ -147,9 +156,9 @@ class ShardedCollection:
 
     async def clear_chunk_size_estimations(self):
         update_result = await self.cluster.configDb.chunks.update_many(
-            {'ns': self.name}, {'$unset': {
-                'defrag_collection_est_size': ''
-            }})
+            self.chunks_query_filter(),
+            {'$unset': {'defrag_collection_est_size': ''}}
+            )
         return update_result.modified_count
 
 def fmt_bytes(num):
@@ -178,8 +187,6 @@ async def main(args):
     # - No zones are associated to the collection
     # - MaxChunkSize has been configured appropriately
     #
-    if await cluster.FCV >= '5.0':
-        raise Exception("The script is only compatible with MongoDB versions < 5.0")
 
     async def balancer_enabled():
         balancer_status = await cluster.adminDb.command({'balancerStatus': 1})
@@ -246,7 +253,7 @@ async def main(args):
     # in preparation for the subsequent write phase.
     ###############################################################################################
 
-    num_chunks = await cluster.configDb.chunks.count_documents({'ns': coll.name})
+    num_chunks = await cluster.configDb.chunks.count_documents(coll.chunks_query_filter())
     logging.info(f"""Collection '{coll.name}' has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks""")
     shard_to_chunks = {}
 
@@ -256,7 +263,7 @@ async def main(args):
         assert not shard_to_chunks
         collectionVersion = None
         with tqdm(total=num_chunks, unit=' chunk') as progress:
-            async for c in cluster.configDb.chunks.find({'ns': coll.name}, sort=[('min',
+            async for c in cluster.configDb.chunks.find(coll.chunks_query_filter(), sort=[('min',
                                                                                 pymongo.ASCENDING)]):
                 shard_id = c['shard']
                 if collectionVersion is None:
@@ -286,7 +293,8 @@ async def main(args):
             await coll.try_write_chunk_size(bounds, ch['shard'], size)
             progress.update()
 
-        missing_size_query = {'ns': coll.name, 'defrag_collection_est_size': {'$exists': 0}}
+        missing_size_query = coll.chunks_query_filter()
+        missing_size_query.update({'defrag_collection_est_size': {'$exists': 0}})
         num_chunks_missing_size = await cluster.configDb.chunks.count_documents(missing_size_query)
 
         if not num_chunks_missing_size:
@@ -836,7 +844,7 @@ async def main(args):
                 
                 num_chunks = len(chunks_id_index)
                 if not args.dryrun:
-                    num_chunks_actual = await cluster.configDb.chunks.count_documents({'ns': coll.name})
+                    num_chunks_actual = await cluster.configDb.chunks.count_documents(coll.chunks_query_filter())
                     assert(num_chunks_actual == num_chunks)
 
                 if moved_data_kb == 0 or progress.n == progress.total:
