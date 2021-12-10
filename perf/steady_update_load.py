@@ -1,6 +1,11 @@
 #
-# 1. Import 10GB data in the cluster:
-#   ./mongoimport --db=BalanceTestDB --collection=Posts --numInsertionWorkers=16 --file=10GBset.json mongodb://localhost
+# 1. Import the 10GB/20GB dataset required for the test in the cluster:
+#     $HOME/mongodb/tools/mongoimport --db=BalanceTest --collection=Posts10GB --numInsertionWorkers=16 --file=$HOME/Temp/10GBset.json mongodb://localhost
+#     $HOME/mongodb/tools/mongoimport --db=BalanceTest --collection=Posts20GB --numInsertionWorkers=16 --file=$HOME/Temp/20GBset.json mongodb://localhost
+# 2. db.Posts20GB.createIndex({ customer_id: 1 })
+# 3. sh.stopBalancer()
+# 4. sh.enableSharding('BalanceTest')
+# 5. sh.shardCollection('BalanceTest.Posts20GB', { customer_id: 1 })
 #
 
 import random
@@ -13,7 +18,7 @@ from time import perf_counter
 
 connection_string = None
 mongo_client = None
-database = None
+collection = None
 
 
 @events.init.add_listener
@@ -25,9 +30,10 @@ def on_locust_init(environment, **kwargs):
 
     global mongo_client
     mongo_client = MongoClient(connection_string)
+    database = mongo_client['BalanceTest']
 
-    global database
-    database = mongo_client['BalanceTestDB']
+    global collection
+    collection = database['Posts20GB']
 
 
 def make_random_string(length):
@@ -44,14 +50,14 @@ class Mongouser(User):
 
     def _switch_customer_id(self):
         # TODO: Use a natural number query instead
-        self.customer_id = randrange(0, 11077057)
+        self.customer_id = randrange(0, 11077064)
 
     @task
     def update_post(self):
         start_time = perf_counter()
 
         self._switch_customer_id()
-        database.Posts.update_one({"customer_id": self.customer_id}, {
+        collection.update_one({"customer_id": self.customer_id}, {
             "$set": {
                 "updated_post": make_random_string(128)
             },
@@ -61,7 +67,7 @@ class Mongouser(User):
         })
 
         self._switch_customer_id()
-        database.Posts.update_one({"customer_id": self.customer_id}, {
+        collection.update_one({"customer_id": self.customer_id}, {
             "$set": {
                 "updated_post": make_random_string(128)
             },
