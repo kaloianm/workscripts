@@ -601,11 +601,15 @@ async def main(args):
         )
         
         with tqdm(total=num_chunks, unit=' chunk') as progress:
-            tasks = []
-            for s in shard_to_chunks:
-                tasks.append(
-                    asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
-            await asyncio.gather(*tasks)
+            if args.no_parallel_merges:
+                for s in shard_to_chunks:
+                    await merge_chunks_on_shard(s, collectionVersion, progress)
+            else:
+                tasks = []
+                for s in shard_to_chunks:
+                    tasks.append(
+                        asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
+                await asyncio.gather(*tasks)
     else:
         logging.info("Skipping Phase I")
 
