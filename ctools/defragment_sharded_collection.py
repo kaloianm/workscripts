@@ -399,8 +399,6 @@ async def main(args):
         else:
             progress.write('Merge will start with a major version bump')
 
-        num_lock_busy_errors_encountered = 0
-
         async def update_chunk_size_estimation(ch):
             size_label = 'defrag_collection_est_size'
             if size_label in ch:
@@ -566,13 +564,10 @@ async def main(args):
                                                             consecutive_chunks.batch_size_estimation)
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
-                            num_lock_busy_errors_encountered += 1
-                            if num_lock_busy_errors_encountered == 1:
-                                logging.warning(
-                                    f"""Lock error occurred while trying to merge chunk range {merge_bounds}.
-                                        This indicates the presence of an older MongoDB version.""")
-                        else:
-                            raise
+                            logging.warning(
+                                f"""Lock error occurred while trying to merge chunk range {merge_bounds}.
+                                    Consider executing with the option `--no-parallel-merges`.""")
+                        raise
                 else:
                     progress.write(
                         f'Merging {len(consecutive_chunks)} consecutive chunks on {shard}: {merge_bounds}'
@@ -1049,6 +1044,11 @@ if __name__ == "__main__":
         '--write-size-on-exit',
         help="""Used for debugging purposes, write all missing data size estimation on disk before exit.""",
         dest="write_size_on_exit", action='store_true')
+
+    argsParser.add_argument(
+        '--no-parallel-merges',
+        help="""Specify whether merges should be executed in parallel or not.""",
+        dest="no_parallel_merges", action='store_true')
 
     list = " ".join(sys.argv[1:])
     
