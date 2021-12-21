@@ -119,7 +119,7 @@ async def main(args):
 
     def make_chunk_id(i):
         if shard_key_as_string:
-            return 'shard-key-' + str(i).zfill(8)
+            return f'shard-key-{args.ns}-{str(i).zfill(8)}'
         else:
             return ObjectId()
 
