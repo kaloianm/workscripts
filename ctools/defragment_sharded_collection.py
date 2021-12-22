@@ -656,15 +656,17 @@ async def main(args):
         if len(shard_chunks) == 0:
             return 0
 
+        def check_max_migrations():
+            if args.max_migrations > 0:
+                args.max_migrations -= 1
+            if args.max_migrations == 0:
+                raise Exception("Max number of migrations exceeded")
+
         begin_time = time.monotonic()
         async def exec_throttle():
             duration = time.monotonic() - begin_time
             if duration < args.min_migration_period:
                 await asyncio.sleep(args.min_migration_period - duration)
-            if args.max_migrations > 0:
-                args.max_migrations -= 1
-            if args.max_migrations == 0:
-                raise Exception("Max number of migrations exceeded")
 
         async def get_remain_chunk_imbalance(center, target_chunk):
             if target_chunk is None:
@@ -763,6 +765,7 @@ async def main(args):
                     if left_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
                         progress.update(1)
 
+                    check_max_migrations()
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
@@ -810,6 +813,7 @@ async def main(args):
                     if right_size <= small_chunk_size_kb and new_size > small_chunk_size_kb:
                         progress.update(1)
 
+                    check_max_migrations()
                     await exec_throttle()
                     begin_time = time.monotonic()
                     continue
