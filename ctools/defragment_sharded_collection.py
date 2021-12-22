@@ -931,13 +931,16 @@ async def main(args):
             raise Exception(f"cannot resolve shard {chunk['shard']}")
 
         conn = await coll.cluster.make_direct_shard_connection(shard_entry)
+        last_split_time = time.perf_counter()
         for c in shard_chunks:
             progress.update()
             
             chunk_size = await get_chunk_size(c)
 
             if chunk_size > target_chunk_size_kb * 1.33:
+                await throttle_if_necessary(last_split_time, args.phase3_throttle_secs)
                 await coll.split_chunk(c, target_chunk_size_kb, conn)
+                last_split_time = time.perf_counter()
 
 
         conn.close()
@@ -954,6 +957,9 @@ async def main(args):
                 splits_performed_per_shard[s] = 0;
                 tasks.append(
                     asyncio.ensure_future(split_oversized_chunks(s, progress)))
+                if args.phase3_throttle_secs:
+                    await asyncio.gather(*tasks)
+                    tasks.clear()
             await asyncio.gather(*tasks)
 
     else:
@@ -1067,6 +1073,10 @@ if __name__ == "__main__":
         help="""Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
         metavar='secs', dest='phase1_throttle_secs', type=float, default=0)
 
+    argsParser.add_argument(
+        '--phase3-throttle-secs',
+        help="""Specify the time in fractional seconds used to throttle phase3. Only one split will be performed every X seconds.""",
+        metavar='secs', dest='phase3_throttle_secs', type=float, default=0)
 
     list = " ".join(sys.argv[1:])
     
