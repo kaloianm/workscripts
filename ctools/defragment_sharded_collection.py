@@ -172,6 +172,11 @@ def fmt_bytes(num):
 def fmt_kb(num):
     return fmt_bytes(num*1024)
 
+async def throttle_if_necessary(last_time_secs, min_delta_secs):
+    secs_elapsed_since_last = (time.perf_counter() - last_time_secs)
+    if secs_elapsed_since_last < min_delta_secs:
+        secs_to_sleep = min_delta_secs - secs_elapsed_since_last
+        await asyncio.sleep(secs_to_sleep)
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
@@ -462,6 +467,7 @@ async def main(args):
 
         consecutive_chunks = ChunkBatch(estimated_chunk_size_kb)
         remain_chunks = []
+        last_merge_time = time.perf_counter()
 
         for c, has_more in lookahead(shard_chunks):
             progress.update()
@@ -558,10 +564,12 @@ async def main(args):
                         
                 if not args.dryrun:
                     try:
+                        await throttle_if_necessary(last_merge_time, args.phase1_throttle_secs)
                         await coll.merge_chunks(consecutive_chunks.batch)
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, shard,
                                                             consecutive_chunks.batch_size_estimation)
+                        last_merge_time = time.perf_counter()
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
                             logging.warning(
@@ -601,7 +609,7 @@ async def main(args):
         )
         
         with tqdm(total=num_chunks, unit=' chunk') as progress:
-            if args.no_parallel_merges:
+            if args.no_parallel_merges or args.phase1_throttle_secs:
                 for s in shard_to_chunks:
                     await merge_chunks_on_shard(s, collectionVersion, progress)
             else:
@@ -1053,6 +1061,12 @@ if __name__ == "__main__":
         '--no-parallel-merges',
         help="""Specify whether merges should be executed in parallel or not.""",
         dest="no_parallel_merges", action='store_true')
+    
+    argsParser.add_argument(
+        '--phase1-throttle-secs',
+        help="""Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
+        metavar='secs', dest='phase1_throttle_secs', type=float, default=0)
+
 
     list = " ".join(sys.argv[1:])
     
