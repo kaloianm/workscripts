@@ -662,12 +662,6 @@ async def main(args):
             if args.max_migrations == 0:
                 raise Exception("Max number of migrations exceeded")
 
-        begin_time = time.monotonic()
-        async def exec_throttle():
-            duration = time.monotonic() - begin_time
-            if duration < args.min_migration_period:
-                await asyncio.sleep(args.min_migration_period - duration)
-
         async def get_remain_chunk_imbalance(center, target_chunk):
             if target_chunk is None:
                 return sys.maxsize
@@ -682,6 +676,7 @@ async def main(args):
 
         sorted_chunks = shard_chunks.copy()
         sorted_chunks.sort(key = lambda c: c.get('defrag_collection_est_size', 0))
+        last_migration_time = time.perf_counter()
 
         for c in sorted_chunks:
             # this chunk might no longer exist due to a move
@@ -735,12 +730,14 @@ async def main(args):
 
                     merge_bounds = [left_chunk['min'], c['max']]
                     if not args.dryrun:
+                        await throttle_if_necessary(last_migration_time, args.phase2_throttle_secs)
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
                         
                         await coll.merge_chunks([left_chunk, c])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                        last_migration_time = time.perf_counter()
                     else:
                         progress.write(f'Moving chunk left from {shard} to {target_shard}, '
                                         f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
@@ -766,8 +763,6 @@ async def main(args):
                         progress.update(1)
 
                     check_max_migrations()
-                    await exec_throttle()
-                    begin_time = time.monotonic()
                     continue
             
             if right_chunk is not None:
@@ -782,12 +777,14 @@ async def main(args):
 
                     merge_bounds = [c['min'], right_chunk['max']]
                     if not args.dryrun:
+                        await throttle_if_necessary(last_migration_time, args.phase2_throttle_secs)
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
                         
                         await coll.merge_chunks([c, right_chunk])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
+                        last_migration_time = time.perf_counter()
                     else:
                         progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
                                         f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
@@ -814,8 +811,6 @@ async def main(args):
                         progress.update(1)
 
                     check_max_migrations()
-                    await exec_throttle()
-                    begin_time = time.monotonic()
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
@@ -1054,10 +1049,6 @@ if __name__ == "__main__":
             'all', 'phase1', 'phase2', 'phase3'
         ])
     argsParser.add_argument(
-        '--phase_2_min_migration_period',
-        help="""Minimum time in seconds between the start of subsequent migrations.""",
-        metavar='seconds', dest="min_migration_period", type=int, default=0)
-    argsParser.add_argument(
         '--phase_2_max_migrations',
         help="""Maximum number of migrations.""",
         metavar='max_migrations', dest="max_migrations", type=int, default=-1)
@@ -1076,6 +1067,11 @@ if __name__ == "__main__":
         '--phase1-throttle-secs',
         help="""Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
         metavar='secs', dest='phase1_throttle_secs', type=float, default=0)
+
+    argsParser.add_argument(
+        '--phase2-throttle-secs',
+        help="""Specify the time in fractional seconds used to throttle phase2. Only one merge will be performed every X seconds.""",
+        metavar='secs', dest="phase2_throttle_secs", type=float, default=0)
 
     argsParser.add_argument(
         '--phase3-throttle-secs',
