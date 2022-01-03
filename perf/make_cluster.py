@@ -11,13 +11,22 @@
 import logging
 import subprocess
 import sys
+
 from pymongo import MongoClient
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
+###################################################################################################
+# BEGIN -- configure logging
+#
+
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+#
+# END -- configure logging
+###################################################################################################
 
 available_hosts = [
     # TODO: Execute the following command in order to obtain the set of instances to use and paste
@@ -69,37 +78,41 @@ cleanup_processes()
 # Start MongoD on each of the instance and convert them to replica sets
 def start_config_server_and_shards():
     # Starts a single MongoD instance on the specified 'host' as part of a replica set called 'repl_set_name'
-    def start_mongod_instance(host, repl_set_name, extra_parameters):
+    def start_mongod_instance(host, port, repl_set_name, extra_parameters):
         exec_remote_ssh_command(
-            host,
-            f'mkdir -p {mongo_data_path} && ~/binaries/mongod --replSet {repl_set_name} --dbpath {mongo_data_path} --logpath {mongo_data_path}/mongod.log --fork --bind_ip_all --setParameter rangeDeleterBatchSize=100000 --setParameter orphanCleanupDelaySecs=0 {" ".join(extra_parameters)}'
-        )
+            host, (f'mkdir -p {mongo_data_path} && '
+                   f'~/binaries/mongod --replSet {repl_set_name} '
+                   f'--dbpath {mongo_data_path} --logpath {mongo_data_path}/mongod.log '
+                   f'--port {port} --fork --bind_ip_all '
+                   f'--setParameter rangeDeleterBatchSize=100000 '
+                   f'--setParameter orphanCleanupDelaySecs=0 '
+                   f'{" ".join(extra_parameters)}'))
 
     # Makes a replica set out of the specified nodes
     def make_replica_set(hosts, port, repl_set_name, extra_parameters):
         # Start the RS hosts
         for host in hosts:
-            start_mongod_instance(host, repl_set_name, extra_parameters)
+            start_mongod_instance(host, port, repl_set_name, extra_parameters)
 
         # Initiate the replica set
-        connection_string = f'mongodb://{host}:{port}'
-        logging.info(f'Connecting to {connection_string}')
+        connection_string = f'mongodb://{hosts[0]}:{port}'
+        logging.info(f'Connecting to {connection_string} in order to initiate it as a replica set')
 
-        mongo_client = MongoClient(connection_string)
-        logging.info(
-            mongo_client.admin.command({
-                'replSetInitiate': {
-                    '_id':
-                        f'{repl_set_name}',
-                    'members':
-                        list(
-                            map(
-                                lambda id_and_host: {
-                                    '_id': id_and_host[0],
-                                    'host': f'{id_and_host[1]}:{port}'
-                                }, zip(range(0, len(hosts)), hosts))),
-                }
-            }))
+        with MongoClient(connection_string) as mongo_client:
+            logging.info(
+                mongo_client.admin.command({
+                    'replSetInitiate': {
+                        '_id':
+                            f'{repl_set_name}',
+                        'members':
+                            list(
+                                map(
+                                    lambda id_and_host: {
+                                        '_id': id_and_host[0],
+                                        'host': f'{id_and_host[1]}:{port}'
+                                    }, zip(range(0, len(hosts)), hosts))),
+                    }
+                }))
 
     # Config Server
     make_replica_set(config_server_hosts, 27019, 'config', ['--configsvr'])
@@ -115,12 +128,16 @@ start_config_server_and_shards()
 # Start MongoS and add the added shards
 def make_cluster():
     for mongos in mongos_hosts:
-        command = f'mkdir -p {mongo_data_path} && ~/binaries/mongos --configdb config/{config_server_hosts[0]}:27019 --logpath {mongo_data_path}/mongos.log --fork --bind_ip_all'
-        exec_remote_ssh_command(mongos, command)
+        exec_remote_ssh_command(
+            mongos, (f'mkdir -p {mongo_data_path} && '
+                     f'~/binaries/mongos --configdb config/{config_server_hosts[0]}:27019 '
+                     f'--logpath {mongo_data_path}/mongos.log '
+                     f'--fork --bind_ip_all'))
 
-    connection_string = f'mongodb://{mongos_hosts[0]}:27017'
-    logging.info(f'Connecting to {connection_string}')
-    mongo_client = MongoClient(connection_string)
+    mongos_connection_string = f'mongodb://{mongos_hosts[0]}'
+    logging.info(f'Connecting to {mongos_connection_string}')
+
+    mongo_client = MongoClient(mongos_connection_string)
     logging.info(
         mongo_client.admin.command({
             'addShard': f'shard0/{shard0_hosts[0]}:27018',
@@ -131,6 +148,14 @@ def make_cluster():
             'addShard': f'shard1/{shard1_hosts[0]}:27018',
             'name': 'shard1'
         }))
+
+    logging.info(f"""
+Cluster started with:
+  MongoS: {mongos_connection_string}
+  ConfigServer: {config_server_hosts}
+  Shard0: {shard0_hosts}
+  Shard1: {shard1_hosts}
+""")
 
 
 make_cluster()
