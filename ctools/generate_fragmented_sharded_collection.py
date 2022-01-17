@@ -141,7 +141,6 @@ async def main(args):
 
             obj = {
                 '_id': make_chunk_id(i),
-                'lastmodEpoch': epoch,
                 'lastmod': bson.timestamp.Timestamp(i + 1, 0),
                 'shard': shardId
             }
@@ -149,7 +148,10 @@ async def main(args):
             if fcv >= '5.0':
                 obj.update({'uuid': collection_uuid})
             else:
-                obj.update({'ns': args.ns})
+                obj.update({
+                    'ns': args.ns,
+                    'lastmodEpoch': epoch,
+                    })
 
             if i == 0:
                 obj = {
@@ -247,6 +249,7 @@ async def main(args):
     print('Writing collection entry')
     coll_obj = {
             '_id': args.ns,
+            'lastmodEpoch': epoch,
             'lastmod': collection_creation_time,
             'key': {
                 'shardKey': 1
@@ -261,7 +264,6 @@ async def main(args):
             })
     else:
         coll_obj.update({
-            'lastmodEpoch': epoch,
             'dropped': False
             })
 
