@@ -48,6 +48,9 @@ class Cluster:
     class NotMongosException(Exception):
         pass
 
+    class BalancerEnabledException(Exception):
+        pass
+
     @property
     async def configsvrConnectionString(self):
         serverStatus = await self.adminDb.command({'serverStatus': 1, 'sharding': 1})
@@ -77,10 +80,25 @@ class Cluster:
             else:
                 raise
 
+    async def check_balancer_is_disabled(self, warn_only=False):
+        try:
+            balancer_status = await self.adminDb.command({'balancerStatus': 1})
+            assert 'mode' in balancer_status, f'Unrecognized balancer status response: {balancer_status}'
+            if balancer_status['mode'] != 'off':
+                raise Cluster.BalancerEnabledException(
+                    '''The balancer must be stopped before running this script.
+                            Please run sh.stopBalancer()''')
+        except Cluster.BalancerEnabledException:
+            if warn_only:
+                print('WARNING: Balancer is still enabled')
+            else:
+                raise
+
     async def make_direct_shard_connection(self, shard):
         conn_parts = shard['host'].split('/', 1)
         uri = 'mongodb://' + conn_parts[1]
-        return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0], **self.uri_options)
+        return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0],
+                                                      **self.uri_options)
 
     async def on_each_shard(self, fn):
         tasks = []

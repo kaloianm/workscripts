@@ -5,14 +5,12 @@ import argparse
 import asyncio
 import logging
 import math
-from motor.frameworks.asyncio import is_event_loop
 import pymongo
 import sys
 import time
 import pickle
 
 from common import Cluster, yes_no
-from copy import deepcopy
 from pymongo import errors as pymongo_errors
 from tqdm import tqdm
 
@@ -193,14 +191,7 @@ async def main(args):
     # - MaxChunkSize has been configured appropriately
     #
 
-    async def balancer_enabled():
-        balancer_status = await cluster.adminDb.command({'balancerStatus': 1})
-        assert 'mode' in balancer_status, f"Unrecognized balancer status response: {balancer_status}"
-        return balancer_status['mode'] != 'off'
-
-    if not args.dryrun and await balancer_enabled():
-        raise Exception("""The balancer must be stopped before running this script. Please run:
-                           sh.stopBalancer()""")
+    await cluster.check_balancer_is_disabled()
 
     tags_doc = await cluster.configDb.tags.find_one({'ns': args.ns})
     if tags_doc is not None:
