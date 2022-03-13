@@ -1,11 +1,11 @@
 #
 # 1. Import the 10GB/20GB dataset required for the test in the cluster:
-#     $HOME/mongodb/tools/mongoimport --db=BalanceTest --collection=Posts10GB --numInsertionWorkers=16 --file=$HOME/Temp/10GBset.json mongodb://localhost
-#     $HOME/mongodb/tools/mongoimport --db=BalanceTest --collection=Posts20GB --numInsertionWorkers=16 --file=$HOME/Temp/20GBset.json mongodb://localhost
+#     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts10GB --numInsertionWorkers=16 --file=$HOME/Temp/10GBset.json mongodb://localhost
+#     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts20GB --numInsertionWorkers=16 --file=$HOME/Temp/20GBset.json mongodb://localhost
 # 2. db.Posts20GB.createIndex({ customer_id: 1 })
 # 3. sh.stopBalancer()
-# 4. sh.enableSharding('BalanceTest')
-# 5. sh.shardCollection('BalanceTest.Posts20GB', { customer_id: 1 })
+# 4. sh.enableSharding('Balancing')
+# 5. sh.shardCollection('Balancing.Posts20GB', { customer_id: 1 })
 #
 
 import random
