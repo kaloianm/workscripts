@@ -2,13 +2,18 @@
 #
 
 import asyncio
+import bson
+import datetime
+import logging
 import motor.motor_asyncio
 import subprocess
 import sys
+import uuid
 
-from pymongo import uri_parser
-from bson.codec_options import CodecOptions
 from bson.binary import UuidRepresentation
+from bson.codec_options import CodecOptions
+from bson.objectid import ObjectId
+from pymongo import uri_parser
 
 
 # Function for a Yes/No result based on the answer provided as an argument
@@ -41,9 +46,9 @@ class Cluster:
         self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = self.client.admin
-        std_codec_options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
-        self.configDb = self.client.get_database('config', codec_options=std_codec_options)
+        self.adminDb = self.client.get_database('admin')
+        self.configDb = self.client.get_database(
+            'config', codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
 
     class NotMongosException(Exception):
         pass
@@ -95,6 +100,9 @@ class Cluster:
                 raise
 
     async def make_direct_shard_connection(self, shard):
+        if (isinstance(shard, str)):
+            shard = await self.configDb.shards.find_one({'_id': shard})
+
         conn_parts = shard['host'].split('/', 1)
         uri = 'mongodb://' + conn_parts[1]
         return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0],
@@ -113,6 +121,82 @@ class Cluster:
                 asyncio.ensure_future(
                     fn(shard['_id'], await self.make_direct_shard_connection(shard))))
         await asyncio.gather(*tasks)
+
+
+# Utility class to generate the components for sharding a collection externally
+class ShardCollection:
+    def __init__(self, ns, uuid, shard_key, unique, fcv):
+        self.ns = ns
+        self.uuid = uuid
+        self.shard_key = shard_key
+        self.unique = unique
+        self.fcv = fcv
+
+        self.shard_key_is_string = (self.fcv <= '4.2')
+
+        self.epoch = bson.objectid.ObjectId()
+        self.creation_time = datetime.datetime.now()
+        self.timestamp = bson.timestamp.Timestamp(self.creation_time, 1)
+
+        logging.info(f'''Sharding an existing collection {self.ns} with the following parameters:
+                            uuid: {self.uuid}
+                            shard_key: {self.shard_key}
+                            unique: {self.unique}
+        ''')
+
+    # Accepts an array of tuples which must contain exactly the following fields:
+    #    min, max, shard
+    # AND MUST be sorted according to range['min']
+    def generate_config_chunks(self, chunks):
+        def make_chunk_id(i):
+            if self.shard_key_is_string:
+                return f'shard-key-{self.ns}-{str(i).zfill(8)}'
+            else:
+                return ObjectId()
+
+        chunk_idx = 0
+        for c in chunks:
+            chunk_obj = {
+                '_id': make_chunk_id(chunk_idx),
+                'min': c['min'],
+                'max': c['max'],
+                'shard': c['shard'],
+                'lastmod': bson.timestamp.Timestamp(1, chunk_idx),
+            }
+
+            if self.fcv >= '5.0':
+                chunk_obj.update({'uuid': self.uuid})
+            else:
+                chunk_obj.update({
+                    'ns': self.ns,
+                    'lastmodEpoch': self.epoch,
+                })
+
+            chunk_idx += 1
+            yield chunk_obj
+
+    # Accepts an array of tuples which must contain exactly the following fields:
+    #    min, max, shard
+    # AND MUST be sorted according to range['min']
+    def generate_shard_chunks(self, chunks):
+        pass
+
+    def generate_collection_entry(self):
+        coll_obj = {
+            '_id': self.ns,
+            'lastmodEpoch': self.epoch,
+            'lastmod': self.creation_time,
+            'key': self.shard_key,
+            'unique': self.unique,
+            'uuid': self.uuid
+        }
+
+        if self.fcv >= '5.0':
+            coll_obj.update({'timestamp': self.timestamp})
+        else:
+            coll_obj.update({'dropped': False})
+
+        return coll_obj
 
 
 # This class implements an iterable wrapper around the 'mgeneratejs' script from

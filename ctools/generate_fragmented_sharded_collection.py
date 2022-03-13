@@ -4,7 +4,7 @@
 import argparse
 import asyncio
 import bson
-import datetime
+import json
 import math
 import random
 import sys
@@ -13,7 +13,7 @@ import uuid
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
 from bson.objectid import ObjectId
-from common import Cluster
+from common import Cluster, ShardCollection, yes_no
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
@@ -44,14 +44,15 @@ async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
     await cluster.check_is_mongos(warn_only=False)
 
-    fcv = await cluster.FCV
-    shard_key_as_string = fcv <= '4.2'
-
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
-    epoch = bson.objectid.ObjectId()
-    collection_creation_time = datetime.datetime.now() 
-    collection_timestamp = bson.timestamp.Timestamp(collection_creation_time, 1) 
-    collection_uuid = uuid.uuid4()
+    shard_collection = ShardCollection(
+        args.ns,
+        uuid=uuid.uuid4(),
+        shard_key={'shardKey': 1},
+        unique=True,
+        fcv=await cluster.FCV,
+    )
+
     shardIds = await cluster.shardIds
 
     print(f"Enabling sharding for database {ns['db']}")
@@ -64,13 +65,17 @@ async def main(args):
     print(f'Chunk size: {chunk_size_desc()}, document size: {fmt_bytes(args.doc_size)}')
 
     uuid_shard_key_byte_order = None
-    if args.shard_key_type == 'uuid':
-        uuid_shard_key_byte_order = 'little' if cluster.uuid_representation == UuidRepresentation.JAVA_LEGACY else 'big'
+    if args.shard_key_type == 'uuid-little':
+        uuid_shard_key_byte_order = 'little'
+        print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
+    elif args.shard_key_type == 'uuid-big':
+        uuid_shard_key_byte_order = 'big'
         print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
 
     print(f'Cleaning up old entries for {args.ns} ...')
     dbName, collName = args.ns.split('.', 1)
     await cluster.client[dbName][collName].drop()
+    await cluster.configDb.collections.delete_one({'_id': args.ns})
     print(f'Cleaned up old entries for {args.ns}')
 
     sem = asyncio.Semaphore(10)
@@ -91,7 +96,7 @@ async def main(args):
                 'applyOps': [{
                     'op': 'c',
                     'ns': ns['db'] + '.$cmd',
-                    'ui': collection_uuid,
+                    'ui': shard_collection.uuid,
                     'o': {
                         'create': ns['coll'],
                     },
@@ -117,12 +122,6 @@ async def main(args):
     # Create collection and chunk entries on the config server
     ###############################################################################################
 
-    def make_chunk_id(i):
-        if shard_key_as_string:
-            return f'shard-key-{args.ns}-{str(i).zfill(8)}'
-        else:
-            return ObjectId()
-
     def make_shard_key(i):
         if uuid_shard_key_byte_order:
             return uuid.UUID(bytes=i.to_bytes(16, byteorder=uuid_shard_key_byte_order))
@@ -139,19 +138,7 @@ async def main(args):
                     shardIds[:sortedShardIdx] + shardIds[sortedShardIdx + 1:]
                 ) if random.random() < args.fragmentation else shardIds[sortedShardIdx]
 
-            obj = {
-                '_id': make_chunk_id(i),
-                'lastmod': bson.timestamp.Timestamp(i + 1, 0),
-                'shard': shardId
-            }
-
-            if fcv >= '5.0':
-                obj.update({'uuid': collection_uuid})
-            else:
-                obj.update({
-                    'ns': args.ns,
-                    'lastmodEpoch': epoch,
-                    })
+            obj = {'shard': shardId}
 
             if i == 0:
                 obj = {
@@ -192,7 +179,7 @@ async def main(args):
 
             yield obj
 
-    def generate_inserts(chunks_subset):
+    def generate_shard_data_inserts(chunks_subset):
         chunk_size = random.randint(args.chunk_size_min, args.chunk_size_max)
         doc_size = args.doc_size
         num_of_docs_per_chunk = chunk_size // doc_size
@@ -203,6 +190,7 @@ async def main(args):
                 'shardKey'] if c['min']['shardKey'] is not bson.min_key.MinKey else minInteger
             maxKey = c['max'][
                 'shardKey'] if c['max']['shardKey'] is not bson.max_key.MaxKey else maxInteger
+
             gap = ((maxKey - minKey) // (num_of_docs_per_chunk + 1))
             key = minKey
             for i in range(num_of_docs_per_chunk):
@@ -214,20 +202,23 @@ async def main(args):
         async with sem:
             write_chunks_entries = asyncio.ensure_future(
                 cluster.configDb.chunks.with_options(
-                    codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_many(chunks_subset, ordered=False))
+                    codec_options=CodecOptions(
+                        uuid_representation=UuidRepresentation.STANDARD)).insert_many(
+                            chunks_subset, ordered=False))
+
             write_data = asyncio.ensure_future(
                 shard_connections[shard][ns['db']][ns['coll']].insert_many(
-                    generate_inserts(chunks_subset), ordered=False))
+                    generate_shard_data_inserts(chunks_subset), ordered=False))
 
             await asyncio.gather(write_chunks_entries, write_data)
             progress.update(len(chunks_subset))
 
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
         progress.write('Writing chunks entries ...')
-        batch_size = 1
+        batch_size = 1000
         shard_to_chunks = {}
         tasks = []
-        for c in gen_chunks(args.num_chunks):
+        for c in shard_collection.generate_config_chunks(gen_chunks(args.num_chunks)):
             shard = c['shard']
             if not shard in shard_to_chunks:
                 shard_to_chunks[shard] = [c]
@@ -247,31 +238,13 @@ async def main(args):
         progress.write('Chunks write completed')
 
     print('Writing collection entry')
-    coll_obj = {
-            '_id': args.ns,
-            'lastmodEpoch': epoch,
-            'lastmod': collection_creation_time,
-            'key': {
-                'shardKey': 1
-                },
-            'unique': True,
-            'uuid': collection_uuid
-            }
-
-    if fcv >= '5.0':
-        coll_obj.update({
-            'timestamp': collection_timestamp
-            })
-    else:
-        coll_obj.update({
-            'dropped': False
-            })
-
     await cluster.configDb.collections.with_options(
-        codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_one(coll_obj)
+        codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_one(
+            shard_collection.generate_collection_entry())
 
 
 if __name__ == "__main__":
+
     def kb_to_bytes(kilo):
         return int(kilo) * 1024
 
@@ -280,7 +253,7 @@ if __name__ == "__main__":
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)
-    argsParser.add_argument('--ns', help='The namespace to create', metavar='neamspace', type=str,
+    argsParser.add_argument('--ns', help='The namespace to create', metavar='namespace', type=str,
                             required=True)
     argsParser.add_argument('--num-chunks', help='The number of chunks to create', metavar='num',
                             type=int, required=True)
@@ -291,7 +264,8 @@ if __name__ == "__main__":
                             metavar='num', dest='doc_size', type=lambda x: kb_to_bytes(x),
                             default=kb_to_bytes(8))
     argsParser.add_argument('--shard-key-type', help='The type to use for a shard key',
-                            metavar='type', type=str, default='uuid', choices=['integer', 'uuid'])
+                            metavar='shard_key_type', type=str, default='uuid',
+                            choices=['integer', 'uuid-little', 'uuid-big'])
     argsParser.add_argument(
         '--fragmentation',
         help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
