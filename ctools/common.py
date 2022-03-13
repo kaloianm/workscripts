@@ -100,18 +100,19 @@ class Cluster:
         return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0],
                                                       **self.uri_options)
 
-    async def on_each_shard(self, fn):
-        tasks = []
-        async for shard in self.configDb.shards.find({}):
-            tasks.append(
-                asyncio.ensure_future(fn(shard['_id'], self.make_direct_shard_connection(shard))))
-        await asyncio.gather(*tasks)
-
     async def make_direct_config_server_connection(self):
         return await self.make_direct_shard_connection({
             '_id': 'config',
             'host': await self.configsvrConnectionString
         })
+
+    async def on_each_shard(self, fn):
+        tasks = []
+        async for shard in self.configDb.shards.find({}):
+            tasks.append(
+                asyncio.ensure_future(
+                    fn(shard['_id'], await self.make_direct_shard_connection(shard))))
+        await asyncio.gather(*tasks)
 
 
 # This class implements an iterable wrapper around the 'mgeneratejs' script from
