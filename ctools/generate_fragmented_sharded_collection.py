@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import bson
 import json
+import logging
 import math
 import random
 import sys
@@ -12,7 +13,6 @@ import uuid
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
-from bson.objectid import ObjectId
 from common import Cluster, ShardCollection, yes_no
 from tqdm import tqdm
 
@@ -55,28 +55,28 @@ async def main(args):
 
     shardIds = await cluster.shardIds
 
-    print(f"Enabling sharding for database {ns['db']}")
+    logging.info(f"Enabling sharding for database {ns['db']}")
     await cluster.adminDb.command({'enableSharding': ns['db']})
 
-    print(
+    logging.info(
         f'Placing {args.num_chunks} chunks over {shardIds} for collection {args.ns} with a shard key of {args.shard_key_type}'
     )
 
-    print(f'Chunk size: {chunk_size_desc()}, document size: {fmt_bytes(args.doc_size)}')
+    logging.info(f'Chunk size: {chunk_size_desc()}, document size: {fmt_bytes(args.doc_size)}')
 
     uuid_shard_key_byte_order = None
     if args.shard_key_type == 'uuid-little':
         uuid_shard_key_byte_order = 'little'
-        print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
+        logging.info(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
     elif args.shard_key_type == 'uuid-big':
         uuid_shard_key_byte_order = 'big'
-        print(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
+        logging.info(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
 
-    print(f'Cleaning up old entries for {args.ns} ...')
+    logging.info(f'Cleaning up old entries for {args.ns} ...')
     dbName, collName = args.ns.split('.', 1)
     await cluster.client[dbName][collName].drop()
     await cluster.configDb.collections.delete_one({'_id': args.ns})
-    print(f'Cleaned up old entries for {args.ns}')
+    logging.info(f'Cleaned up old entries for {args.ns}')
 
     sem = asyncio.Semaphore(10)
 
@@ -87,7 +87,7 @@ async def main(args):
 
     async def safe_create_shard_indexes(shard):
         async with sem:
-            print('Creating shard key indexes on shard ' + shard['_id'])
+            logging.info('Creating shard key indexes on shard ' + shard['_id'])
             client = shard_connections[shard['_id']] = await cluster.make_direct_shard_connection(
                 shard)
             db = client[ns['db']]
@@ -122,13 +122,13 @@ async def main(args):
     # Create collection and chunk entries on the config server
     ###############################################################################################
 
-    def make_shard_key(i):
-        if uuid_shard_key_byte_order:
-            return uuid.UUID(bytes=i.to_bytes(16, byteorder=uuid_shard_key_byte_order))
-        else:
-            return i
-
     def gen_chunks(num_chunks):
+        def make_shard_key(i):
+            if uuid_shard_key_byte_order:
+                return uuid.UUID(bytes=i.to_bytes(16, byteorder=uuid_shard_key_byte_order))
+            else:
+                return i
+
         for i in range(num_chunks):
             if len(shardIds) == 1:
                 shardId = shardIds[0]
@@ -216,6 +216,7 @@ async def main(args):
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
         progress.write('Writing chunks entries ...')
         batch_size = 1000
+
         shard_to_chunks = {}
         tasks = []
         for c in shard_collection.generate_config_chunks(gen_chunks(args.num_chunks)):
@@ -237,7 +238,7 @@ async def main(args):
         await asyncio.gather(*tasks)
         progress.write('Chunks write completed')
 
-    print('Writing collection entry')
+    logging.info('Writing collection entry')
     await cluster.configDb.collections.with_options(
         codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_one(
             shard_collection.generate_collection_entry())
@@ -252,26 +253,29 @@ if __name__ == "__main__":
         description='Tool to generated a sharded collection with various degree of fragmentation')
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
-        metavar='uri', type=str)
-    argsParser.add_argument('--ns', help='The namespace to create', metavar='namespace', type=str,
-                            required=True)
-    argsParser.add_argument('--num-chunks', help='The number of chunks to create', metavar='num',
-                            type=int, required=True)
-    argsParser.add_argument('--chunk-size-kb', help='Final chunk size (in KiB)', metavar='num',
-                            dest='chunk_size', type=lambda x: kb_to_bytes(x), nargs='+',
-                            default=kb_to_bytes(1024))
-    argsParser.add_argument('--doc-size-kb', help='Size of the generated documents (in KiB)',
-                            metavar='num', dest='doc_size', type=lambda x: kb_to_bytes(x),
-                            default=kb_to_bytes(8))
+        type=str)
+    argsParser.add_argument('--ns', help='The namespace to create', type=str)
+    argsParser.add_argument('--num-chunks', help='The number of chunks to create',
+                            dest='num_chunks', type=int)
     argsParser.add_argument('--shard-key-type', help='The type to use for a shard key',
-                            metavar='shard_key_type', type=str, default='uuid',
-                            choices=['integer', 'uuid-little', 'uuid-big'])
+                            dest='shard_key_type', type=str,
+                            choices=['integer', 'uuid-little', 'uuid-big'], default='integer')
+    argsParser.add_argument('--chunk-size-kb', help='Final chunk size (in KiB)', dest='chunk_size',
+                            type=lambda x: kb_to_bytes(x), nargs='+',
+                            default=[kb_to_bytes(16), kb_to_bytes(32)])
+    argsParser.add_argument('--doc-size-kb', help='Size of the generated documents (in KiB)',
+                            dest='doc_size', type=lambda x: kb_to_bytes(x), default=kb_to_bytes(8))
     argsParser.add_argument(
         '--fragmentation',
         help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
            fragmentation is a measure of how likely it is that a chunk, which needs to sequentially
            follow the previous one, on the same shard, is actually not on the same shard.""",
-        metavar='fragmentation', type=float, default=0.10)
+        dest='fragmentation', type=float, default=0.10)
+
+    list = " ".join(sys.argv[1:])
+
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+    logging.info(f"Starting with parameters: '{list}'")
 
     args = argsParser.parse_args()
 

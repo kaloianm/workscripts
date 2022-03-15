@@ -1043,27 +1043,22 @@ if __name__ == "__main__":
         '--phase_2_max_migrations',
         help="""Maximum number of migrations.""",
         metavar='max_migrations', dest="max_migrations", type=int, default=-1)
-    
     argsParser.add_argument(
         '--write-size-on-exit',
         help="""Used for debugging purposes, write all missing data size estimation on disk before exit.""",
         dest="write_size_on_exit", action='store_true')
-
     argsParser.add_argument(
         '--no-parallel-merges',
         help="""Specify whether merges should be executed in parallel or not.""",
         dest="no_parallel_merges", action='store_true')
-    
     argsParser.add_argument(
         '--phase1-throttle-secs',
         help="""Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
         metavar='secs', dest='phase1_throttle_secs', type=float, default=0)
-
     argsParser.add_argument(
         '--phase2-throttle-secs',
         help="""Specify the time in fractional seconds used to throttle phase2. Only one merge will be performed every X seconds.""",
         metavar='secs', dest="phase2_throttle_secs", type=float, default=0)
-
     argsParser.add_argument(
         '--phase3-throttle-secs',
         help="""Specify the time in fractional seconds used to throttle phase3. Only one split will be performed every X seconds.""",
