@@ -46,7 +46,8 @@ class Cluster:
         self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = self.client.get_database('admin')
+        self.adminDb = self.client.get_database('admin', 
+            codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
         self.configDb = self.client.get_database(
             'config', codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
 
