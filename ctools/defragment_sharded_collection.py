@@ -131,7 +131,7 @@ class ShardedCollection:
         await self.cluster.adminDb.command({
             'mergeChunks': self.name,
             'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
-        }, codec_options=self.cluster.client.codec_options)
+        }, codec_options=self.cluster.adminDb.codec_options)
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write_kb):
         try:
@@ -593,7 +593,7 @@ async def main(args):
         logging.info('Phase I: Merging consecutive chunks on shards')
 
         await load_chunks()
-        assert (len(shard_to_chunks) > 1)
+        #assert (len(shard_to_chunks) > 1)
 
         logging.info(
             f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
