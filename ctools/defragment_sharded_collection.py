@@ -593,7 +593,7 @@ async def main(args):
         logging.info('Phase I: Merging consecutive chunks on shards')
 
         await load_chunks()
-        #assert (len(shard_to_chunks) > 1)
+        assert (len(shard_to_chunks) > 1)
 
         logging.info(
             f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
