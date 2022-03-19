@@ -13,7 +13,7 @@ import uuid
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
-from common import Cluster, ShardCollection, yes_no
+from common import Cluster, ShardCollectionUtil, yes_no
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
@@ -45,7 +45,7 @@ async def main(args):
     await cluster.check_is_mongos(warn_only=False)
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
-    shard_collection = ShardCollection(
+    shard_collection = ShardCollectionUtil(
         args.ns,
         uuid=uuid.uuid4(),
         shard_key={'shardKey': 1},
@@ -101,7 +101,7 @@ async def main(args):
                         'create': ns['coll'],
                     },
                 }]
-            }, codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
+            }, codec_options=cluster.system_codec_options)
 
             await db.command({
                 'createIndexes': ns['coll'],
@@ -201,13 +201,10 @@ async def main(args):
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
             write_chunks_entries = asyncio.ensure_future(
-                cluster.configDb.chunks.with_options(
-                    codec_options=CodecOptions(
-                        uuid_representation=UuidRepresentation.STANDARD)).insert_many(
-                            chunks_subset, ordered=False))
+                cluster.configDb.chunks.insert_many(chunks_subset, ordered=False))
 
-            write_data = asyncio.ensure_future(
-                shard_connections[shard][ns['db']][ns['coll']].insert_many(
+            write_data = asyncio.ensure_future(shard_connections[shard].get_database(
+                ns['db'])[ns['coll']].insert_many(
                     generate_shard_data_inserts(chunks_subset), ordered=False))
 
             await asyncio.gather(write_chunks_entries, write_data)
@@ -239,9 +236,7 @@ async def main(args):
         progress.write('Chunks write completed')
 
     logging.info('Writing collection entry')
-    await cluster.configDb.collections.with_options(
-        codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD)).insert_one(
-            shard_collection.generate_collection_entry())
+    await cluster.configDb.collections.insert_one(shard_collection.generate_collection_entry())
 
 
 if __name__ == "__main__":

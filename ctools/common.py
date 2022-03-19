@@ -46,10 +46,11 @@ class Cluster:
         self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = self.client.get_database('admin', 
-            codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
-        self.configDb = self.client.get_database(
-            'config', codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
+        # The internal cluster collections always use the standard UUID representation
+        self.system_codec_options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
+
+        self.adminDb = self.client.get_database('admin', codec_options=self.system_codec_options)
+        self.configDb = self.client.get_database('config', codec_options=self.system_codec_options)
 
     class NotMongosException(Exception):
         pass
@@ -124,8 +125,9 @@ class Cluster:
         await asyncio.gather(*tasks)
 
 
-# Utility class to generate the components for sharding a collection externally
-class ShardCollection:
+# Utility class to generate the documents for manually sharding a collection through a process
+# external to the core server. Does not perform any modifications to the cluster itself.
+class ShardCollectionUtil:
     def __init__(self, ns, uuid, shard_key, unique, fcv):
         self.ns = ns
         self.uuid = uuid

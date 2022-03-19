@@ -12,7 +12,7 @@ import uuid
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
-from common import Cluster, ShardCollection, yes_no
+from common import Cluster, ShardCollectionUtil, yes_no
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
@@ -40,9 +40,8 @@ async def main(args):
     async def check_cache_collections(shard_id, shard_conn):
         logging.info(f'Checking shard {shard_id} for leftover sharding information')
 
-        configDb = shard_conn.get_database(
-            'config', codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
-        if await configDb.get_collection(f'system.cache.collections').count_documents(
+        configDb = shard_conn.get_database('config', codec_options=cluster.system_codec_options)
+        if await configDb.get_collection('system.cache.collections').count_documents(
             {'_id': args.namespace}):
             raise Exception(f'Leftover collection entry found on shard {shard_id}')
         if await configDb.get_collection(f'system.cache.chunks.{args.namespace}').count_documents(
@@ -64,9 +63,9 @@ async def main(args):
     coll_description = coll_description_iter.next()
 
     # Choose sharding information for the collection
-    shard_collection = ShardCollection(args.namespace, coll_description['info']['uuid'],
-                                       json.loads(args.shard_key), args.shard_key_unique, await
-                                       cluster.FCV)
+    shard_collection = ShardCollectionUtil(args.namespace, coll_description['info']['uuid'],
+                                           json.loads(args.shard_key), args.shard_key_unique, await
+                                           cluster.FCV)
 
     sem = asyncio.Semaphore(10)
 
