@@ -498,7 +498,7 @@ async def main(args):
                 """Merging too many chunks in one go can hit the 16 MB BSON size limit. 
                 Let's not allow more than 'max_chunks_to_merge' to be merged.
                 """
-                max_chunks_to_merge = 2000
+                max_chunks_to_merge = 20000
                 return len(consecutive_chunks) > max_chunks_to_merge
 
             if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size() and not too_many_chunks_to_merge_at_once():
