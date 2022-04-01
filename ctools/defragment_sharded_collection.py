@@ -494,7 +494,14 @@ async def main(args):
                 return (trust_estimations and
                         consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20))
 
-            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size():
+            def too_many_chunks_to_merge_at_once():
+                """Merging too many chunks in one go can hit the 16 MB BSON size limit. 
+                Let's not allow more than 'max_chunks_to_merge' to be merged.
+                """
+                max_chunks_to_merge = 2000
+                return len(consecutive_chunks) > max_chunks_to_merge
+
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size() and not too_many_chunks_to_merge_at_once():
                 consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
