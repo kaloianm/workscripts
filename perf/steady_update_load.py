@@ -1,5 +1,5 @@
 #
-# 1. Import the 10GB/20GB dataset required for the test in the cluster:
+# 1. Import one of the 10GB/20GB datasets required for the performance test in the cluster:
 #     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts10GB --numInsertionWorkers=16 --file=$HOME/Temp/10GBset.json mongodb://localhost
 #     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts20GB --numInsertionWorkers=16 --file=$HOME/Temp/20GBset.json mongodb://localhost
 # 2. db.Posts20GB.createIndex({ customer_id: 1 })
