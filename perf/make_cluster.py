@@ -91,8 +91,6 @@ class RemoteHost:
              f'--logpath {self.host_desc["mongod_data_path"]}/mongod.log '
              f'--port {port} --bind_ip_all '
              f'--fork '
-             f'--setParameter rangeDeleterBatchSize=100000 '
-             f'--setParameter orphanCleanupDelaySecs=0 '
              f'{" ".join(extra_args)}'))
 
     async def start_mongos_instance(self, port, config_server, extra_args=[]):
@@ -214,11 +212,21 @@ async def start_shards_and_config_server():
                 }))
 
     # Shard(s)
-    await make_replica_set(shard0_hosts, 27018, 'shard0', ['--shardsvr'])
-    await make_replica_set(shard1_hosts, 27018, 'shard1', ['--shardsvr'])
+    await make_replica_set(shard0_hosts, 27018, 'shard0', [
+        '--shardsvr',
+        '--setParameter rangeDeleterBatchSize=100000',
+        '--setParameter orphanCleanupDelaySecs=0',
+    ])
+    await make_replica_set(shard1_hosts, 27018, 'shard1', [
+        '--shardsvr',
+        '--setParameter rangeDeleterBatchSize=100000',
+        '--setParameter orphanCleanupDelaySecs=0',
+    ])
 
     # Config Server
-    await make_replica_set(config_server_hosts, 27019, 'config', ['--configsvr'])
+    await make_replica_set(config_server_hosts, 27019, 'config', [
+        '--configsvr',
+    ])
 
 
 async def make_cluster():
