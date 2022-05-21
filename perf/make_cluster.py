@@ -36,6 +36,8 @@ class RemoteHost:
                 'host': host_desc,
                 'ssh_username': default_ssh_user_name,
                 'ssh_args': '-o StrictHostKeyChecking=no',
+                'mongod_data_path': '$HOME/mongod_data',
+                'mongos_data_path': '$HOME/mongos_data',
             }
         else:
             self.host_desc = host_desc
@@ -75,8 +77,43 @@ class RemoteHost:
                 f'RSYNC command on host {self.host_desc["host"]} failed with code {rsync_process.returncode}'
             )
 
+    async def start_mongod_instance(self, port, repl_set_name, extra_args=[]):
+        '''
+        Starts a single MongoD instance on this host, as part of a replica set called 'repl_set_name',
+        listening on 'port'. The 'extra_args' is a list of additional command line arguments to
+        specify to the mongod command line.
+        '''
 
-# Set of hosts on which to place the cluster
+        await self.exec_remote_ssh_command(
+            (f'mkdir -p {self.host_desc["mongod_data_path"]} && '
+             f'$HOME/binaries/mongod --replSet {repl_set_name} '
+             f'--dbpath {self.host_desc["mongod_data_path"]} '
+             f'--logpath {self.host_desc["mongod_data_path"]}/mongod.log '
+             f'--port {port} --bind_ip_all '
+             f'--fork '
+             f'--setParameter rangeDeleterBatchSize=100000 '
+             f'--setParameter orphanCleanupDelaySecs=0 '
+             f'{" ".join(extra_args)}'))
+
+    async def start_mongos_instance(self, port, config_server, extra_args=[]):
+        '''
+        Starts a single MongoS instance on this host, listening on 'port', pointing to
+        'config_server'. The 'extra_args' is a list of additional command line arguments to specify
+        to the mongos command line.
+        '''
+
+        await self.exec_remote_ssh_command(
+            (f'mkdir -p {self.host_desc["mongos_data_path"]} && '
+             f'$HOME/binaries/mongos --configdb config/{config_server.host}:27019 '
+             f'--logpath {self.host_desc["mongos_data_path"]}/mongos.log '
+             f'--port {port} --bind_ip_all '
+             f'--fork '
+             f'{" ".join(extra_args)}'))
+
+
+##############################################################################
+# The set of hosts on which to place the cluster
+
 available_hosts = list(
     map(
         lambda host_info: RemoteHost(host_info),
@@ -86,13 +123,12 @@ available_hosts = list(
             #   aws ec2 describe-instances --filters "Name=tag:owner,Values=kaloian.manassiev" --query "Reservations[].Instances[].PublicDnsName[]"
         ]))
 
+#
+##############################################################################
+
 shard0_hosts = available_hosts[0:3]
 shard1_hosts = available_hosts[3:6]
 config_server_hosts = available_hosts[6:9]
-
-# Directories to use on each cluster node
-mongod_data_path = '$HOME/mongod_data'
-mongos_data_path = '$HOME/mongos_data'
 
 
 async def cleanup_leftover_processes():
@@ -105,9 +141,9 @@ async def cleanup_leftover_processes():
     for host in available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.exec_remote_ssh_command(
-                    f'killall -9 mongo mongod mongos ; rm -rf {mongod_data_path} ; rm -rf {mongos_data_path}'
-                )))
+                host.exec_remote_ssh_command((f'killall -9 mongo mongod mongos ;'
+                                              f'rm -rf {host.host_desc["mongod_data_path"]} ;'
+                                              f'rm -rf {host.host_desc["mongos_data_path"]}'))))
     await asyncio.gather(*tasks)
 
 
@@ -143,23 +179,7 @@ async def start_shards_and_config_server():
     Start the mongod service on each of the hosts and initiate them as replica sets
     '''
 
-    async def start_mongod_instance(host, port, repl_set_name, extra_args):
-        '''
-        Starts a single MongoD instance on 'host' as part of a replica set called 'repl_set_name',
-        listening on 'port'. The 'extra_args' is a list of additional command line arguments to
-        specify to the mongod command line.
-        '''
-
-        await host.exec_remote_ssh_command(
-            (f'mkdir -p {mongod_data_path} && '
-             f'~/binaries/mongod --replSet {repl_set_name} '
-             f'--dbpath {mongod_data_path} --logpath {mongod_data_path}/mongod.log '
-             f'--port {port} --fork --bind_ip_all '
-             f'--setParameter rangeDeleterBatchSize=100000 '
-             f'--setParameter orphanCleanupDelaySecs=0 '
-             f'{" ".join(extra_args)}'))
-
-    async def make_replica_set(hosts, port, repl_set_name, extra_parameters):
+    async def make_replica_set(hosts, port, repl_set_name, extra_args):
         '''
         Makes a replica set out of the specified 'hosts', where each host will be listening on
         'port' and will be initiated as part of 'repl_set_name'. The 'extra_args' is a list of
@@ -170,8 +190,7 @@ async def start_shards_and_config_server():
         tasks = []
         for host in hosts:
             tasks.append(
-                asyncio.ensure_future(
-                    start_mongod_instance(host, port, repl_set_name, extra_parameters)))
+                asyncio.ensure_future(host.start_mongod_instance(port, repl_set_name, extra_args)))
         await asyncio.gather(*tasks)
 
         # Initiate the Replica Set
@@ -208,14 +227,9 @@ async def make_cluster():
     '''
 
     tasks = []
-    for mongos in available_hosts:
+    for host in available_hosts:
         tasks.append(
-            asyncio.ensure_future(
-                mongos.exec_remote_ssh_command(
-                    (f'mkdir -p {mongos_data_path} && '
-                     f'~/binaries/mongos --configdb config/{config_server_hosts[0].host}:27019 '
-                     f'--logpath {mongos_data_path}/mongos.log '
-                     f'--fork --bind_ip_all'))))
+            asyncio.ensure_future(host.start_mongos_instance(27017, config_server_hosts[0])))
     await asyncio.gather(*tasks)
 
     mongos_connection_string = f'mongodb://{available_hosts[0].host}'
