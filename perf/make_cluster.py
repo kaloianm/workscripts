@@ -10,6 +10,7 @@
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 
@@ -109,34 +110,34 @@ class RemoteHost:
              f'{" ".join(extra_args)}'))
 
 
-##############################################################################
-# The set of hosts on which to place the cluster
+class Cluster:
+    '''
+    Wraps the common information for the cluster
+    '''
 
-available_hosts = list(
-    map(
-        lambda host_info: RemoteHost(host_info),
-        [
-            # TODO: Execute the following command in order to obtain the set of instances to use and
-            # paste it in this array:
-            #   aws ec2 describe-instances --filters "Name=tag:owner,Values=kaloian.manassiev" --query "Reservations[].Instances[].PublicDnsName[]"
-        ]))
+    def __init__(self, cluster_config):
+        '''
+        '''
 
-#
-##############################################################################
+        self.config = cluster_config
 
-shard0_hosts = available_hosts[0:3]
-shard1_hosts = available_hosts[3:6]
-config_server_hosts = available_hosts[6:9]
+        self.name = cluster_config['Name']
+        self.available_hosts = list(
+            map(lambda host_info: RemoteHost(host_info), cluster_config['Hosts']))
+
+        self.shard0_hosts = self.available_hosts[0:3]
+        self.shard1_hosts = self.available_hosts[3:6]
+        self.config_server_hosts = self.available_hosts[6:9]
 
 
-async def cleanup_leftover_processes():
+async def cleanup_leftover_processes(cluster):
     '''
     Cleanup processes that might have been left over from a previous run, on all nodes.
     '''
 
     logging.info('Killing leftover processes')
     tasks = []
-    for host in available_hosts:
+    for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command((f'killall -9 mongo mongod mongos ;'
@@ -145,34 +146,34 @@ async def cleanup_leftover_processes():
     await asyncio.gather(*tasks)
 
 
-async def install_prerequisite_packages():
+async def install_prerequisite_packages(cluster):
     '''
     Install (using apt) all the prerequisite libraries that the mongodb binaries require, on all nodes
     '''
 
     logging.info('Installing prerequisite packages')
     tasks = []
-    for host in available_hosts:
+    for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command('sudo apt update && sudo apt -y install libsnmp-dev')))
     await asyncio.gather(*tasks)
 
 
-async def copy_binaries(mongo_binaries_path):
+async def copy_binaries(cluster, mongo_binaries_path):
     '''
     Copy the mongodb binaries to all nodes
     '''
 
     tasks = []
-    for host in available_hosts:
+    for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
                 host.rsync_files_to_remote(f'{mongo_binaries_path}/*', '$HOME/binaries')))
     await asyncio.gather(*tasks)
 
 
-async def start_shards_and_config_server():
+async def start_shards_and_config_server(cluster):
     '''
     Start the mongod service on each of the hosts and initiate them as replica sets
     '''
@@ -212,80 +213,86 @@ async def start_shards_and_config_server():
                 }))
 
     # Shard(s)
-    await make_replica_set(shard0_hosts, 27018, 'shard0', [
+    await make_replica_set(cluster.shard0_hosts, 27018, 'shard0', [
         '--shardsvr',
         '--setParameter rangeDeleterBatchSize=100000',
         '--setParameter orphanCleanupDelaySecs=0',
     ])
-    await make_replica_set(shard1_hosts, 27018, 'shard1', [
+    await make_replica_set(cluster.shard1_hosts, 27018, 'shard1', [
         '--shardsvr',
         '--setParameter rangeDeleterBatchSize=100000',
         '--setParameter orphanCleanupDelaySecs=0',
     ])
 
     # Config Server
-    await make_replica_set(config_server_hosts, 27019, 'config', [
+    await make_replica_set(cluster.config_server_hosts, 27019, 'config', [
         '--configsvr',
     ])
 
 
-async def make_cluster():
+async def make_cluster(cluster):
     '''
     Start the mongos service on each of the hosts and add the newly created shards to the cluster
     '''
 
     tasks = []
-    for host in available_hosts:
+    for host in cluster.available_hosts:
         tasks.append(
-            asyncio.ensure_future(host.start_mongos_instance(27017, config_server_hosts[0])))
+            asyncio.ensure_future(
+                host.start_mongos_instance(27017, cluster.config_server_hosts[0])))
     await asyncio.gather(*tasks)
 
-    mongos_connection_string = f'mongodb://{available_hosts[0].host}'
+    mongos_connection_string = f'mongodb://{cluster.available_hosts[0].host}'
     logging.info(f'Connecting to {mongos_connection_string}')
 
     mongo_client = MongoClient(mongos_connection_string)
     logging.info(
         mongo_client.admin.command({
-            'addShard': f'shard0/{shard0_hosts[0].host}:27018',
+            'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
             'name': 'shard0'
         }))
     logging.info(
         mongo_client.admin.command({
-            'addShard': f'shard1/{shard1_hosts[0].host}:27018',
+            'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
             'name': 'shard1'
         }))
 
     logging.info(f"""
-Cluster started with:
+Cluster {cluster.name} started with:
   MongoS: {mongos_connection_string}
-  ConfigServer: {config_server_hosts}
-  Shard0: {shard0_hosts}
-  Shard1: {shard1_hosts}
+  ConfigServer: {cluster.config_server_hosts}
+  Shard0: {cluster.shard0_hosts}
+  Shard1: {cluster.shard1_hosts}
 """)
 
 
 async def main(args):
     '''Main entrypoint of the application'''
 
-    await cleanup_leftover_processes()
-    await install_prerequisite_packages()
-    await copy_binaries(args.mongobinpath)
-    await start_shards_and_config_server()
-    await make_cluster()
+    with open(args.clusterconfigfile) as f:
+        cluster_config = json.load(f)
+
+    logging.info(f"Starting cluster generation with configuration: '{cluster_config}'")
+    cluster = Cluster(cluster_config)
+
+    await cleanup_leftover_processes(cluster)
+    await install_prerequisite_packages(cluster)
+    await copy_binaries(cluster, cluster_config['MongoBinPath'])
+    await start_shards_and_config_server(cluster)
+    await make_cluster(cluster)
 
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
         description='Tool to create a fully working cluster given SSH access to a set of hosts')
     argsParser.add_argument(
-        'mongobinpath',
-        help='Location of the mongodb core server binaries to upload to the destination nodes',
+        'clusterconfigfile',
+        help='JSON-formatted text file which contains the desired configuration of the cluster',
         type=str)
 
     args_list = " ".join(sys.argv[1:])
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-    logging.info(f"Starting cluster generation with parameters: '{args_list}'")
 
     args = argsParser.parse_args()
 
