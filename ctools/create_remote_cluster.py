@@ -21,27 +21,46 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
-class RemoteHost:
+class ClusterHost:
     '''
-    Wraps the common management tasks and the description of a remote host which will be part of the cluster.
+    Wraps information and common management tasks for a remote host which will be part of the
+    cluster
     '''
 
     def __init__(self, host_desc):
         '''
+        Constructs a cluster host object from host description, which is either a simple string with
+        just a hostname (FQDN), or JSON object with the following fields:
+          host: The hostname (FQDN) of the host, e.g. ec2-18-232-173-175.compute-1.amazonaws.com
+          ssh_username: The ssh username to use for connections to the host. Defaulted to the
+            default_ssh_username variable below.
+          ssh_args: Arguments to pass the the ssh command. Defaulted to the default_ssh_args
+            variable below.
+          mongod_data_path: Path on the host to serve as a root for the MongoD service's data and
+            logs. Defaulted to $HOME/mongod_data.
+          mongos_data_path: Path on the host to serve as a root for the MongoS service's data and
+            logs. Defaulted to $HOME/mongos_data.
         '''
 
-        default_ssh_user_name = 'ubuntu'
-
         if (isinstance(host_desc, str)):
-            self.host_desc = {
-                'host': host_desc,
-                'ssh_username': default_ssh_user_name,
-                'ssh_args': '-o StrictHostKeyChecking=no',
-                'mongod_data_path': '$HOME/mongod_data',
-                'mongos_data_path': '$HOME/mongos_data',
-            }
+            self.host_desc = {'host': host_desc}
         else:
             self.host_desc = host_desc
+
+        default_ssh_username = 'ubuntu'
+        default_ssh_args = '-o StrictHostKeyChecking=no'
+        default_mongod_data_path = '$HOME/mongod_data'
+        default_mongos_data_path = '$HOME/mongos_data'
+
+        # Populate parameter defaults
+        if 'ssh_username' not in self.host_desc:
+            self.host_desc['ssh_username'] = default_ssh_username
+        if 'ssh_args' not in self.host_desc:
+            self.host_desc['ssh_args'] = default_ssh_args
+        if 'mongod_data_path' not in self.host_desc:
+            self.host_desc['mongod_data_path'] = default_mongod_data_path
+        if 'mongos_data_path' not in self.host_desc:
+            self.host_desc['mongos_data_path'] = default_mongos_data_path
 
         self.host = self.host_desc['host']
 
@@ -50,7 +69,7 @@ class RemoteHost:
 
     async def exec_remote_ssh_command(self, command):
         '''
-        Runs the specified command on the remote host under the SSH credentials configuration above
+        Runs the specified command on the cluster host under the SSH credentials configuration above
         '''
 
         ssh_command = f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host_desc["host"]} "{command}"'
@@ -112,19 +131,23 @@ class RemoteHost:
 
 class Cluster:
     '''
-    Wraps the common information for the cluster
+    Wraps information and common management tasks for the whole cluster
     '''
 
     def __init__(self, cluster_config):
         '''
+        Constructs a cluster object from a JSON object with the following fields:
+         Name: Name for the cluster (used only for logging purposes)
+         Hosts: Array of JSON objects, each of which must follow the format for ClusterHost above
         '''
 
         self.config = cluster_config
 
         self.name = cluster_config['Name']
         self.available_hosts = list(
-            map(lambda host_info: RemoteHost(host_info), cluster_config['Hosts']))
+            map(lambda host_info: ClusterHost(host_info), cluster_config['Hosts']))
 
+        # Split the cluster hosts into 3 replica sets
         self.shard0_hosts = self.available_hosts[0:3]
         self.shard1_hosts = self.available_hosts[3:6]
         self.config_server_hosts = self.available_hosts[6:9]
