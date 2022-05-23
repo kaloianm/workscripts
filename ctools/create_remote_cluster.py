@@ -21,25 +21,21 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
-class ClusterHost:
+class RemoteSSHHost:
     '''
-    Wraps information and common management tasks for a remote host which will be part of the
-    cluster
+    Wraps information and common management tasks for a remote host which will be controlled
+    through SSH commands
     '''
 
     def __init__(self, host_desc):
         '''
-        Constructs a cluster host object from host description, which is either a simple string with
-        just a hostname (FQDN), or JSON object with the following fields:
+        Constructs a remote ssh host object from host description, which is either a simple string
+        with just a hostname (FQDN), or JSON object with the following fields:
           host: The hostname (FQDN) of the host, e.g. ec2-18-232-173-175.compute-1.amazonaws.com
           ssh_username: The ssh username to use for connections to the host. Defaulted to the
             default_ssh_username variable below.
           ssh_args: Arguments to pass the the ssh command. Defaulted to the default_ssh_args
             variable below.
-          mongod_data_path: Path on the host to serve as a root for the MongoD service's data and
-            logs. Defaulted to $HOME/mongod_data.
-          mongos_data_path: Path on the host to serve as a root for the MongoS service's data and
-            logs. Defaulted to $HOME/mongos_data.
         '''
 
         if (isinstance(host_desc, str)):
@@ -47,22 +43,17 @@ class ClusterHost:
         else:
             self.host_desc = host_desc
 
+        #  The 'host' key must exist
+        self.host = self.host_desc['host']
+
         default_ssh_username = 'ubuntu'
         default_ssh_args = '-o StrictHostKeyChecking=no'
-        default_mongod_data_path = '$HOME/mongod_data'
-        default_mongos_data_path = '$HOME/mongos_data'
 
         # Populate parameter defaults
         if 'ssh_username' not in self.host_desc:
             self.host_desc['ssh_username'] = default_ssh_username
         if 'ssh_args' not in self.host_desc:
             self.host_desc['ssh_args'] = default_ssh_args
-        if 'mongod_data_path' not in self.host_desc:
-            self.host_desc['mongod_data_path'] = default_mongod_data_path
-        if 'mongos_data_path' not in self.host_desc:
-            self.host_desc['mongos_data_path'] = default_mongos_data_path
-
-        self.host = self.host_desc['host']
 
     def __repr__(self):
         return self.host
@@ -72,30 +63,59 @@ class ClusterHost:
         Runs the specified command on the cluster host under the SSH credentials configuration above
         '''
 
-        ssh_command = f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host_desc["host"]} "{command}"'
-        logging.info(f'Executing ({self.host_desc["host"]}): {ssh_command}')
+        ssh_command = (
+            f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
+            f'"{command}"')
+        logging.info(f'Executing ({self.host}): {ssh_command}')
         ssh_process = await asyncio.create_subprocess_shell(ssh_command)
         await ssh_process.wait()
 
         if ssh_process.returncode != 0:
             raise Exception(
-                f'SSH command on host {self.host_desc["host"]} failed with code {ssh_process.returncode}'
-            )
+                f'SSH command on host {self.host} failed with code {ssh_process.returncode}')
 
     async def rsync_files_to_remote(self, source_pattern, destination_path):
         '''
         Uses rsync to copy files matching 'source_pattern' to 'destination_path'
         '''
 
-        rsync_command = f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t {source_pattern} {self.host_desc["ssh_username"]}@{self.host_desc["host"]}:{destination_path}'
-        logging.info(f'Executing ({self.host_desc["host"]}): {rsync_command}')
+        rsync_command = (
+            f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
+            f'{source_pattern} {self.host_desc["ssh_username"]}@{self.host}:{destination_path}')
+        logging.info(f'Executing ({self.host}): {rsync_command}')
         rsync_process = await asyncio.create_subprocess_shell(rsync_command)
         await rsync_process.wait()
 
         if rsync_process.returncode != 0:
             raise Exception(
-                f'RSYNC command on host {self.host_desc["host"]} failed with code {rsync_process.returncode}'
-            )
+                f'RSYNC command on host {self.host} failed with code {rsync_process.returncode}')
+
+
+class RemoteMongoHost(RemoteSSHHost):
+    '''
+    Specialisation of 'RemoteSSHHost' which will be running MongoDB services (mongod/mongos, etc)
+    '''
+
+    def __init__(self, host_desc):
+        '''
+        Constructs a cluster host object from host description, which is a superset of the
+        description required by 'RemoteSSHHost' above. The additional fields are:
+          mongod_data_path: Path on the host to serve as a root for the MongoD service's data and
+            logs. Defaulted to $HOME/mongod_data.
+          mongos_data_path: Path on the host to serve as a root for the MongoS service's data and
+            logs. Defaulted to $HOME/mongos_data.
+        '''
+
+        RemoteSSHHost.__init__(self, host_desc)
+
+        default_mongod_data_path = '$HOME/mongod_data'
+        default_mongos_data_path = '$HOME/mongos_data'
+
+        # Populate parameter defaults
+        if 'mongod_data_path' not in self.host_desc:
+            self.host_desc['mongod_data_path'] = default_mongod_data_path
+        if 'mongos_data_path' not in self.host_desc:
+            self.host_desc['mongos_data_path'] = default_mongos_data_path
 
     async def start_mongod_instance(self, port, repl_set_name, extra_args=[]):
         '''
@@ -138,14 +158,15 @@ class Cluster:
         '''
         Constructs a cluster object from a JSON object with the following fields:
          Name: Name for the cluster (used only for logging purposes)
-         Hosts: Array of JSON objects, each of which must follow the format for ClusterHost above
+         Hosts: Array of JSON objects, each of which must follow the format for RemoteMongoHost
+          above
         '''
 
         self.config = cluster_config
 
         self.name = cluster_config['Name']
         self.available_hosts = list(
-            map(lambda host_info: ClusterHost(host_info), cluster_config['Hosts']))
+            map(lambda host_info: RemoteMongoHost(host_info), cluster_config['Hosts']))
 
         # Split the cluster hosts into 3 replica sets
         self.shard0_hosts = self.available_hosts[0:3]
