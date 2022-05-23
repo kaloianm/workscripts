@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 #
-
-#
-# 1. Create 9 instances in the AWS console
-# 2. Run the following command in order to obtain the list of instances
-#      aws ec2 describe-instances --filters "Name=tag:owner,Values=kaloian.manassiev" --query "Reservations[].Instances[].PublicDnsName[]"
-#    and paste the output under the 'available_hosts' variable below
-#
+'''
+  1. Create 9 instances in the AWS console
+  2. Run the following command in order to obtain the list of instances
+       aws ec2 describe-instances \
+         --filters "Name=tag:owner,Values=kaloian.manassiev" \
+         --query "Reservations[].Instances[].PublicDnsName[]"
+  3. Generate a JSON file with the following format:
+        {
+                "Name": "Test Cluster",
+                "Hosts": [
+                    # The output of (2)
+                ],
+                "MongoBinPath": <Path where the MongoDB binaries are stored>
+        }
+  3. ./create_remote_cluster.py <File from step (2)>
+'''
 
 import argparse
 import asyncio
@@ -15,80 +24,12 @@ import logging
 import sys
 
 from pymongo import MongoClient
+from remote_common import RemoteSSHHost
+from signal import Signals
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
-
-
-class RemoteSSHHost:
-    '''
-    Wraps information and common management tasks for a remote host which will be controlled
-    through SSH commands
-    '''
-
-    def __init__(self, host_desc):
-        '''
-        Constructs a remote ssh host object from host description, which is either a simple string
-        with just a hostname (FQDN), or JSON object with the following fields:
-          host: The hostname (FQDN) of the host, e.g. ec2-18-232-173-175.compute-1.amazonaws.com
-          ssh_username: The ssh username to use for connections to the host. Defaulted to the
-            default_ssh_username variable below.
-          ssh_args: Arguments to pass the the ssh command. Defaulted to the default_ssh_args
-            variable below.
-        '''
-
-        if (isinstance(host_desc, str)):
-            self.host_desc = {'host': host_desc}
-        else:
-            self.host_desc = host_desc
-
-        #  The 'host' key must exist
-        self.host = self.host_desc['host']
-
-        default_ssh_username = 'ubuntu'
-        default_ssh_args = '-o StrictHostKeyChecking=no'
-
-        # Populate parameter defaults
-        if 'ssh_username' not in self.host_desc:
-            self.host_desc['ssh_username'] = default_ssh_username
-        if 'ssh_args' not in self.host_desc:
-            self.host_desc['ssh_args'] = default_ssh_args
-
-    def __repr__(self):
-        return self.host
-
-    async def exec_remote_ssh_command(self, command):
-        '''
-        Runs the specified command on the cluster host under the SSH credentials configuration above
-        '''
-
-        ssh_command = (
-            f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
-            f'"{command}"')
-        logging.info(f'Executing ({self.host}): {ssh_command}')
-        ssh_process = await asyncio.create_subprocess_shell(ssh_command)
-        await ssh_process.wait()
-
-        if ssh_process.returncode != 0:
-            raise Exception(
-                f'SSH command on host {self.host} failed with code {ssh_process.returncode}')
-
-    async def rsync_files_to_remote(self, source_pattern, destination_path):
-        '''
-        Uses rsync to copy files matching 'source_pattern' to 'destination_path'
-        '''
-
-        rsync_command = (
-            f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
-            f'{source_pattern} {self.host_desc["ssh_username"]}@{self.host}:{destination_path}')
-        logging.info(f'Executing ({self.host}): {rsync_command}')
-        rsync_process = await asyncio.create_subprocess_shell(rsync_command)
-        await rsync_process.wait()
-
-        if rsync_process.returncode != 0:
-            raise Exception(
-                f'RSYNC command on host {self.host} failed with code {rsync_process.returncode}')
 
 
 class RemoteMongoHost(RemoteSSHHost):
@@ -173,19 +114,47 @@ class Cluster:
         self.shard1_hosts = self.available_hosts[3:6]
         self.config_server_hosts = self.available_hosts[6:9]
 
+    async def start_mongod_as_replica_set(self, hosts, port, repl_set_name, extra_args):
+        '''
+        Starts the mongod processes on the specified 'hosts', where each host will be listening on
+        'port' and will be initiated as part of 'repl_set_name'. The 'extra_args' is a list of
+        additional command line arguments to specify to the mongod command line.
+        '''
 
-async def cleanup_leftover_processes(cluster):
+        # Start the Replica Set hosts
+        tasks = []
+        for host in hosts:
+            tasks.append(
+                asyncio.ensure_future(host.start_mongod_instance(port, repl_set_name, extra_args)))
+        await asyncio.gather(*tasks)
+
+
+async def stop_all_mongo_processes(cluster, signal):
     '''
-    Cleanup processes that might have been left over from a previous run, on all nodes.
+    Stops processes that might have been left over from a previous run, on all nodes
     '''
 
-    logging.info('Killing leftover processes')
+    logging.info('Stopping mongo processes')
     tasks = []
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.exec_remote_ssh_command((f'killall -9 mongo mongod mongos ;'
-                                              f'rm -rf {host.host_desc["mongod_data_path"]} ;'
+                host.exec_remote_ssh_command(
+                    (f'killall --wait -s {signal.name} mongo mongod mongos || true'))))
+    await asyncio.gather(*tasks)
+
+
+async def cleanup_mongo_directories(cluster):
+    '''
+    Cleanup directories that might have been left over from a previous run, on all nodes
+    '''
+
+    logging.info('Cleaning leftover directories')
+    tasks = []
+    for host in cluster.available_hosts:
+        tasks.append(
+            asyncio.ensure_future(
+                host.exec_remote_ssh_command((f'rm -rf {host.host_desc["mongod_data_path"]} ;'
                                               f'rm -rf {host.host_desc["mongos_data_path"]}'))))
     await asyncio.gather(*tasks)
 
@@ -217,24 +186,59 @@ async def copy_binaries(cluster, mongo_binaries_path):
     await asyncio.gather(*tasks)
 
 
-async def start_shards_and_config_server(cluster):
-    '''
-    Start the mongod service on each of the hosts and initiate them as replica sets
-    '''
+async def start_mongod_processes(cluster):
+    tasks = []
 
-    async def make_replica_set(hosts, port, repl_set_name, extra_args):
-        '''
-        Makes a replica set out of the specified 'hosts', where each host will be listening on
-        'port' and will be initiated as part of 'repl_set_name'. The 'extra_args' is a list of
-        additional command line arguments to specify to the mongod command line.
-        '''
+    # Shard(s)
+    tasks.append(
+        asyncio.ensure_future(
+            cluster.start_mongod_as_replica_set(cluster.shard0_hosts, 27018, 'shard0', [
+                '--shardsvr',
+                '--setParameter rangeDeleterBatchSize=100000',
+                '--setParameter orphanCleanupDelaySecs=0',
+            ])))
 
-        # Start the Replica Set hosts
-        tasks = []
-        for host in hosts:
-            tasks.append(
-                asyncio.ensure_future(host.start_mongod_instance(port, repl_set_name, extra_args)))
-        await asyncio.gather(*tasks)
+    tasks.append(
+        asyncio.ensure_future(
+            cluster.start_mongod_as_replica_set(cluster.shard1_hosts, 27018, 'shard1', [
+                '--shardsvr',
+                '--setParameter rangeDeleterBatchSize=100000',
+                '--setParameter orphanCleanupDelaySecs=0',
+            ])))
+
+    # Config Server
+    tasks.append(
+        asyncio.ensure_future(
+            cluster.start_mongod_as_replica_set(cluster.config_server_hosts, 27019, 'config', [
+                '--configsvr',
+            ])))
+
+    await asyncio.gather(*tasks)
+
+
+async def start_mongos_processes(cluster):
+    tasks = []
+    for host in cluster.available_hosts:
+        tasks.append(
+            asyncio.ensure_future(
+                host.start_mongos_instance(27017, cluster.config_server_hosts[0])))
+    await asyncio.gather(*tasks)
+
+
+async def main_create(args, cluster):
+    '''Implements the create command'''
+
+    await stop_all_mongo_processes(cluster, Signals.SIGKILL)
+    await cleanup_mongo_directories(cluster)
+    await install_prerequisite_packages(cluster)
+    await copy_binaries(cluster, cluster_config['MongoBinPath'])
+    await start_mongod_processes(cluster)
+
+    async def initiate_replica_set(hosts, port, repl_set_name):
+        '''
+        Initiates 'hosts' as a replica set with a name of 'repl_set_name' and 'hosts':'port' as
+        members
+        '''
 
         # Initiate the Replica Set
         connection_string = f'mongodb://{hosts[0].host}:{port}'
@@ -256,35 +260,12 @@ async def start_shards_and_config_server(cluster):
                     }
                 }))
 
-    # Shard(s)
-    await make_replica_set(cluster.shard0_hosts, 27018, 'shard0', [
-        '--shardsvr',
-        '--setParameter rangeDeleterBatchSize=100000',
-        '--setParameter orphanCleanupDelaySecs=0',
-    ])
-    await make_replica_set(cluster.shard1_hosts, 27018, 'shard1', [
-        '--shardsvr',
-        '--setParameter rangeDeleterBatchSize=100000',
-        '--setParameter orphanCleanupDelaySecs=0',
-    ])
+    await initiate_replica_set(cluster.shard0_hosts, 27018, 'shard0')
+    await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
+    await initiate_replica_set(cluster.config_server_hosts, 27019, 'config')
 
-    # Config Server
-    await make_replica_set(cluster.config_server_hosts, 27019, 'config', [
-        '--configsvr',
-    ])
-
-
-async def make_cluster(cluster):
-    '''
-    Start the mongos service on each of the hosts and add the newly created shards to the cluster
-    '''
-
-    tasks = []
-    for host in cluster.available_hosts:
-        tasks.append(
-            asyncio.ensure_future(
-                host.start_mongos_instance(27017, cluster.config_server_hosts[0])))
-    await asyncio.gather(*tasks)
+    # MongoS instances
+    await start_mongos_processes(cluster)
 
     mongos_connection_string = f'mongodb://{cluster.available_hosts[0].host}'
     logging.info(f'Connecting to {mongos_connection_string}')
@@ -301,44 +282,64 @@ async def make_cluster(cluster):
             'name': 'shard1'
         }))
 
-    logging.info(f"""
+    logging.info(f'''
 Cluster {cluster.name} started with:
   MongoS: {mongos_connection_string}
   ConfigServer: {cluster.config_server_hosts}
   Shard0: {cluster.shard0_hosts}
   Shard1: {cluster.shard1_hosts}
-""")
+''')
 
 
-async def main(args):
-    '''Main entrypoint of the application'''
+async def main_stop(args, cluster):
+    '''Implements the stop command'''
 
-    with open(args.clusterconfigfile) as f:
-        cluster_config = json.load(f)
+    await stop_all_mongo_processes(cluster, args.signal)
 
-    logging.info(f"Starting cluster generation with configuration: '{cluster_config}'")
-    cluster = Cluster(cluster_config)
 
-    await cleanup_leftover_processes(cluster)
-    await install_prerequisite_packages(cluster)
-    await copy_binaries(cluster, cluster_config['MongoBinPath'])
-    await start_shards_and_config_server(cluster)
-    await make_cluster(cluster)
+async def main_start(args, cluster):
+    '''Implements the start command'''
+
+    await start_mongod_processes(cluster)
+    await start_mongos_processes(cluster)
 
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
-        description='Tool to create a fully working cluster given SSH access to a set of hosts')
+        description='Tool to manipulate a fully working cluster given SSH access to a set of hosts')
     argsParser.add_argument(
         'clusterconfigfile',
-        help='JSON-formatted text file which contains the desired configuration of the cluster',
-        type=str)
+        help='JSON-formatted text file which contains the configuration of the cluster', type=str)
+    subparsers = argsParser.add_subparsers(title='subcommands')
 
-    args_list = " ".join(sys.argv[1:])
+    # Arguments for the 'create' command
+    parser_create = subparsers.add_parser('create',
+                                          help='Creates (or overwrites) a brand new cluster')
+    parser_create.set_defaults(func=main_create)
+
+    # Arguments for the 'stop' command
+    parser_stop = subparsers.add_parser(
+        'stop',
+        help='Stops all the processes of an already created cluster using a specified signal')
+    parser_stop.add_argument(
+        'signal', type=lambda x: Signals[x],
+        help=f'The signal to use for terminating the processes. One of {[e.name for e in Signals]}')
+    parser_stop.set_defaults(func=main_stop)
+
+    # Arguments for the 'start' command
+    parser_start = subparsers.add_parser(
+        'start', help='Starts all the processes of an already created cluster')
+    parser_start.set_defaults(func=main_start)
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     args = argsParser.parse_args()
 
+    with open(args.clusterconfigfile) as f:
+        cluster_config = json.load(f)
+
+    logging.info(f"Starting with configuration: '{cluster_config}'")
+    cluster = Cluster(cluster_config)
+
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main(args))
+    loop.run_until_complete(args.func(args, cluster))
