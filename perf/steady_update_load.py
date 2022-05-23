@@ -1,24 +1,17 @@
-#
-# 1. Import one of the 10GB/20GB datasets required for the performance test in the cluster:
-#     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts10GB --numInsertionWorkers=16 --file=$HOME/Temp/10GBset.json mongodb://localhost
-#     $HOME/mongodb/tools/mongoimport --db=Balancing --collection=Posts20GB --numInsertionWorkers=16 --file=$HOME/Temp/20GBset.json mongodb://localhost
-# 2. db.Posts20GB.createIndex({ customer_id: 1 })
-# 3. sh.stopBalancer()
-# 4. sh.enableSharding('Balancing')
-# 5. sh.shardCollection('Balancing.Posts20GB', { customer_id: 1 })
-#
-
-import random
-import string
+# Locust-based read/update workload
 
 from locust import User, constant_pacing, events, tag, task
 from pymongo import MongoClient
 from random import randrange
-from time import perf_counter
+from time import perf_counter_ns
 
 connection_string = None
 mongo_client = None
 collection = None
+
+
+def nanos_to_millis(nanos):
+    return round(nanos / 1000000.0, 2)
 
 
 @events.init.add_listener
@@ -30,15 +23,10 @@ def on_locust_init(environment, **kwargs):
 
     global mongo_client
     mongo_client = MongoClient(connection_string)
-    database = mongo_client['BalanceTest']
+    database = mongo_client['MDBW22']
 
     global collection
-    collection = database['Posts20GB']
-
-
-def make_random_string(length):
-    letters = string.ascii_lowercase
-    return ''.join(random.choice(letters) for i in range(length))
+    collection = database['BalancerDemo']
 
 
 class Mongouser(User):
@@ -46,36 +34,30 @@ class Mongouser(User):
     wait_time = constant_pacing(1)
 
     def on_start(self):
-        self._switch_customer_id()
+        self._switch_account_id()
 
-    def _switch_customer_id(self):
+    def _switch_account_id(self):
         # TODO: Use a natural number query instead
-        self.customer_id = randrange(0, 11077064)
+        self.account_id = randrange(0, 180000000)
 
-    @task
-    def update_post(self):
-        start_time = perf_counter()
+    @task(66)
+    def find_account(self):
+        start_time = perf_counter_ns()
+        self._switch_account_id()
 
-        self._switch_customer_id()
-        collection.update_one({"customer_id": self.customer_id}, {
-            "$set": {
-                "updated_post": make_random_string(128)
-            },
-            "$inc": {
-                "modifications": 1
-            }
-        })
+        collection.find_one({'account_id': self.account_id})
 
-        self._switch_customer_id()
-        collection.update_one({"customer_id": self.customer_id}, {
-            "$set": {
-                "updated_post": make_random_string(128)
-            },
-            "$inc": {
-                "modifications": 1
-            }
-        })
+        self.environment.events.request_success.fire(
+            request_type='find_account', name='find_account',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
 
-        self.environment.events.request_success.fire(request_type="update_post", name="update_post",
-                                                     response_time=perf_counter() - start_time,
-                                                     response_length=0)
+    @task(33)
+    def update_account(self):
+        start_time = perf_counter_ns()
+        self._switch_account_id()
+
+        collection.update_one({'account_id': self.account_id}, {'$inc': {'modifications': 1}})
+
+        self.environment.events.request_success.fire(
+            request_type='update_account', name='update_account',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
