@@ -55,11 +55,12 @@ async def main(args):
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
-        description='Tool to shard a large collection with minimum downtime')
+        description=
+        'Tool to unshard a collection which is already on a single shard without downtime')
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)
-    argsParser.add_argument('namespace', help='The namespace to shard, in the form of db.coll',
+    argsParser.add_argument('namespace', help='The namespace to unshard, in the form of db.coll',
                             metavar='namespace', type=str)
 
     args = argsParser.parse_args()
