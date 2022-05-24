@@ -33,7 +33,7 @@ if __name__ == "__main__":
                             type=str)
     subparsers = argsParser.add_subparsers(title='subcommands')
 
-    # The 'run' command
+    # Arguments for the 'run' command
     parser_run = subparsers.add_parser('run', help='Runs a command')
     parser_run.add_argument('command', help='The command to run')
     parser_run.set_defaults(func=main_run)
