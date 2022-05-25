@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 #
-'''
+help_string = '''
+Tool to create and manipulate a MongoDB sharded cluster given SSH access to a set of hosts. The
+intended usage is:
+
   1. Create 9 instances in the AWS console
-  2. Run the following command in order to obtain the list of instances
+  2. Run the following command in order to obtain the list of instances:
        aws ec2 describe-instances \
          --filters "Name=tag:owner,Values=kaloian.manassiev" \
          --query "Reservations[].Instances[].PublicDnsName[]"
-  3. Generate a JSON file with the following format:
+  3. Create a JSON file with the following format:
         {
                 "Name": "Test Cluster",
                 "Hosts": [
                     # The output from step (2)
                 ],
                 "MongoBinPath": "<Path where the MongoDB binaries are stored>",
-                "FeatureFlags": [ "<List of strings with the feature flag names>" ]
+                "FeatureFlags": [ "<List of strings with feature flag names to enable>" ]
         }
   4. ./remote_control_cluster.py create <File from step (3)>
+
+See the help for more supported commands.
 '''
 
 import argparse
@@ -316,8 +321,7 @@ async def main_start(args, cluster):
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description='Tool to manipulate a fully working cluster given SSH access to a set of hosts')
+    argsParser = argparse.ArgumentParser(description=help_string)
     argsParser.add_argument(
         'clusterconfigfile',
         help='JSON-formatted text file which contains the configuration of the cluster', type=str)

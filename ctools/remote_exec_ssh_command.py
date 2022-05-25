@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #
-'''
+help_string = '''
+Tool for executing commands against a set of hosts in the format accepted by `remote_control_cluster.py`.
 '''
 
 import argparse
@@ -36,8 +37,7 @@ async def main_rsync(args, available_hosts):
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description='Tool to execute an SSH command across a set of hosts')
+    argsParser = argparse.ArgumentParser(description=help_string)
     argsParser.add_argument('clusterconfigfile',
                             help='JSON-formatted text file which contains the set of hosts',
                             type=str)
