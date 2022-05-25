@@ -25,6 +25,16 @@ async def main_run(args, available_hosts):
     await asyncio.gather(*tasks)
 
 
+async def main_rsync(args, available_hosts):
+    '''Implements the rsync command'''
+
+    tasks = []
+    for host in available_hosts:
+        tasks.append(
+            asyncio.ensure_future(host.rsync_files_to_remote(args.local_pattern, args.remote_path)))
+    await asyncio.gather(*tasks)
+
+
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
         description='Tool to execute an SSH command across a set of hosts')
@@ -37,6 +47,13 @@ if __name__ == "__main__":
     parser_run = subparsers.add_parser('run', help='Runs a command')
     parser_run.add_argument('command', help='The command to run')
     parser_run.set_defaults(func=main_run)
+
+    # Arguments for the 'rsync' command
+    parser_rsync = subparsers.add_parser('rsync',
+                                         help='Rsyncs a set of file from a local to remote path')
+    parser_rsync.add_argument('local_pattern', help='The local pattern from which to rsync')
+    parser_rsync.add_argument('remote_path', help='The remote path to which to rsync')
+    parser_rsync.set_defaults(func=main_rsync)
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 

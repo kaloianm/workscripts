@@ -12,7 +12,8 @@
                 "Hosts": [
                     # The output from step (2)
                 ],
-                "MongoBinPath": "<Path where the MongoDB binaries are stored>"
+                "MongoBinPath": "<Path where the MongoDB binaries are stored>",
+                "FeatureFlags": [ "<List of strings with the feature flag names>" ]
         }
   4. ./remote_control_cluster.py create <File from step (3)>
 '''
@@ -105,9 +106,12 @@ class Cluster:
 
         self.config = cluster_config
 
-        self.name = cluster_config['Name']
+        self.name = self.config['Name']
+        self.feature_flags = [f'--setParameter {f}=true' for f in self.config["FeatureFlags"]
+                              ] if "FeatureFlags" in self.config else []
+
         self.available_hosts = list(
-            map(lambda host_info: RemoteMongoHost(host_info), cluster_config['Hosts']))
+            map(lambda host_info: RemoteMongoHost(host_info), self.config['Hosts']))
 
         # Split the cluster hosts into 3 replica sets
         self.shard0_hosts = self.available_hosts[0:3]
@@ -126,6 +130,17 @@ class Cluster:
         for host in hosts:
             tasks.append(
                 asyncio.ensure_future(host.start_mongod_instance(port, repl_set_name, extra_args)))
+        await asyncio.gather(*tasks)
+
+    async def rsync(self, local_pattern, remote_path):
+        '''
+        Rsyncs all the files that match 'local_pattern' to the 'remote_path' on all nodes
+        '''
+
+        tasks = []
+        for host in self.available_hosts:
+            tasks.append(
+                asyncio.ensure_future(host.rsync_files_to_remote(local_pattern, remote_path)))
         await asyncio.gather(*tasks)
 
 
@@ -173,55 +188,51 @@ async def install_prerequisite_packages(cluster):
     await asyncio.gather(*tasks)
 
 
-async def copy_binaries(cluster, mongo_binaries_path):
-    '''
-    Copy the mongodb binaries to all nodes
-    '''
-
-    tasks = []
-    for host in cluster.available_hosts:
-        tasks.append(
-            asyncio.ensure_future(
-                host.rsync_files_to_remote(f'{mongo_binaries_path}/*', '$HOME/binaries')))
-    await asyncio.gather(*tasks)
-
-
 async def start_mongod_processes(cluster):
     tasks = []
+
+    # Shard server-only parameters
+    shard_extra_parameters = [
+        '--setParameter rangeDeleterBatchSize=100000',
+        '--setParameter orphanCleanupDelaySecs=0',
+    ] + cluster.feature_flags
 
     # Shard(s)
     tasks.append(
         asyncio.ensure_future(
             cluster.start_mongod_as_replica_set(cluster.shard0_hosts, 27018, 'shard0', [
                 '--shardsvr',
-                '--setParameter rangeDeleterBatchSize=100000',
-                '--setParameter orphanCleanupDelaySecs=0',
-            ])))
+            ] + shard_extra_parameters)))
 
     tasks.append(
         asyncio.ensure_future(
             cluster.start_mongod_as_replica_set(cluster.shard1_hosts, 27018, 'shard1', [
                 '--shardsvr',
-                '--setParameter rangeDeleterBatchSize=100000',
-                '--setParameter orphanCleanupDelaySecs=0',
-            ])))
+            ] + shard_extra_parameters)))
+
+    # Config server-only parameters
+    config_extra_parameters = [] + cluster.feature_flags
 
     # Config Server
     tasks.append(
         asyncio.ensure_future(
             cluster.start_mongod_as_replica_set(cluster.config_server_hosts, 27019, 'config', [
                 '--configsvr',
-            ])))
+            ] + config_extra_parameters)))
 
     await asyncio.gather(*tasks)
 
 
 async def start_mongos_processes(cluster):
+    # MongoS-only parameters
+    mongos_extra_parameters = [] + cluster.feature_flags
+
     tasks = []
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.start_mongos_instance(27017, cluster.config_server_hosts[0])))
+                host.start_mongos_instance(27017, cluster.config_server_hosts[0],
+                                           mongos_extra_parameters)))
     await asyncio.gather(*tasks)
 
 
@@ -231,7 +242,7 @@ async def main_create(args, cluster):
     await stop_all_mongo_processes(cluster, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster)
     await install_prerequisite_packages(cluster)
-    await copy_binaries(cluster, cluster_config['MongoBinPath'])
+    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
     await start_mongod_processes(cluster)
 
     async def initiate_replica_set(hosts, port, repl_set_name):
