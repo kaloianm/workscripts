@@ -1,7 +1,11 @@
-# Locust-based read/update workload
+'''
+Locust-based read/update workload
+Example usage:
+ locust -f perf/steady_update_load.py --users 300 --spawn-rate 100 --autostart --web-port 8090/8091 --host hostname
+'''
 
 from locust import User, constant_pacing, events, tag, task
-from pymongo import MongoClient
+from pymongo import MongoClient, ReadPreference
 from random import randrange
 from time import perf_counter_ns
 
@@ -26,7 +30,7 @@ def on_locust_init(environment, **kwargs):
     database = mongo_client['MDBW22']
 
     global collection
-    collection = database['BalancerDemo']
+    collection = database.get_collection('BalancerDemo', read_preference=ReadPreference.SECONDARY)
 
 
 class Mongouser(User):
