@@ -1,8 +1,11 @@
 # Helper utilities to be used by the ctools scripts
 #
 
+import aiofiles
 import asyncio
 import logging
+import sys
+import tempfile
 
 
 class RemoteSSHHost:
@@ -47,16 +50,22 @@ class RemoteSSHHost:
         Runs the specified command on the cluster host under the SSH credentials configuration above
         '''
 
-        ssh_command = (
-            f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
-            f'"{command}"')
-        logging.info(f'Executing ({self.host}): {ssh_command}')
-        ssh_process = await asyncio.create_subprocess_shell(ssh_command)
-        await ssh_process.wait()
+        async with aiofiles.tempfile.TemporaryFile() as temp_file:
+            ssh_command = (
+                f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
+                f'"{command}"')
+            logging.info(f'Executing ({self.host}): {ssh_command}')
+            ssh_process = await asyncio.create_subprocess_shell(ssh_command, stdout=temp_file,
+                                                                stderr=temp_file)
+            await ssh_process.wait()
 
-        if ssh_process.returncode != 0:
-            raise Exception(
-                f'SSH command on host {self.host} failed with code {ssh_process.returncode}')
+            await temp_file.seek(0)
+            async for line in temp_file:
+                print(f'{self.host}: {line.decode("ascii")}')
+
+            if ssh_process.returncode != 0:
+                raise Exception(
+                    f'SSH command on host {self.host} failed with code {ssh_process.returncode}')
 
     async def rsync_files_to_remote(self, source_pattern, destination_path):
         '''

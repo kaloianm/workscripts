@@ -1,6 +1,7 @@
+aiofiles == 0.8.0
 argparse == 1.4.0
-motor == 2.4.0
-mtools == 1.6.4
-psutil == 5.7.0
-pymongo == 3.12.1
-tqdm == 4.60.0
+motor == 3.0.0
+mtools == 1.7.0
+psutil == 5.9.1
+pymongo == 4.1.1
+tqdm == 4.64.0
