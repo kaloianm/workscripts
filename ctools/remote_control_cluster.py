@@ -76,9 +76,10 @@ class RemoteMongoHost(RemoteSSHHost):
              f'$HOME/binaries/mongod --replSet {repl_set_name} '
              f'--dbpath {self.host_desc["mongod_data_path"]} '
              f'--logpath {self.host_desc["mongod_data_path"]}/mongod.log '
-             f'--port {port} --bind_ip_all '
-             f'--fork '
-             f'{" ".join(extra_args)}'))
+             f'--port {port} '
+             f'--bind_ip_all '
+             f'{" ".join(extra_args)} '
+             f'--fork '))
 
     async def start_mongos_instance(self, port, config_server, extra_args=[]):
         '''
@@ -91,9 +92,10 @@ class RemoteMongoHost(RemoteSSHHost):
             (f'mkdir -p {self.host_desc["mongos_data_path"]} && '
              f'$HOME/binaries/mongos --configdb config/{config_server.host}:27019 '
              f'--logpath {self.host_desc["mongos_data_path"]}/mongos.log '
-             f'--port {port} --bind_ip_all '
-             f'--fork '
-             f'{" ".join(extra_args)}'))
+             f'--port {port} '
+             f'--bind_ip_all '
+             f'{" ".join(extra_args)} '
+             f'--fork '))
 
 
 class Cluster:
@@ -260,7 +262,7 @@ async def main_create(args, cluster):
         connection_string = f'mongodb://{hosts[0].host}:{port}'
         logging.info(f'Connecting to {connection_string} in order to initiate it as a replica set')
 
-        with MongoClient(connection_string) as mongo_client:
+        with MongoClient(connection_string, directConnection=True) as mongo_client:
             replica_set_members_list = list(
                 map(
                     lambda id_and_host: {
