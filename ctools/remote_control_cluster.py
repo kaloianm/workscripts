@@ -10,11 +10,11 @@
         {
                 "Name": "Test Cluster",
                 "Hosts": [
-                    # The output of (2)
+                    # The output from step (2)
                 ],
-                "MongoBinPath": <Path where the MongoDB binaries are stored>
+                "MongoBinPath": "<Path where the MongoDB binaries are stored>"
         }
-  3. ./create_remote_cluster.py <File from step (2)>
+  4. ./remote_control_cluster.py create <File from step (3)>
 '''
 
 import argparse
