@@ -30,7 +30,7 @@ def on_locust_init(environment, **kwargs):
     database = mongo_client['MDBW22']
 
     global collection
-    collection = database.get_collection('BalancerDemo', read_preference=ReadPreference.SECONDARY)
+    collection = database.get_collection('BalancerDemo', read_preference=ReadPreference.PRIMARY)
 
 
 class Mongouser(User):
@@ -42,26 +42,42 @@ class Mongouser(User):
 
     def _switch_account_id(self):
         # TODO: Use a natural number query instead
-        self.account_id = randrange(0, 180000000)
+        self.account_id = randrange(0, 200000000)
 
-    @task(66)
+    @task(60)
     def find_account(self):
         start_time = perf_counter_ns()
         self._switch_account_id()
 
-        collection.find_one({'account_id': self.account_id})
+        collection.find_one({'account_id': self.account_id, 'sub_account_id': 0})
 
         self.environment.events.request_success.fire(
             request_type='find_account', name='find_account',
             response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
 
-    @task(33)
+    @task(30)
     def update_account(self):
         start_time = perf_counter_ns()
         self._switch_account_id()
 
-        collection.update_one({'account_id': self.account_id}, {'$inc': {'modifications': 1}})
+        collection.update_one({
+            'account_id': self.account_id,
+            'sub_account_id': 0
+        }, {'$inc': {
+            'modifications': 1
+        }})
 
         self.environment.events.request_success.fire(
             request_type='update_account', name='update_account',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
+
+    @task(10)
+    def create_account(self):
+        start_time = perf_counter_ns()
+        self._switch_account_id()
+
+        collection.insert_one({'account_id': self.account_id, 'sub_account_id': 0})
+
+        self.environment.events.request_success.fire(
+            request_type='create_account', name='create_account',
             response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
