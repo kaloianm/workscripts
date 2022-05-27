@@ -49,7 +49,7 @@ class Mongouser(User):
         start_time = perf_counter_ns()
         self._switch_account_id()
 
-        collection.find_one({'account_id': self.account_id, 'sub_account_id': 0})
+        assert collection.find_one({'account_id': self.account_id, 'account_sub_id': 0}) is not None
 
         self.environment.events.request_success.fire(
             request_type='find_account', name='find_account',
@@ -60,12 +60,14 @@ class Mongouser(User):
         start_time = perf_counter_ns()
         self._switch_account_id()
 
-        collection.update_one({
+        update_result = collection.update_one({
             'account_id': self.account_id,
-            'sub_account_id': 0
+            'account_sub_id': 0
         }, {'$inc': {
             'modifications': 1
         }})
+
+        assert update_result.modified_count > 0
 
         self.environment.events.request_success.fire(
             request_type='update_account', name='update_account',
@@ -76,7 +78,13 @@ class Mongouser(User):
         start_time = perf_counter_ns()
         self._switch_account_id()
 
-        collection.insert_one({'account_id': self.account_id, 'sub_account_id': 0})
+        insert_result = collection.insert_one({
+            'account_id': self.account_id,
+            'account_sub_id': 1,
+            'modifications': 1
+        })
+
+        assert insert_result.inserted_id is not None
 
         self.environment.events.request_success.fire(
             request_type='create_account', name='create_account',
