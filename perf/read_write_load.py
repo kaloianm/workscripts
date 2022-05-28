@@ -1,7 +1,7 @@
 '''
 Locust-based read/update workload
 Example usage:
- locust -f perf/steady_update_load.py --users 300 --spawn-rate 100 --autostart --web-port 8090/8091 --host hostname
+ locust -f perf/steady_update_load.py --users 500 --spawn-rate 100 --autostart --web-port 8090/8091 --host hostname
 '''
 
 from locust import User, constant_pacing, events, tag, task
@@ -42,7 +42,7 @@ class Mongouser(User):
 
     def _switch_account_id(self):
         # TODO: Use a natural number query instead
-        self.account_id = randrange(0, 200000000)
+        self.account_id = randrange(0, 350000000)
 
     @task(60)
     def find_account(self):
