@@ -61,8 +61,8 @@ class RemoteSSHHost:
 
             await temp_file.seek(0)
             async for line in temp_file:
-                stripped_line = line.decode("ascii").replace("\n", "")
-                logging.info(f'{self.host}: {stripped_line}')
+                stripped_line = line.decode('ascii').replace('\n', '')
+                logging.info(f'[{self.host}]: {stripped_line}')
 
             if ssh_process.returncode != 0:
                 raise Exception(
