@@ -29,6 +29,7 @@ import json
 import logging
 import sys
 
+from common import yes_no
 from pymongo import MongoClient
 from remote_common import RemoteSSHHost
 from signal import Signals
@@ -244,8 +245,17 @@ async def start_mongos_processes(cluster):
     await asyncio.gather(*tasks)
 
 
+##################################################################################################
+#
+# Main methods implementations for the various sub-commands
+#
+##################################################################################################
+
+
 async def main_create(args, cluster):
     '''Implements the create command'''
+
+    yes_no('The next steps will erase all existing data on the specified hosts.')
 
     await stop_all_mongo_processes(cluster, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster)
