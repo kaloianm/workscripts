@@ -40,6 +40,7 @@ async def main(args):
 
     await cluster.configDb.collections.delete_one({'_id': args.namespace})
     await cluster.configDb.chunks.delete_many({'uuid': collection['uuid']})
+    await cluster.configDb.tags.delete_many({'ns': args.namespace})
 
     async def check_cache_collections(shard_id, shard_conn):
         logging.info(f'Clearing shard {shard_id} from leftover sharding information')
