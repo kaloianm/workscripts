@@ -200,7 +200,7 @@ async def start_mongod_processes(cluster):
 
     # Shard server-only parameters
     shard_extra_parameters = [
-        '--setParameter rangeDeleterBatchSize=100000',
+        '--setParameter rangeDeleterBatchSize=100',
         '--setParameter orphanCleanupDelaySecs=0',
         '--wiredTigerCacheSizeGB 10',
     ] + cluster.feature_flags
