@@ -202,6 +202,7 @@ async def start_mongod_processes(cluster):
     shard_extra_parameters = [
         '--setParameter rangeDeleterBatchSize=100000',
         '--setParameter orphanCleanupDelaySecs=0',
+        '--wiredTigerCacheSizeGB 10',
     ] + cluster.feature_flags
 
     # Shard(s)
@@ -267,7 +268,8 @@ async def main_create(args, cluster):
                 map(
                     lambda id_and_host: {
                         '_id': id_and_host[0],
-                        'host': f'{id_and_host[1].host}:{port}'
+                        'host': f'{id_and_host[1].host}:{port}',
+                        'priority': 2 if id_and_host[0] == 0 else 1
                     }, zip(range(0, len(hosts)), hosts)))
 
             logging.info(
