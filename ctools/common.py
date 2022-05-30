@@ -1,6 +1,7 @@
 # Helper utilities to be used by the ctools scripts
 #
 
+import aiofiles
 import asyncio
 import bson
 import datetime
@@ -8,7 +9,6 @@ import logging
 import motor.motor_asyncio
 import subprocess
 import sys
-import uuid
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
@@ -16,8 +16,9 @@ from bson.objectid import ObjectId
 from pymongo import uri_parser
 
 
-# Function for a Yes/No result based on the answer provided as an argument
 def yes_no(answer):
+    '''Function for a Yes/No result based on the answer provided as an argument'''
+
     yes = set(['yes', 'y', 'y'])
     no = set(['no', 'n', ''])
 
@@ -31,11 +32,32 @@ def yes_no(answer):
             print("Please respond with 'yes' or 'no'\n")
 
 
-# Abstracts constructing the name of an executable on POSIX vs Windows platforms
 def exe_name(name):
+    '''Abstracts constructing the name of an executable on POSIX vs Windows platforms'''
+
     if (sys.platform == 'win32'):
         return name + '.exe'
     return name
+
+
+async def async_start_shell_command(command, logging_prefix):
+    '''Asynchronously starts a shell command'''
+
+    logging.info(f'[{logging_prefix}]: {command}')
+
+    async with aiofiles.tempfile.TemporaryFile() as temp_file:
+        command_shell_process = await asyncio.create_subprocess_shell(command, stdout=temp_file,
+                                                                      stderr=temp_file)
+        await command_shell_process.wait()
+
+        await temp_file.seek(0)
+        async for line in temp_file:
+            stripped_line = line.decode('ascii').replace('\n', '')
+            logging.info(f'[{logging_prefix}]: {stripped_line}')
+
+        if command_shell_process.returncode != 0:
+            raise Exception(
+                f'[{logging_prefix}]: Command failed with code {command_shell_process.returncode}')
 
 
 # Abstracts the connection to and some administrative operations against a MongoDB cluster. This

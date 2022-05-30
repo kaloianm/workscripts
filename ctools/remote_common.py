@@ -2,9 +2,7 @@ help_string = '''
 Set of support utilities requiredd by the remote_*.py tools.
 '''
 
-import aiofiles
-import asyncio
-import logging
+from common import async_start_shell_command
 
 
 class RemoteSSHHost:
@@ -52,21 +50,7 @@ class RemoteSSHHost:
         ssh_command = (
             f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
             f'"{command}"')
-        logging.info(f'EXEC ({self.host}): {ssh_command}')
-
-        async with aiofiles.tempfile.TemporaryFile() as temp_file:
-            ssh_process = await asyncio.create_subprocess_shell(ssh_command, stdout=temp_file,
-                                                                stderr=temp_file)
-            await ssh_process.wait()
-
-            await temp_file.seek(0)
-            async for line in temp_file:
-                stripped_line = line.decode('ascii').replace('\n', '')
-                logging.info(f'[{self.host}]: {stripped_line}')
-
-            if ssh_process.returncode != 0:
-                raise Exception(
-                    f'SSH command on host {self.host} failed with code {ssh_process.returncode}')
+        await async_start_shell_command(ssh_command, self.host)
 
     async def rsync_files_to_remote(self, source_pattern, destination_path):
         '''
@@ -76,17 +60,4 @@ class RemoteSSHHost:
         rsync_command = (
             f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
             f'{source_pattern} {self.host_desc["ssh_username"]}@{self.host}:{destination_path}')
-        logging.info(f'RSYNC ({self.host}): {rsync_command}')
-
-        async with aiofiles.tempfile.TemporaryFile() as temp_file:
-            rsync_process = await asyncio.create_subprocess_shell(rsync_command)
-            await rsync_process.wait()
-
-            await temp_file.seek(0)
-            async for line in temp_file:
-                stripped_line = line.decode("ascii").replace("\n", "")
-                logging.info(f'{self.host}: {stripped_line}')
-
-        if rsync_process.returncode != 0:
-            raise Exception(
-                f'RSYNC command on host {self.host} failed with code {rsync_process.returncode}')
+        await async_start_shell_command(rsync_command, self.host)
