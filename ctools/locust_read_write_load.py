@@ -1,9 +1,16 @@
-'''
+#!/usr/bin/env python3
+#
+help_string = '''
 Locust-based read/update workload
 Example usage:
  locust -f perf/steady_update_load.py --users 500 --spawn-rate 100 --autostart --web-port 8090/8091 --host hostname
 '''
 
+import argparse
+import asyncio
+import logging
+
+from common import async_start_shell_command
 from locust import User, constant_pacing, events, tag, task
 from pymongo import MongoClient, ReadPreference
 from random import randrange
@@ -89,3 +96,46 @@ class Mongouser(User):
         self.environment.events.request_success.fire(
             request_type='create_account', name='create_account',
             response_time=nanos_to_millis(perf_counter_ns() - start_time), response_length=0)
+
+
+async def main(args):
+    logging.info(f"Starting with configuration: '{args}'")
+
+    tasks = []
+
+    # Start the coordinator
+    coordinator_command = (
+        f'locust -f {__file__} --master --master-bind-port {args.coordinator_port} '
+        f'--users {args.users} --spawn-rate 100 --autostart '
+        f'--web-port {args.web_port} '
+        f'--host {args.host} ')
+    logging.info(coordinator_command)
+    tasks.append(
+        asyncio.ensure_future(async_start_shell_command(coordinator_command, 'coordinator')))
+
+    for i in range(0, 4):
+        worker_command = (f'locust -f {__file__} --worker --master-port {args.coordinator_port} '
+                          f'--host {args.host} ')
+        tasks.append(asyncio.ensure_future(async_start_shell_command(worker_command, 'worker')))
+
+    await asyncio.gather(*tasks)
+
+
+if __name__ == "__main__":
+    argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+    argsParser.add_argument('--coordinator-port',
+                            help='The port on which the coordinator server will listen',
+                            metavar='coordinator-port', type=int)
+    argsParser.add_argument('--web-port', help='The port on which the web server will listen',
+                            metavar='web-port', type=int)
+    argsParser.add_argument('--users', help='How many users to generate', metavar='users', type=int)
+    argsParser.add_argument('--host', help='The host against which to run', metavar='host',
+                            type=str)
+
+    logging.info(f'Running with Python source file of {__file__}')
+    args = argsParser.parse_args()
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main(args))
