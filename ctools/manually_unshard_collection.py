@@ -18,14 +18,16 @@ async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
     await cluster.check_is_mongos()
 
-    await cluster.check_balancer_is_disabled()
-
     ns = {'db': args.namespace.split('.', 1)[0], 'coll': args.namespace.split('.', 1)[1]}
 
     collection = await cluster.configDb.collections.find_one({'_id': args.namespace})
     if not collection:
         raise Exception(f'Collection {args.namespace} is NOT sharded')
 
+    logging.info(f'Stopping balancer')
+    await cluster.adminDb.command({'balancerStop': 1})
+
+    logging.info(f'Merging all chunks into one')
     await cluster.adminDb.command({
         'mergeChunks':
             args.namespace,
