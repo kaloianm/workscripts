@@ -14,15 +14,11 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
-async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop())
-    await cluster.check_is_mongos()
-
-    ns = {'db': args.namespace.split('.', 1)[0], 'coll': args.namespace.split('.', 1)[1]}
-
+async def clear_collection_sharding(cluster, args):
     collection = await cluster.configDb.collections.find_one({'_id': args.namespace})
     if not collection:
-        raise Exception(f'Collection {args.namespace} is NOT sharded')
+        logging.info(f'Collection {args.namespace} is NOT sharded')
+        return
 
     logging.info(f'Stopping balancer')
     await cluster.adminDb.command({'balancerStop': 1})
@@ -45,7 +41,7 @@ async def main(args):
     await cluster.configDb.tags.delete_many({'ns': args.namespace})
 
     async def check_cache_collections(shard_id, shard_conn):
-        logging.info(f'Clearing shard {shard_id} from leftover sharding information')
+        logging.info(f'Clearing shard {shard_id} from leftover routing/filtering information')
 
         shard_admin_db = shard_conn.get_database('admin')
         await shard_admin_db.command({
@@ -54,6 +50,26 @@ async def main(args):
         })
 
     await cluster.on_each_shard(check_cache_collections)
+
+
+async def main(args):
+    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    await cluster.check_is_mongos()
+
+    ns = {'db': args.namespace.split('.', 1)[0], 'coll': args.namespace.split('.', 1)[1]}
+
+    await clear_collection_sharding(cluster, args)
+
+    database = await cluster.configDb.databases.find_one({'_id': ns['db']})
+
+    async def check_orphaned_shards(shard_id, shard_conn):
+        if (shard_id == database['primary']):
+            return
+        logging.info(f'Clearing shard {shard_id} from leftover orphaned information')
+        shard_db = shard_conn.get_database(ns['db'])
+        await shard_db[ns['coll']].drop()
+
+    await cluster.on_each_shard(check_orphaned_shards)
 
 
 if __name__ == "__main__":
