@@ -16,6 +16,8 @@ intended usage is:
                     # The output from step (2)
                 ],
                 "MongoBinPath": "<Path where the MongoDB binaries are stored>",
+                "RemoteMongoDPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
+                "RemoteMongoSPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
                 "FeatureFlags": [ "<List of strings with feature flag names to enable>" ]
         }
   4. ./remote_control_cluster.py create <File from step (3)>
@@ -25,6 +27,7 @@ See the help for more supported commands.
 
 import argparse
 import asyncio
+import copy
 import json
 import logging
 import sys
@@ -48,9 +51,9 @@ class RemoteMongoHost(RemoteSSHHost):
         '''
         Constructs a cluster host object from host description, which is a superset of the
         description required by 'RemoteSSHHost' above. The additional fields are:
-          mongod_data_path: Path on the host to serve as a root for the MongoD service's data and
+          RemoteMongoDPath: Path on the host to serve as a root for the MongoD service's data and
             logs. Defaulted to $HOME/mongod_data.
-          mongos_data_path: Path on the host to serve as a root for the MongoS service's data and
+          RemoteMongoSPath: Path on the host to serve as a root for the MongoS service's data and
             logs. Defaulted to $HOME/mongos_data.
         '''
 
@@ -60,10 +63,10 @@ class RemoteMongoHost(RemoteSSHHost):
         default_mongos_data_path = '$HOME/mongos_data'
 
         # Populate parameter defaults
-        if 'mongod_data_path' not in self.host_desc:
-            self.host_desc['mongod_data_path'] = default_mongod_data_path
-        if 'mongos_data_path' not in self.host_desc:
-            self.host_desc['mongos_data_path'] = default_mongos_data_path
+        if 'RemoteMongoDPath' not in self.host_desc:
+            self.host_desc['RemoteMongoDPath'] = default_mongod_data_path
+        if 'RemoteMongoSPath' not in self.host_desc:
+            self.host_desc['RemoteMongoSPath'] = default_mongos_data_path
 
     async def start_mongod_instance(self, port, repl_set_name, extra_args=[]):
         '''
@@ -73,10 +76,10 @@ class RemoteMongoHost(RemoteSSHHost):
         '''
 
         await self.exec_remote_ssh_command(
-            (f'mkdir -p {self.host_desc["mongod_data_path"]} && '
+            (f'mkdir -p {self.host_desc["RemoteMongoDPath"]} && '
              f'$HOME/binaries/mongod --replSet {repl_set_name} '
-             f'--dbpath {self.host_desc["mongod_data_path"]} '
-             f'--logpath {self.host_desc["mongod_data_path"]}/mongod.log '
+             f'--dbpath {self.host_desc["RemoteMongoDPath"]} '
+             f'--logpath {self.host_desc["RemoteMongoDPath"]}/mongod.log '
              f'--port {port} '
              f'--bind_ip_all '
              f'{" ".join(extra_args)} '
@@ -90,9 +93,9 @@ class RemoteMongoHost(RemoteSSHHost):
         '''
 
         await self.exec_remote_ssh_command(
-            (f'mkdir -p {self.host_desc["mongos_data_path"]} && '
+            (f'mkdir -p {self.host_desc["RemoteMongoSPath"]} && '
              f'$HOME/binaries/mongos --configdb config/{config_server.host}:27019 '
-             f'--logpath {self.host_desc["mongos_data_path"]}/mongos.log '
+             f'--logpath {self.host_desc["RemoteMongoSPath"]}/mongos.log '
              f'--port {port} '
              f'--bind_ip_all '
              f'{" ".join(extra_args)} '
@@ -118,8 +121,22 @@ class Cluster:
         self.feature_flags = [f'--setParameter {f}=true' for f in self.config["FeatureFlags"]
                               ] if "FeatureFlags" in self.config else []
 
+        def make_remote_mongo_host_with_global_config(host_info):
+            if (isinstance(host_info, str)):
+                host_info = {'host': host_info}
+            else:
+                host_info = copy.deepcopy(host_info)
+
+            if 'RemoteMongoDPath' in self.config and not 'RemoteMongoDPath' in host_info:
+                host_info['RemoteMongoDPath'] = self.config['RemoteMongoDPath']
+            if 'RemoteMongoSPath' in self.config and not 'RemoteMongoSPath' in host_info:
+                host_info['RemoteMongoSPath'] = self.config['RemoteMongoSPath']
+
+            return RemoteMongoHost(host_info)
+
         self.available_hosts = list(
-            map(lambda host_info: RemoteMongoHost(host_info), self.config['Hosts']))
+            map(make_remote_mongo_host_with_global_config, self.config['Hosts']))
+        logging.info(f'Cluster consists of: {self.available_hosts}')
 
         # Split the cluster hosts into 3 replica sets
         self.shard0_hosts = self.available_hosts[0:3]
@@ -177,8 +194,8 @@ async def cleanup_mongo_directories(cluster):
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.exec_remote_ssh_command((f'rm -rf {host.host_desc["mongod_data_path"]} ;'
-                                              f'rm -rf {host.host_desc["mongos_data_path"]}'))))
+                host.exec_remote_ssh_command((f'rm -rf {host.host_desc["RemoteMongoDPath"]} ;'
+                                              f'rm -rf {host.host_desc["RemoteMongoSPath"]}'))))
     await asyncio.gather(*tasks)
 
 
@@ -255,10 +272,14 @@ async def start_mongos_processes(cluster):
 async def main_create(args, cluster):
     '''Implements the create command'''
 
-    yes_no('The next steps will erase all existing data on the specified hosts.')
+    if (args.force_clean_wipe_all_data):
+        yes_no('The next steps will erase all existing data on the specified hosts.')
 
     await stop_all_mongo_processes(cluster, Signals.SIGKILL)
-    await cleanup_mongo_directories(cluster)
+
+    if (args.force_clean_wipe_all_data):
+        await cleanup_mongo_directories(cluster)
+
     await install_prerequisite_packages(cluster)
     await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
     await start_mongod_processes(cluster)
@@ -344,6 +365,9 @@ if __name__ == "__main__":
     # Arguments for the 'create' command
     parser_create = subparsers.add_parser('create',
                                           help='Creates (or overwrites) a brand new cluster')
+    parser_create.add_argument(
+        '--force-clean-wipe-all-data', type=bool, default=False,
+        help='Whether to wipe out the data directories before starting the cluster')
     parser_create.set_defaults(func=main_create)
 
     # Arguments for the 'stop' command
@@ -363,11 +387,12 @@ if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     args = argsParser.parse_args()
+    logging.info(f"Starting with arguments: '{args}'")
 
     with open(args.clusterconfigfile) as f:
         cluster_config = json.load(f)
 
-    logging.info(f"Starting with configuration: '{cluster_config}'")
+    logging.info(f"Configuration: '{cluster_config}'")
     cluster = Cluster(cluster_config)
 
     loop = asyncio.get_event_loop()
