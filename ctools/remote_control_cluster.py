@@ -354,9 +354,8 @@ async def start_mongos_processes(cluster):
 async def main_create(args, cluster):
     '''Implements the create command'''
 
-    yes_no(
-        'Start creating the cluster. The next steps will erase all existing data on the specified hosts.'
-    )
+    yes_no(('Start creating the cluster from scratch.'
+            'WARNING: The next steps will erase all existing data on the specified hosts.'))
 
     await stop_mongo_processes(cluster, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster)
@@ -398,7 +397,7 @@ Cluster {cluster.name} started with:
 
 
 async def main_create_from_image(args, cluster):
-    '''Implements the create command'''
+    '''Implements the create-from-image command'''
 
     yes_no('Start creating the cluster from image.')
 
@@ -483,6 +482,20 @@ async def main_rsync(args, cluster):
     await asyncio.gather(*tasks)
 
 
+async def main_deploy_binaries(args, cluster):
+    '''Implements the deploy-binaries command'''
+
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(
+            asyncio.ensure_future(
+                host.rsync_files_to_remote(f'{args.local_path}/*', '$HOME/binaries')))
+    await asyncio.gather(*tasks)
+
+
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     argsParser.add_argument(
@@ -533,6 +546,15 @@ if __name__ == "__main__":
     parser_rsync.add_argument('--shard', nargs='?', type=str,
                               help='Limit the command to just one shard')
     parser_rsync.set_defaults(func=main_rsync)
+
+    # Arguments for the 'deploy-binaries' command
+    parser_deploy_binaries = subparsers.add_parser(
+        'deploy-binaries',
+        help='Specialisation of the rsync command which deploys binaries to a fixed path')
+    parser_deploy_binaries.add_argument('local_path', help='The local path from which to deploy')
+    parser_deploy_binaries.add_argument('--shard', nargs='?', type=str,
+                                        help='Limit the command to just one shard')
+    parser_deploy_binaries.set_defaults(func=main_deploy_binaries)
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
