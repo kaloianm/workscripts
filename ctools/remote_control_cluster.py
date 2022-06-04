@@ -139,9 +139,9 @@ class Cluster:
         logging.info(f'Cluster consists of: {self.available_hosts}')
 
         # Split the cluster hosts into 3 replica sets
-        self.shard0_hosts = self.available_hosts[0:3]
-        self.shard1_hosts = self.available_hosts[3:6]
-        self.config_server_hosts = self.available_hosts[6:9]
+        self.config_server_hosts = self.available_hosts[0:3]
+        self.shard0_hosts = self.available_hosts[3:6]
+        self.shard1_hosts = self.available_hosts[6:9]
 
     async def start_mongod_as_replica_set(self, hosts, port, repl_set_name, extra_args):
         '''
@@ -209,7 +209,8 @@ async def install_prerequisite_packages(cluster):
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.exec_remote_ssh_command('sudo apt update && sudo apt -y install libsnmp-dev')))
+                host.exec_remote_ssh_command(
+                    'sudo apt update -y && sudo apt -y install libsnmp-dev')))
     await asyncio.gather(*tasks)
 
 
@@ -311,9 +312,9 @@ async def main_create(args, cluster):
                     }
                 }))
 
+    await initiate_replica_set(cluster.config_server_hosts, 27019, 'config')
     await initiate_replica_set(cluster.shard0_hosts, 27018, 'shard0')
     await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
-    await initiate_replica_set(cluster.config_server_hosts, 27019, 'config')
 
     # MongoS instances
     await start_mongos_processes(cluster)
