@@ -11,6 +11,7 @@ sudo bash -c 'echo "ubuntu hard nproc 64000" >> /etc/security/limits.conf'
 sudo bash -c 'echo "ubuntu soft nofile 64000" >> /etc/security/limits.conf'
 sudo bash -c 'echo "ubuntu soft nproc 64000" >> /etc/security/limits.conf'
 sudo bash -c 'echo "# END USER ULIMITS BLOCK" >> /etc/security/limits.conf'
+sudo bash -c 'echo "vm.max_map_count = 262144" >> /etc/sysctl.conf'
 sudo sysctl -p
 
 ###################################################################################################
