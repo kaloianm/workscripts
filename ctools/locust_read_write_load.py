@@ -3,7 +3,7 @@
 help_string = '''
 Locust-based read/update workload
 Example usage:
- locust -f perf/steady_update_load.py --users 500 --spawn-rate 100 --autostart --web-port 8090/8091 --host hostname
+ locust -f perf/steady_update_load.py --users 500 --web-port 8090/8091 hostname
 '''
 
 import argparse
@@ -125,14 +125,13 @@ if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
+    argsParser.add_argument('host', help='The host against which to run', metavar='host', type=str)
     argsParser.add_argument('--coordinator-port',
                             help='The port on which the coordinator server will listen',
-                            metavar='coordinator-port', type=int)
+                            metavar='coordinator-port', type=int, default=9090)
     argsParser.add_argument('--web-port', help='The port on which the web server will listen',
                             metavar='web-port', type=int)
     argsParser.add_argument('--users', help='How many users to generate', metavar='users', type=int)
-    argsParser.add_argument('--host', help='The host against which to run', metavar='host',
-                            type=str)
 
     logging.info(f'Running with Python source file of {__file__}')
     args = argsParser.parse_args()
