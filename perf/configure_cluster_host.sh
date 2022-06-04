@@ -20,7 +20,7 @@ echo "Configuring required packages"
 
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update -y
-sudo apt install -y libsnmp-dev python3.9
+sudo apt install -y libsnmp-dev python3.9 python3.9-distutils fio
 
 ###################################################################################################
 echo "Configuring volumes"
