@@ -121,7 +121,23 @@ class Cluster:
         self.feature_flags = [f'--setParameter {f}=true' for f in self.config["FeatureFlags"]
                               ] if "FeatureFlags" in self.config else []
 
-        def make_remote_mongo_host_with_global_config(host_info):
+        def make_remote_mongo_host_with_global_config(host_idx_and_info):
+            '''
+            Constructs a RemoteMongoHost and populates default configuration
+            '''
+
+            host_idx = host_idx_and_info[0]
+            if (host_idx < 3):
+                shard = 'config'
+            elif (host_idx < 6):
+                shard = 'shard0'
+            elif (host_idx < 9):
+                shard = 'shard1'
+            else:
+                raise Exception('Too many hosts')
+
+            host_info = host_idx_and_info[1]
+
             if (isinstance(host_info, str)):
                 host_info = {'host': host_info}
             else:
@@ -132,11 +148,17 @@ class Cluster:
             if 'RemoteMongoSPath' in self.config and not 'RemoteMongoSPath' in host_info:
                 host_info['RemoteMongoSPath'] = self.config['RemoteMongoSPath']
 
+            host_info['shard'] = shard
+
             return RemoteMongoHost(host_info)
 
         self.available_hosts = list(
-            map(make_remote_mongo_host_with_global_config, self.config['Hosts']))
-        logging.info(f'Cluster consists of: {self.available_hosts}')
+            map(make_remote_mongo_host_with_global_config,
+                zip(range(0, len(self.config['Hosts'])), self.config['Hosts'])))
+
+        logging.info(
+            f"Cluster consists of: {list(map(lambda h: (h.host_desc['host'], h.host_desc['shard']), self.available_hosts))}"
+        )
 
         # Split the cluster hosts into 3 replica sets
         self.config_server_hosts = self.available_hosts[0:3]
@@ -169,14 +191,17 @@ class Cluster:
         await asyncio.gather(*tasks)
 
 
-async def stop_all_mongo_processes(cluster, signal):
+async def stop_mongo_processes(cluster, signal, shard=None):
     '''
     Stops processes that might have been left over from a previous run, on all nodes
     '''
 
-    logging.info('Stopping mongo processes')
+    logging.info(f"Stopping mongo processes for {shard if shard else 'all shards'}")
     tasks = []
     for host in cluster.available_hosts:
+        if shard and host.host_desc['shard'] != shard:
+            continue
+
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command(
@@ -184,14 +209,17 @@ async def stop_all_mongo_processes(cluster, signal):
     await asyncio.gather(*tasks)
 
 
-async def cleanup_mongo_directories(cluster):
+async def cleanup_mongo_directories(cluster, shard=None):
     '''
     Cleanup directories that might have been left over from a previous run, on all nodes
     '''
 
-    logging.info('Cleaning leftover directories')
+    logging.info(f"Cleaning leftover directories for {shard if shard else 'all shards'}")
     tasks = []
     for host in cluster.available_hosts:
+        if shard and host.host_desc['shard'] != shard:
+            continue
+
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command((f'rm -rf {host.host_desc["RemoteMongoDPath"]} ;'
@@ -224,6 +252,8 @@ async def start_mongod_processes(cluster):
         '--wiredTigerCacheSizeGB 11',
     ] + cluster.feature_flags
 
+    logging.info('Starting mongod processes')
+
     # Shard(s)
     tasks.append(
         asyncio.ensure_future(
@@ -254,6 +284,8 @@ async def start_mongos_processes(cluster):
     # MongoS-only parameters
     mongos_extra_parameters = [] + cluster.feature_flags
 
+    logging.info('Starting mongos processes')
+
     tasks = []
     for host in cluster.available_hosts:
         tasks.append(
@@ -273,14 +305,12 @@ async def start_mongos_processes(cluster):
 async def main_create(args, cluster):
     '''Implements the create command'''
 
-    if (args.force_clean_wipe_all_data):
-        yes_no('The next steps will erase all existing data on the specified hosts.')
+    yes_no(
+        'Start creating the cluster. The next steps will erase all existing data on the specified hosts.'
+    )
 
-    await stop_all_mongo_processes(cluster, Signals.SIGKILL)
-
-    if (args.force_clean_wipe_all_data):
-        await cleanup_mongo_directories(cluster)
-
+    await stop_mongo_processes(cluster, Signals.SIGKILL)
+    await cleanup_mongo_directories(cluster)
     await install_prerequisite_packages(cluster)
     await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
     await start_mongod_processes(cluster)
@@ -291,9 +321,9 @@ async def main_create(args, cluster):
         members
         '''
 
-        # Initiate the Replica Set
         connection_string = f'mongodb://{hosts[0].host}:{port}'
-        logging.info(f'Connecting to {connection_string} in order to initiate it as a replica set')
+        logging.info(
+            f'Connecting to {connection_string} in order to initiate it as {repl_set_name}')
 
         with MongoClient(connection_string, directConnection=True) as mongo_client:
             replica_set_members_list = list(
@@ -310,6 +340,32 @@ async def main_create(args, cluster):
                         '_id': repl_set_name,
                         'members': replica_set_members_list,
                     }
+                }))
+
+    async def force_reconfig_replica_set(hosts, port, repl_set_name):
+        '''
+        Force-reconfigures a set of 'hosts' which have been restored from exactly the same disk
+        image as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
+        '''
+
+        connection_string = f'mongodb://{hosts[0].host}:{port}'
+        logging.info(
+            f'Connecting to {connection_string} in order to force reconfig it as {repl_set_name}')
+
+        with MongoClient(connection_string, directConnection=True) as mongo_client:
+            repl_set_config = mongo_client.admin.command({'replSetGetConfig': 1})['config']
+            repl_set_config['members'] = list(
+                map(
+                    lambda id_and_host: {
+                        '_id': id_and_host[0],
+                        'host': f'{id_and_host[1].host}:{port}',
+                        'priority': 2 if id_and_host[0] == 0 else 1
+                    }, zip(range(0, len(hosts)), hosts)))
+
+            logging.info(
+                mongo_client.admin.command({
+                    'replSetReconfig': repl_set_config,
+                    'force': True
                 }))
 
     await initiate_replica_set(cluster.config_server_hosts, 27019, 'config')
@@ -346,7 +402,7 @@ Cluster {cluster.name} started with:
 async def main_stop(args, cluster):
     '''Implements the stop command'''
 
-    await stop_all_mongo_processes(cluster, args.signal)
+    await stop_mongo_processes(cluster, args.signal, args.shard)
 
 
 async def main_start(args, cluster):
@@ -354,6 +410,31 @@ async def main_start(args, cluster):
 
     await start_mongod_processes(cluster)
     await start_mongos_processes(cluster)
+
+
+async def main_run(args, cluster):
+    '''Implements the run command'''
+
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(asyncio.ensure_future(host.exec_remote_ssh_command(args.command)))
+    await asyncio.gather(*tasks)
+
+
+async def main_rsync(args, cluster):
+    '''Implements the rsync command'''
+
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(
+            asyncio.ensure_future(host.rsync_files_to_remote(args.local_pattern, args.remote_path)))
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
@@ -366,9 +447,6 @@ if __name__ == "__main__":
     # Arguments for the 'create' command
     parser_create = subparsers.add_parser('create',
                                           help='Creates (or overwrites) a brand new cluster')
-    parser_create.add_argument(
-        '--force-clean-wipe-all-data', type=bool, default=False,
-        help='Whether to wipe out the data directories before starting the cluster')
     parser_create.set_defaults(func=main_create)
 
     # Arguments for the 'stop' command
@@ -378,12 +456,32 @@ if __name__ == "__main__":
     parser_stop.add_argument(
         'signal', type=lambda x: Signals[x],
         help=f'The signal to use for terminating the processes. One of {[e.name for e in Signals]}')
+    parser_stop.add_argument('--shard', nargs='?', type=str,
+                             help='Limit the command to just one shard')
     parser_stop.set_defaults(func=main_stop)
 
     # Arguments for the 'start' command
     parser_start = subparsers.add_parser(
         'start', help='Starts all the processes of an already created cluster')
+    parser_start.add_argument('--shard', nargs='?', type=str,
+                              help='Limit the command to just one shard')
     parser_start.set_defaults(func=main_start)
+
+    # Arguments for the 'run' command
+    parser_run = subparsers.add_parser('run', help='Runs a command')
+    parser_run.add_argument('command', help='The command to run')
+    parser_run.add_argument('--shard', nargs='?', type=str,
+                            help='Limit the command to just one shard')
+    parser_run.set_defaults(func=main_run)
+
+    # Arguments for the 'rsync' command
+    parser_rsync = subparsers.add_parser('rsync',
+                                         help='Rsyncs a set of file from a local to remote path')
+    parser_rsync.add_argument('local_pattern', help='The local pattern from which to rsync')
+    parser_rsync.add_argument('remote_path', help='The remote path to which to rsync')
+    parser_rsync.add_argument('--shard', nargs='?', type=str,
+                              help='Limit the command to just one shard')
+    parser_rsync.set_defaults(func=main_rsync)
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
