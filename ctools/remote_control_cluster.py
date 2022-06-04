@@ -30,6 +30,7 @@ import asyncio
 import copy
 import json
 import logging
+import pymongo
 import sys
 
 from common import yes_no
@@ -161,7 +162,7 @@ class Cluster:
         )
 
         # Split the cluster hosts into 3 replica sets
-        self.config_server_hosts = self.available_hosts[0:3]
+        self.config_hosts = self.available_hosts[0:3]
         self.shard0_hosts = self.available_hosts[3:6]
         self.shard1_hosts = self.available_hosts[6:9]
 
@@ -242,42 +243,90 @@ async def install_prerequisite_packages(cluster):
     await asyncio.gather(*tasks)
 
 
-async def start_mongod_processes(cluster):
-    tasks = []
+async def start_config_replica_set(cluster):
+    logging.info('Starting config processes')
 
-    # Shard server-only parameters
+    config_extra_parameters = [] + cluster.feature_flags
+
+    await cluster.start_mongod_as_replica_set(cluster.config_hosts, 27019, 'config', [
+        '--configsvr',
+    ] + config_extra_parameters)
+
+
+async def start_shard_replica_set(cluster, shard_hosts, shard_name):
+    logging.info(f'Starting shard processes for {shard_name}')
+
     shard_extra_parameters = [
         '--setParameter rangeDeleterBatchSize=1000',
         '--setParameter orphanCleanupDelaySecs=0',
         '--wiredTigerCacheSizeGB 11',
     ] + cluster.feature_flags
 
-    logging.info('Starting mongod processes')
+    await cluster.start_mongod_as_replica_set(shard_hosts, 27018, shard_name, [
+        '--shardsvr',
+    ] + shard_extra_parameters)
 
-    # Shard(s)
-    tasks.append(
-        asyncio.ensure_future(
-            cluster.start_mongod_as_replica_set(cluster.shard0_hosts, 27018, 'shard0', [
-                '--shardsvr',
-            ] + shard_extra_parameters)))
 
-    tasks.append(
-        asyncio.ensure_future(
-            cluster.start_mongod_as_replica_set(cluster.shard1_hosts, 27018, 'shard1', [
-                '--shardsvr',
-            ] + shard_extra_parameters)))
+async def initiate_replica_set(hosts, port, repl_set_name):
+    '''
+    Initiates 'hosts' as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
+    '''
 
-    # Config server-only parameters
-    config_extra_parameters = [] + cluster.feature_flags
+    connection_string = f'mongodb://{hosts[0].host}:{port}'
+    logging.info(f'Connecting to {connection_string} in order to initiate it as {repl_set_name}')
 
-    # Config Server
-    tasks.append(
-        asyncio.ensure_future(
-            cluster.start_mongod_as_replica_set(cluster.config_server_hosts, 27019, 'config', [
-                '--configsvr',
-            ] + config_extra_parameters)))
+    with MongoClient(connection_string, directConnection=True) as mongo_client:
+        replica_set_members_list = list(
+            map(
+                lambda id_and_host: {
+                    '_id': id_and_host[0],
+                    'host': f'{id_and_host[1].host}:{port}',
+                    'priority': 2 if id_and_host[0] == 0 else 1
+                }, zip(range(0, len(hosts)), hosts)))
 
-    await asyncio.gather(*tasks)
+        logging.info(
+            mongo_client.admin.command(
+                {'replSetInitiate': {
+                    '_id': repl_set_name,
+                    'members': replica_set_members_list,
+                }}))
+
+
+async def force_reconfig_replica_set(hosts, port, repl_set_name):
+    '''
+    Force-reconfigures a set of 'hosts' which have been restored from exactly the same disk image
+    as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
+    '''
+
+    connection_string = f'mongodb://{hosts[0].host}:{port}'
+    logging.info(
+        f'Connecting to {connection_string} in order to force reconfig it as {repl_set_name}')
+
+    with MongoClient(connection_string, directConnection=True) as mongo_client:
+        while True:
+            try:
+                repl_set_config = mongo_client.admin.command({'replSetGetConfig': 1})['config']
+                break
+            except pymongo.errors.OperationFailure as e:
+                # 94 == NotYetInitialized
+                if e.code == 94:
+                    await asyncio.sleep(1)
+                else:
+                    raise
+
+        repl_set_config['members'] = list(
+            map(
+                lambda id_and_host: {
+                    '_id': id_and_host[0],
+                    'host': f'{id_and_host[1].host}:{port}',
+                    'priority': 2 if id_and_host[0] == 0 else 1
+                }, zip(range(0, len(hosts)), hosts)))
+
+        logging.info(
+            mongo_client.admin.command({
+                'replSetReconfig': repl_set_config,
+                'force': True
+            }))
 
 
 async def start_mongos_processes(cluster):
@@ -290,7 +339,7 @@ async def start_mongos_processes(cluster):
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.start_mongos_instance(27017, cluster.config_server_hosts[0],
+                host.start_mongos_instance(27017, cluster.config_hosts[0],
                                            mongos_extra_parameters)))
     await asyncio.gather(*tasks)
 
@@ -313,62 +362,11 @@ async def main_create(args, cluster):
     await cleanup_mongo_directories(cluster)
     await install_prerequisite_packages(cluster)
     await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
-    await start_mongod_processes(cluster)
+    await start_config_replica_set(cluster)
+    await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
+    await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
 
-    async def initiate_replica_set(hosts, port, repl_set_name):
-        '''
-        Initiates 'hosts' as a replica set with a name of 'repl_set_name' and 'hosts':'port' as
-        members
-        '''
-
-        connection_string = f'mongodb://{hosts[0].host}:{port}'
-        logging.info(
-            f'Connecting to {connection_string} in order to initiate it as {repl_set_name}')
-
-        with MongoClient(connection_string, directConnection=True) as mongo_client:
-            replica_set_members_list = list(
-                map(
-                    lambda id_and_host: {
-                        '_id': id_and_host[0],
-                        'host': f'{id_and_host[1].host}:{port}',
-                        'priority': 2 if id_and_host[0] == 0 else 1
-                    }, zip(range(0, len(hosts)), hosts)))
-
-            logging.info(
-                mongo_client.admin.command({
-                    'replSetInitiate': {
-                        '_id': repl_set_name,
-                        'members': replica_set_members_list,
-                    }
-                }))
-
-    async def force_reconfig_replica_set(hosts, port, repl_set_name):
-        '''
-        Force-reconfigures a set of 'hosts' which have been restored from exactly the same disk
-        image as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
-        '''
-
-        connection_string = f'mongodb://{hosts[0].host}:{port}'
-        logging.info(
-            f'Connecting to {connection_string} in order to force reconfig it as {repl_set_name}')
-
-        with MongoClient(connection_string, directConnection=True) as mongo_client:
-            repl_set_config = mongo_client.admin.command({'replSetGetConfig': 1})['config']
-            repl_set_config['members'] = list(
-                map(
-                    lambda id_and_host: {
-                        '_id': id_and_host[0],
-                        'host': f'{id_and_host[1].host}:{port}',
-                        'priority': 2 if id_and_host[0] == 0 else 1
-                    }, zip(range(0, len(hosts)), hosts)))
-
-            logging.info(
-                mongo_client.admin.command({
-                    'replSetReconfig': repl_set_config,
-                    'force': True
-                }))
-
-    await initiate_replica_set(cluster.config_server_hosts, 27019, 'config')
+    await initiate_replica_set(cluster.config_hosts, 27019, 'config')
     await initiate_replica_set(cluster.shard0_hosts, 27018, 'shard0')
     await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
 
@@ -393,23 +391,71 @@ async def main_create(args, cluster):
     logging.info(f'''
 Cluster {cluster.name} started with:
   MongoS: {mongos_connection_string}
-  ConfigServer: {cluster.config_server_hosts}
+  ConfigServer: {cluster.config_hosts}
   Shard0: {cluster.shard0_hosts}
   Shard1: {cluster.shard1_hosts}
 ''')
+
+
+async def main_create_from_image(args, cluster):
+    '''Implements the create command'''
+
+    yes_no('Start creating the cluster from image.')
+
+    await stop_mongo_processes(cluster, Signals.SIGTERM)
+    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
+    await start_config_replica_set(cluster)
+    await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
+    await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
+
+    await initiate_replica_set(cluster.config_hosts, 27019, 'config')
+    await force_reconfig_replica_set(cluster.shard0_hosts, 27018, 'shard0')
+    await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
+
+    # MongoS instances
+    await start_mongos_processes(cluster)
+
+    mongos_connection_string = f'mongodb://{cluster.available_hosts[0].host}'
+    logging.info(f'Connecting to {mongos_connection_string}')
+
+    mongo_client = MongoClient(mongos_connection_string)
+    logging.info(
+        mongo_client.admin.command({
+            'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
+            'name': 'shard0'
+        }))
+    logging.info(
+        mongo_client.admin.command({
+            'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
+            'name': 'shard1'
+        }))
+
+    logging.info(f'''
+Cluster {cluster.name} started with:
+  MongoS: {mongos_connection_string}
+  ConfigServer: {cluster.config_hosts}
+  Shard0: {cluster.shard0_hosts}
+  Shard1: {cluster.shard1_hosts}
+''')
+
+
+async def main_start(args, cluster):
+    '''Implements the start command'''
+
+    if not args.shard or args.shard == 'config':
+        await start_config_replica_set(cluster)
+    if not args.shard or args.shard == 'shard0':
+        await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
+    if not args.shard or args.shard == 'shard1':
+        await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
+
+    await start_mongos_processes(cluster)
 
 
 async def main_stop(args, cluster):
     '''Implements the stop command'''
 
     await stop_mongo_processes(cluster, args.signal, args.shard)
-
-
-async def main_start(args, cluster):
-    '''Implements the start command'''
-
-    await start_mongod_processes(cluster)
-    await start_mongos_processes(cluster)
 
 
 async def main_run(args, cluster):
@@ -449,6 +495,18 @@ if __name__ == "__main__":
                                           help='Creates (or overwrites) a brand new cluster')
     parser_create.set_defaults(func=main_create)
 
+    # Arguments for the 'create-from-image' command
+    parser_create_from_image = subparsers.add_parser(
+        'create-from-image', help='Creates (or overwrites) a brand new cluster from image')
+    parser_create_from_image.set_defaults(func=main_create_from_image)
+
+    # Arguments for the 'start' command
+    parser_start = subparsers.add_parser(
+        'start', help='Starts all the processes of an already created cluster')
+    parser_start.add_argument('--shard', nargs='?', type=str,
+                              help='Limit the command to just one shard')
+    parser_start.set_defaults(func=main_start)
+
     # Arguments for the 'stop' command
     parser_stop = subparsers.add_parser(
         'stop',
@@ -459,13 +517,6 @@ if __name__ == "__main__":
     parser_stop.add_argument('--shard', nargs='?', type=str,
                              help='Limit the command to just one shard')
     parser_stop.set_defaults(func=main_stop)
-
-    # Arguments for the 'start' command
-    parser_start = subparsers.add_parser(
-        'start', help='Starts all the processes of an already created cluster')
-    parser_start.add_argument('--shard', nargs='?', type=str,
-                              help='Limit the command to just one shard')
-    parser_start.set_defaults(func=main_start)
 
     # Arguments for the 'run' command
     parser_run = subparsers.add_parser('run', help='Runs a command')
