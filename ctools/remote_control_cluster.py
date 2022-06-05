@@ -257,7 +257,7 @@ async def start_shard_replica_set(cluster, shard_hosts, shard_name):
     logging.info(f'Starting shard processes for {shard_name}')
 
     shard_extra_parameters = [
-        '--setParameter rangeDeleterBatchSize=100',
+        '--setParameter rangeDeleterBatchSize=200',
         '--setParameter rangeDeleterBatchDelayMS=20',
         '--setParameter orphanCleanupDelaySecs=0',
         '--wiredTigerCacheSizeGB 11',
