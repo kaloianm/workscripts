@@ -21,3 +21,11 @@ echo "Configuring required packages"
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update -y
 sudo apt install -y libsnmp-dev python3.9 python3.9-distutils fio
+
+sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1
+sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2
+
+curl https://bootstrap.pypa.io/get-pip.py -o $HOME/get-pip.py
+python3.9 $HOME/get-pip.py
+
+git clone https://github.com/kaloianm/workscripts.git $HOME/workscripts

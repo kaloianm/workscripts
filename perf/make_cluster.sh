@@ -2,7 +2,7 @@
 set -e
 
 export SCRIPT_DIR="$(dirname "$0")"
-export MONGOVERSION=6.0
+export MONGOVERSION=6.0-EXT4
 
 aws ec2 run-instances \
     --count 3 \
@@ -52,3 +52,8 @@ aws ec2 describe-instances \
     Name=tag:mongoversion,Values=$MONGOVERSION \
     Name=tag:mongorole,Values=shard1 \
     --query "Reservations[].Instances[].PublicDnsName[]"
+
+aws ec2 describe-instances \
+    --filters Name=tag:owner,Values=kaloian.manassiev \
+    Name=tag:mongorole,Values=driver \
+    --query 'Reservations[].Instances[].{Instance:PublicDnsName, Name:Tags[?Key==`mongoversion`]}'
