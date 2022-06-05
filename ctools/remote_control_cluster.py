@@ -257,7 +257,8 @@ async def start_shard_replica_set(cluster, shard_hosts, shard_name):
     logging.info(f'Starting shard processes for {shard_name}')
 
     shard_extra_parameters = [
-        '--setParameter rangeDeleterBatchSize=1000',
+        '--setParameter rangeDeleterBatchSize=100',
+        '--setParameter rangeDeleterBatchDelayMS=20',
         '--setParameter orphanCleanupDelaySecs=0',
         '--wiredTigerCacheSizeGB 11',
     ] + cluster.feature_flags
@@ -414,7 +415,7 @@ async def main_create_from_image(args, cluster):
     # MongoS instances
     await start_mongos_processes(cluster)
 
-    mongos_connection_string = f'mongodb://{cluster.available_hosts[0].host}'
+    mongos_connection_string = f'mongodb://{cluster.config_hosts[2].host}'
     logging.info(f'Connecting to {mongos_connection_string}')
 
     mongo_client = MongoClient(mongos_connection_string)
