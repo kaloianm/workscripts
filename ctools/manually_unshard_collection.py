@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+This is a tool to unshard a collection which is already on a single shard, without downtime.
+
+See the help for more commands.
+'''
 
 import argparse
 import asyncio
@@ -73,9 +78,7 @@ async def main(args):
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description=
-        'Tool to unshard a collection which is already on a single shard without downtime')
+    argsParser = argparse.ArgumentParser(description=help_string)
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)

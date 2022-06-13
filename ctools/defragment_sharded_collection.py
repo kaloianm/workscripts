@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+This is a tool to defragment a sharded cluster in a way which minimises the rate at which the major
+shard version gets bumped in order to minimise the amount of stalls due to refresh.
+
+See the help for more commands.
+'''
 
 import argparse
 import asyncio
@@ -983,9 +989,7 @@ async def main(args):
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
-        description=
-        """Tool to defragment a sharded cluster in a way which minimises the rate at which the major
-           shard version gets bumped in order to minimise the amount of stalls due to refresh.""")
+        description=help_string)
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)

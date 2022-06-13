@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 #
 help_string = '''
-Tool to create and manipulate a MongoDB sharded cluster given SSH access to a set of hosts. The
-intended usage is:
+This is a tool to create and manipulate a MongoDB sharded cluster given SSH and MongoDB port access
+to a set of hosts. The intended usage is:
 
-  1. Create 9 instances in the AWS console
-  2. Run the following command in order to obtain the list of instances:
-       aws ec2 describe-instances \
-         --filters "Name=tag:owner,Values=kaloian.manassiev" \
-         --query "Reservations[].Instances[].PublicDnsName[]"
-  3. Create a JSON file with the following format:
+1. Use the `launch_ec2_cluster_hosts.py launch` script in order to spawn a set of hosts in EC2
+which will be used to run the MongoDB processes on.
+2. Produce a cluster description cluster.json file with the following format:
         {
                 "Name": "Test Cluster",
                 "Hosts": [
-                    # The output from step (2)
+                    # The output from step (1)
+                ],
+                "DriverHosts": [
+                    # The output from step (1)
                 ],
                 "MongoBinPath": "<Path where the MongoDB binaries are stored>",
                 "RemoteMongoDPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
                 "RemoteMongoSPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
                 "FeatureFlags": [ "<List of strings with feature flag names to enable>" ]
         }
-  4. ./remote_control_cluster.py create <File from step (3)>
+3. `remote_control_cluster.py create cluster.json`
 
-See the help for more supported commands.
+See the help for more commands.
 '''
 
 import argparse
