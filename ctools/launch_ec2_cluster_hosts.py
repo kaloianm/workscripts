@@ -58,13 +58,17 @@ git clone https://github.com/kaloianm/workscripts.git $UBUNTU_USER_HOME_DIR/work
 python3.9 -m pip install -r $UBUNTU_USER_HOME_DIR/workscripts/ctools/requirements.txt
 '''
 
-client_driver_host_configuration = any_host_configuration + '''
+
+def make_client_driver_host_configuration():
+    return any_host_configuration + f'''
 ###################################################################################################
 echo "Configuring driver host workscripts"
 ###################################################################################################
 '''
 
-cluster_host_configuration = any_host_configuration + '''
+
+def make_cluster_host_configuration(filesystem):
+    return any_host_configuration + f'''
 ###################################################################################################
 echo "Configuring shard host volumes"
 ###################################################################################################
@@ -77,9 +81,9 @@ if [ ! -e "/dev/nvme1n1p1" ]; then
   sudo parted -s /dev/nvme1n1 mklabel gpt &&
     sudo parted -s -a optimal /dev/nvme1n1 mkpart primary 0% 100%
 
-  echo "Making EXT4 filesystem ..."
+  echo "Making {filesystem} filesystem ..."
   while [ ! -e "/dev/nvme1n1p1" ]; do sleep 1; done
-  sudo mkfs -t ext4 /dev/nvme1n1p1
+  sudo mkfs -t {filesystem} /dev/nvme1n1p1
 fi
 
 echo "Mounting data volume ..."
@@ -165,7 +169,7 @@ async def main_launch(args, ec2):
         LaunchTemplate={
             'LaunchTemplateId': 'lt-042b07169886af208',
         }, TagSpecifications=make_instance_tag_specifications(args.clustertag, 'driver'),
-        UserData=client_driver_host_configuration, MinCount=1, MaxCount=1)['Instances']
+        UserData=make_client_driver_host_configuration(), MinCount=1, MaxCount=1)['Instances']
 
     # Config server instances
     config_instances = ec2.run_instances(
@@ -180,7 +184,8 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'config'),
-        UserData=cluster_host_configuration, MinCount=3, MaxCount=3)['Instances']
+        UserData=make_cluster_host_configuration(args.filesystem), MinCount=3,
+        MaxCount=3)['Instances']
 
     # Shard0 instances
     shard0_instances = ec2.run_instances(
@@ -196,8 +201,8 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard0'),
-        UserData=cluster_host_configuration, MinCount=args.shard_repl_set_nodes,
-        MaxCount=args.shard_repl_set_nodes)['Instances']
+        UserData=make_cluster_host_configuration(args.filesystem),
+        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
 
     # Shard1 instances
     shard1_instances = ec2.run_instances(
@@ -213,8 +218,8 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard1'),
-        UserData=cluster_host_configuration, MinCount=args.shard_repl_set_nodes,
-        MaxCount=args.shard_repl_set_nodes)['Instances']
+        UserData=make_cluster_host_configuration(args.filesystem),
+        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
 
     logging.info('Instances launched, now waiting for them to start running ...')
 
@@ -247,6 +252,9 @@ if __name__ == "__main__":
     parser_launch.add_argument('--shard-repl-set-nodes',
                                help='Number of nodes to use for the shard replica sets.', type=int,
                                default=3)
+    parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
+                               help='Number of nodes to use for the shard replica sets.',
+                               default='xfs')
     parser_launch.set_defaults(func=main_launch)
 
     # Arguments for the 'describe' command
