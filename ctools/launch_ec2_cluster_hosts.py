@@ -9,6 +9,7 @@ See the help for more commands.
 import argparse
 import asyncio
 import boto3
+import json
 import logging
 import sys
 
@@ -24,6 +25,9 @@ any_host_configuration = '''#!/bin/bash
 set -e
 
 export UBUNTU_USER_HOME_DIR=`getent passwd ubuntu | cut -d: -f6`
+
+sudo mkdir /mnt/data
+sudo chown ubuntu:ubuntu /mnt/data
 
 ###################################################################################################
 echo "Applying OS configuration (Home: $UBUNTU_USER_HOME_DIR)"
@@ -46,21 +50,18 @@ sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt update -y
 sudo apt install -y libsnmp-dev python3.9 python3.9-distutils fio
 
-sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1
-sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2
-
 curl https://bootstrap.pypa.io/get-pip.py -o $UBUNTU_USER_HOME_DIR/get-pip.py
 python3.9 $UBUNTU_USER_HOME_DIR/get-pip.py
 rm $UBUNTU_USER_HOME_DIR/get-pip.py
+
+git clone https://github.com/kaloianm/workscripts.git $UBUNTU_USER_HOME_DIR/workscripts
+python3.9 -m pip install -r $UBUNTU_USER_HOME_DIR/workscripts/ctools/requirements.txt
 '''
 
 client_driver_host_configuration = any_host_configuration + '''
 ###################################################################################################
 echo "Configuring driver host workscripts"
 ###################################################################################################
-
-git clone https://github.com/kaloianm/workscripts.git $UBUNTU_USER_HOME_DIR/workscripts
-python3.9 -m pip install -r $UBUNTU_USER_HOME_DIR/workscripts/ctools/requirements.txt
 '''
 
 cluster_host_configuration = any_host_configuration + '''
@@ -104,22 +105,30 @@ def make_instance_tag_specifications(cluster_tag, role):
     }]
 
 
-def describe_cluster(ec2, clustertag):
-    response = ec2.describe_instances(Filters=[{
+def describe_all_instances(ec2, clustertag=None):
+    filters = [{
         'Name': 'tag:owner',
         'Values': ['kaloian.manassiev']
     }, {
-        'Name': 'tag:mongoversion',
-        'Values': [clustertag]
-    }, {
         'Name': 'instance-state-name',
         'Values': ['running']
-    }])
+    }]
+
+    if clustertag:
+        filters.append({'Name': 'tag:mongoversion', 'Values': [clustertag]})
+
+    response = ec2.describe_instances(Filters=filters)
 
     assert ('NextToken' not in response)
     all_instances = []
     for reservation in response['Reservations']:
         all_instances += reservation['Instances']
+
+    return all_instances
+
+
+def describe_cluster(ec2, clustertag):
+    all_instances = describe_all_instances(ec2, clustertag)
 
     def filter_by_role(role):
         return list(
@@ -128,16 +137,26 @@ def describe_cluster(ec2, clustertag):
                 'Value': role
             } in x['Tags'], all_instances))
 
-    logging.info(f'Cluster: {clustertag}')
-    logging.info(f'Driver: {filter_by_role("driver")[0]["PublicDnsName"]}')
+    cluster_json = {
+        "Name":
+            clustertag,
+        "Hosts":
+            list(
+                map(lambda x: x["PublicDnsName"],
+                    filter_by_role('config') + filter_by_role('shard0') + filter_by_role('shard1'))
+            ),
+        "DriverHosts":
+            list(map(lambda x: x["PublicDnsName"], filter_by_role('driver'))),
+        "MongoBinPath":
+            "<Substitute with the local binaries path>",
+        "RemoteMongoDPath":
+            "/mnt/data/mongod",
+        "RemoteMongoSPath":
+            "/mnt/data/mongos",
+        "FeatureFlags": []
+    }
 
-    ordered_hosts_string = ',\n'.join(
-        f'    "{x["PublicDnsName"]}"'
-        for x in filter_by_role('config') + filter_by_role('shard0') + filter_by_role('shard1'))
-    logging.info(f'Cluster JSON description:\n'
-                 f'"Name": "{clustertag}",\n'
-                 f'"Hosts": [\n{ordered_hosts_string}\n],\n'
-                 f'"DriverHosts": [\n    "{filter_by_role("driver")[0]["PublicDnsName"]}"\n],\n')
+    logging.info('\n' + json.dumps(cluster_json, indent=2, separators=(', ', ': ')))
 
 
 async def main_launch(args, ec2):
@@ -161,7 +180,7 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'config'),
-        MinCount=3, MaxCount=3)['Instances']
+        UserData=cluster_host_configuration, MinCount=3, MaxCount=3)['Instances']
 
     # Shard0 instances
     shard0_instances = ec2.run_instances(
@@ -177,7 +196,8 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard0'),
-        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
+        UserData=cluster_host_configuration, MinCount=args.shard_repl_set_nodes,
+        MaxCount=args.shard_repl_set_nodes)['Instances']
 
     # Shard1 instances
     shard1_instances = ec2.run_instances(
@@ -193,7 +213,8 @@ async def main_launch(args, ec2):
                 },
             },
         ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard1'),
-        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
+        UserData=cluster_host_configuration, MinCount=args.shard_repl_set_nodes,
+        MaxCount=args.shard_repl_set_nodes)['Instances']
 
     logging.info('Instances launched, now waiting for them to start running ...')
 
@@ -202,6 +223,8 @@ async def main_launch(args, ec2):
         InstanceIds=list(
             map(lambda x: x['InstanceId'], client_driver_instances + config_instances +
                 shard0_instances + shard1_instances)))
+
+    describe_cluster(ec2, args.clustertag)
 
 
 async def main_describe(args, ec2):
