@@ -3,12 +3,13 @@
 help_string = '''
 Locust-based read/update workload
 Example usage:
- locust -f perf/steady_update_load.py --users 500 --web-port 8090/8091 hostname
+  locust_read_write_load.py --users 750 --web-port 8090 mongodb://
 '''
 
 import argparse
 import asyncio
 import logging
+import sys
 
 from common import async_start_shell_command
 from locust import User, constant_pacing, events, tag, task
@@ -114,8 +115,9 @@ async def main(args):
         asyncio.ensure_future(async_start_shell_command(coordinator_command, 'coordinator')))
 
     for i in range(0, 4):
-        worker_command = (f'locust -f {__file__} --worker --master-port {args.coordinator_port} '
-                          f'--host {args.host} ')
+        worker_command = (f'{sys.executable} -m '
+                          f'locust -f {__file__} '
+                          f'--worker --master-port {args.coordinator_port} --host {args.host} ')
         tasks.append(asyncio.ensure_future(async_start_shell_command(worker_command, 'worker')))
 
     await asyncio.gather(*tasks)
@@ -134,6 +136,7 @@ if __name__ == "__main__":
     argsParser.add_argument('--users', help='How many users to generate', metavar='users', type=int)
 
     logging.info(f'Running with Python source file of {__file__}')
+    logging.info(f'Using interpreter of {sys.executable}')
     args = argsParser.parse_args()
 
     loop = asyncio.get_event_loop()
