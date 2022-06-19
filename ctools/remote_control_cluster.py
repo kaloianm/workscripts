@@ -483,6 +483,67 @@ async def main_rsync(args, cluster):
     await asyncio.gather(*tasks)
 
 
+async def main_gather_logs(args, cluster):
+    '''Implements the gather-logs command'''
+
+    def make_host_suffix(host, process_name):
+        if host in cluster.config_hosts:
+            return f'{process_name}-CSRS-{host.host}'
+        elif host in cluster.shard0_hosts:
+            return f'{process_name}-Shard0-{host.host}'
+        elif host in cluster.shard1_hosts:
+            return f'{process_name}-Shard1-{host.host}'
+
+    # Compress MongoD logs and FTDC
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(
+            asyncio.ensure_future(
+                host.exec_remote_ssh_command((
+                    f'tar zcvf {host.host_desc["RemoteMongoDPath"]}/{make_host_suffix(host, "mongod")}.tar.gz '
+                    f'{host.host_desc["RemoteMongoDPath"]}/mongod.log* '
+                    f'{host.host_desc["RemoteMongoDPath"]}/diagnostic.data'))))
+    await asyncio.gather(*tasks)
+
+    # Compress MongoS logs and FTDC
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(
+            asyncio.ensure_future(
+                host.exec_remote_ssh_command((
+                    f'tar zcvf {host.host_desc["RemoteMongoSPath"]}/{make_host_suffix(host, "mongos")}.tar.gz '
+                    f'{host.host_desc["RemoteMongoSPath"]}/mongos.log* '
+                    f'{host.host_desc["RemoteMongoSPath"]}/mongos.diagnostic.data'))))
+    await asyncio.gather(*tasks)
+
+    # Rsync files locally (do nor rsync more than 3 at a time)
+    sem_max_concurrent_rsync = asyncio.Semaphore(3)
+
+    async def rsync_with_semaphore(host):
+        async with sem_max_concurrent_rsync:
+            await host.rsync_files_to_local(
+                f'{host.host_desc["RemoteMongoDPath"]}/{make_host_suffix(host, "mongod")}.tar.gz',
+                f'{args.local_path}/{cluster.name}/')
+            await host.rsync_files_to_local(
+                f'{host.host_desc["RemoteMongoSPath"]}/{make_host_suffix(host, "mongos")}.tar.gz',
+                f'{args.local_path}/{cluster.name}/')
+
+    tasks = []
+    for host in cluster.available_hosts:
+        if args.shard and host.host_desc['shard'] != args.shard:
+            continue
+
+        tasks.append(asyncio.ensure_future(rsync_with_semaphore(host)))
+
+    await asyncio.gather(*tasks)
+
+
 async def main_deploy_binaries(args, cluster):
     '''Implements the deploy-binaries command'''
 
@@ -547,6 +608,15 @@ if __name__ == "__main__":
     parser_rsync.add_argument('--shard', nargs='?', type=str,
                               help='Limit the command to just one shard')
     parser_rsync.set_defaults(func=main_rsync)
+
+    # Arguments for the 'gather-logs' command
+    parser_gather_logs = subparsers.add_parser(
+        'gather-logs',
+        help='Compresses and rsyncs the set of logs from the cluster to a local directory')
+    parser_gather_logs.add_argument('local_path', help='The local to which to rsync')
+    parser_gather_logs.add_argument('--shard', nargs='?', type=str,
+                                    help='Limit the command to just one shard')
+    parser_gather_logs.set_defaults(func=main_gather_logs)
 
     # Arguments for the 'deploy-binaries' command
     parser_deploy_binaries = subparsers.add_parser(

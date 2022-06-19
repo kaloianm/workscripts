@@ -54,10 +54,20 @@ class RemoteSSHHost:
 
     async def rsync_files_to_remote(self, source_pattern, destination_path):
         '''
-        Uses rsync to copy files matching 'source_pattern' to 'destination_path'
+        Uses rsync to copy files matching 'source_pattern' to 'destination_path' (on the remote host)
         '''
 
         rsync_command = (
             f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
             f'{source_pattern} {self.host_desc["ssh_username"]}@{self.host}:{destination_path}')
+        await async_start_shell_command(rsync_command, self.host)
+
+    async def rsync_files_to_local(self, destination_pattern, local_path):
+        '''
+        Uses rsync to copy files matching 'destination_pattern' (on the remote host) to 'local_path'
+        '''
+
+        rsync_command = (
+            f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
+            f'{self.host_desc["ssh_username"]}@{self.host}:{destination_pattern} {local_path}')
         await async_start_shell_command(rsync_command, self.host)
