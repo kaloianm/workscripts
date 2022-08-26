@@ -125,6 +125,10 @@ class ShardedCollection:
             splits_performed_per_shard[chunk['shard']] += len(split_keys);
 
     async def move_chunk(self, chunk, to):
+        # This error should never occur; if encountered, contact the Sharding EMEA team.
+        if to == 'logkeeperdb2-shard_0':
+            raise Exception('Moving chunks to the primary shard of buildlogs is not allowed')
+
         await self.cluster.adminDb.command({
                 'moveChunk': self.name,
                 'bounds': [chunk['min'], chunk['max']],
@@ -199,9 +203,10 @@ async def main(args):
 
     await cluster.check_balancer_is_disabled()
 
-    tags_doc = await cluster.configDb.tags.find_one({'ns': args.ns})
-    if tags_doc is not None:
-        raise Exception("There can be no zones associated with the collection to defragment")
+    # Lift the check on the presence of zones - ONLY for the logkeeper cluster
+    # tags_doc = await cluster.configDb.tags.find_one({'ns': args.ns})
+    # if tags_doc is not None:
+    #     raise Exception("There can be no zones associated with the collection to defragment")
 
     auto_splitter_doc = await cluster.configDb.settings.find_one({'_id': 'autosplit'})
     if not args.dryrun and (auto_splitter_doc is None or auto_splitter_doc['enabled']):
