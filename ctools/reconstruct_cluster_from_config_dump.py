@@ -32,6 +32,8 @@ class ToolConfiguration:
     # Class initialization. The 'args' parameter contains the parsed tool command line arguments.
     def __init__(self, args):
         self.binarypath = args.binarypath
+        self.toolbinarypath = args.toolbinarypath
+        self.mongoRestoreBinary = os.path.join(self.toolbinarypath, exe_name('mongorestore'))
         self.root = args.dir
         self.introspectRoot = os.path.join(self.root, 'introspect')
         self.clusterRoot = os.path.join(self.root, 'cluster')
@@ -39,12 +41,11 @@ class ToolConfiguration:
         self.numShards = args.numshards
         self.genData = args.gen_data
 
-        self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
-
         self.clusterIntrospectMongoDPort = 20000
         self.clusterStartingPort = 27017
 
         logging.info(f'Running cluster import with binaries located at: {self.binarypath}')
+        logging.info(f'Tool binaries at: {self.toolbinarypath}')
         logging.info(f'Config dump directory at: {self.configdump}')
         logging.info(f'Reconstruction root at: {self.root}')
         logging.info(f'Introspect directory at: {self.introspectRoot}')
@@ -405,11 +406,15 @@ if __name__ == "__main__":
     argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
                             metavar='binarypath', type=str, required=True)
     argsParser.add_argument(
-        '--dir', help='Directory in which to place the data files (will create subdirectories)',
+        '--toolbinarypath',
+        help='''Directory containing the MongoDB tools binaries (mongorestore, etc)''',
+        metavar='toolbinarypath', type=str, required=True)
+    argsParser.add_argument(
+        '--dir', help='''Directory in which to place the data files (will create subdirectories)''',
         metavar='dir', type=str, required=True)
     argsParser.add_argument(
         '--gen_data',
-        help="""Generate random data in the collection after reconstructing the cluster""",
+        help='''Generate random data in the collection after reconstructing the cluster''',
         action='store_true')
 
     # Positional arguments

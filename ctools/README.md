@@ -14,6 +14,7 @@ to a set of hosts. The intended usage is:
 1. Use the `launch_ec2_cluster_hosts.py launch` script in order to spawn a set of hosts in EC2
 which will be used to run the MongoDB processes on.
 1. Produce a cluster description cluster.json file with the following format:
+```
         {
                 "Name": "Test Cluster",
                 "Hosts": [
@@ -27,6 +28,7 @@ which will be used to run the MongoDB processes on.
                 "RemoteMongoSPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
                 "FeatureFlags": [ "<List of strings with feature flag names to enable>" ]
         }
+```
 1. `remote_control_cluster.py create cluster.json`
 
 See the help for more commands.
@@ -38,7 +40,11 @@ shard version gets bumped in order to minimise the amount of stalls due to refre
 See the help for more commands.
 
 ## [reconstruct_cluster_from_config_dump.py](https://github.com/kaloianm/workscripts/blob/master/ctools/reconstruct_cluster_from_config_dump.py#L3)
-TODO:
+This is a tool to reconstruct a locally-spawned cluster of single-shard nodes (using mtools) which
+matches the configuration of a provided config server dump and restore all the sharded collections
+as empty sharded collection with the same configuraiton.
+
+See the help for more commands.
 
 ## [manually_unshard_collection.py](https://github.com/kaloianm/workscripts/blob/master/ctools/manually_unshard_collection.py#L3)
 This is a tool to unshard a collection which is already on a single shard, without downtime.
