@@ -409,17 +409,23 @@ async def main(args):
         async def update_chunk_size_estimation(ch):
             size_label = 'defrag_collection_est_size'
             if size_label in ch:
-                return
+                return 0, 0
 
             if args.dryrun:
                 ch[size_label] = estimated_chunk_size_kb
-                return
+                return 0, 0
 
             chunk_range = [ch['min'], ch['max']]
+
+            get_data_size_begin = time.perf_counter()
             ch[size_label] = await coll.data_size_kb_from_shard(chunk_range)
+            data_size_time = time.perf_counter() - get_data_size_begin
             
             if args.write_chunk_size:
+                write_data_size_begin = time.perf_counter()
                 await coll.try_write_chunk_size(chunk_range, shard, ch[size_label])
+                update_time = time.perf_counter() - write_data_size_begin
+            return data_size_time, update_time
 
         def lookahead(iterable):
             """Pass through all values from the given iterable, augmented by the
@@ -470,8 +476,30 @@ async def main(args):
         consecutive_chunks = ChunkBatch(estimated_chunk_size_kb)
         remain_chunks = []
         last_merge_time = time.perf_counter()
+        last_loop_time = time.perf_counter()
+        loops_to_average = 1000
+        current_num_loops = 0
+
+        cummulative_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
+        single_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
 
         for c, has_more in lookahead(shard_chunks):
+            single_loop_timings['total'] = time.perf_counter() - last_loop_time
+            last_loop_time = time.perf_counter()
+            if current_num_loops > 0:
+                for item in single_loop_timings:
+                    cummulative_loop_timings[item] += single_loop_timings[item]
+                if current_num_loops == loops_to_average:
+                    for item in cummulative_loop_timings:
+                        cummulative_loop_timings[item] /= loops_to_average
+                    progress.write(f'Loop timings: {str(cummulative_loop_timings)}')
+                    cummulative_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
+                single_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
+            if current_num_loops == loops_to_average:
+                current_num_loops = 1
+            else:
+                current_num_loops += 1
+
             progress.update()
 
             if len(consecutive_chunks) == 0:
@@ -484,7 +512,9 @@ async def main(args):
                     skip_chunk = c['defrag_collection_est_size'] >= target_chunk_size_kb * 0.75
 
                 if skip_chunk or not has_more:
-                    await update_chunk_size_estimation(c)
+                    run_datasize, write_datasize = await update_chunk_size_estimation(c)
+                    single_loop_timings['run_datasize'] += run_datasize
+                    single_loop_timings['write_datasize'] += write_datasize
                     remain_chunks.append(c)
                 else:
                     consecutive_chunks.append(c)
@@ -508,14 +538,18 @@ async def main(args):
             if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size():
                 consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
-                await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                run_datasize, write_datasize = await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                single_loop_timings['run_datasize'] += run_datasize
+                single_loop_timings['write_datasize'] += write_datasize
                 remain_chunks.append(consecutive_chunks.batch[0])
                 consecutive_chunks.reset()
 
                 consecutive_chunks.append(c)
 
                 if not has_more:
-                    await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                    run_datasize, write_datasize = await update_chunk_size_estimation(consecutive_chunks.batch[0])
+                    single_loop_timings['run_datasize'] += run_datasize
+                    single_loop_timings['write_datasize'] += write_datasize
                     remain_chunks.append(consecutive_chunks.batch[0])
                     consecutive_chunks.reset()
                     
@@ -540,7 +574,9 @@ async def main(args):
             # the currently accumulated bounds via the `dataSize` command in order to decide
             # whether this run should be merged or if we should continue adding chunks to it.
             if not consecutive_chunks.trust_batch_estimation and not args.dryrun:
+                get_data_size_begin = time.perf_counter()
                 consecutive_chunks.update_size(await coll.data_size_kb_from_shard(merge_bounds))
+                single_loop_timings["run_datasize"] += time.perf_counter() - get_data_size_begin
 
             if merge_consecutive_chunks_without_size_check or not has_more:
                 pass
@@ -567,10 +603,14 @@ async def main(args):
                 if not args.dryrun:
                     try:
                         await throttle_if_necessary(last_merge_time, args.phase1_throttle_secs)
+                        merge_chunks_begin = time.perf_counter()
                         await coll.merge_chunks(consecutive_chunks.batch)
+                        single_loop_timings["run_merge"] += time.perf_counter() - merge_chunks_begin
                         if args.write_chunk_size:
+                            write_data_size_begin = time.perf_counter()
                             await coll.try_write_chunk_size(merge_bounds, shard,
                                                             consecutive_chunks.batch_size_estimation)
+                            single_loop_timings["write_datasize"] += time.perf_counter() - write_data_size_begin
                         last_merge_time = time.perf_counter()
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
@@ -590,7 +630,9 @@ async def main(args):
             if merge_consecutive_chunks_without_size_check:
                 consecutive_chunks.append(c)
                 if not has_more:
-                    await update_chunk_size_estimation(c)
+                    run_datasize, write_datasize = await update_chunk_size_estimation(c)
+                    single_loop_timings['run_datasize'] += run_datasize
+                    single_loop_timings['write_datasize'] += write_datasize
                     remain_chunks.append(c)
 
             shard_entry['num_merges_performed'] += 1
