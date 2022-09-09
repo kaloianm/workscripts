@@ -478,27 +478,29 @@ async def main(args):
         last_merge_time = time.perf_counter()
         last_loop_time = time.perf_counter()
         loops_to_average = 1000
-        current_num_loops = 0
+        current_loop_number = 0
 
         cummulative_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
         single_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
 
         for c, has_more in lookahead(shard_chunks):
             single_loop_timings['total'] = time.perf_counter() - last_loop_time
+
+            # Add last round to totals
+            for item in single_loop_timings:
+                cummulative_loop_timings[item] += single_loop_timings[item]
+            # If loops_to_average chunks have been processed, print the averages
+            if current_loop_number == loops_to_average - 1:
+                for item in cummulative_loop_timings:
+                    cummulative_loop_timings[item] /= loops_to_average
+                progress.write(f'Loop timings: {str(cummulative_loop_timings)}')
+                cummulative_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
+
+
+            # Reset per-loop state
+            single_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
+            current_loop_number = (current_loop_number + 1) % loops_to_average
             last_loop_time = time.perf_counter()
-            if current_num_loops > 0:
-                for item in single_loop_timings:
-                    cummulative_loop_timings[item] += single_loop_timings[item]
-                if current_num_loops == loops_to_average:
-                    for item in cummulative_loop_timings:
-                        cummulative_loop_timings[item] /= loops_to_average
-                    progress.write(f'Loop timings: {str(cummulative_loop_timings)}')
-                    cummulative_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
-                single_loop_timings = {"run_datasize": 0, "write_datasize": 0, "run_merge": 0, "total": 0}
-            if current_num_loops == loops_to_average:
-                current_num_loops = 1
-            else:
-                current_num_loops += 1
 
             progress.update()
 
