@@ -497,7 +497,7 @@ async def main(args):
                 If we don't trust the estimation of `consecutive_chunks` or 
                 we don't know the size of `c` this function will always return false.
                 """
-                if args.merge_batch_size is not None and len(consecutive_chunks) == args.merge_batch_size:
+                if args.merge_batch_size and len(consecutive_chunks) == args.merge_batch_size:
                     return True
                 trust_estimations = consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c
                 return (trust_estimations and
