@@ -489,18 +489,21 @@ async def main(args):
             merge_consecutive_chunks_without_size_check = False
 
             
-            def will_overflow_target_size():
+            def will_overflow_merge_cap():
                 """Returns true if merging the `consecutive_chunks` with the current one `c` will
-                produce a chunk that is 20% bigger that the target chunk size.
+                produce a chunk that is 20% bigger that the target chunk size or if we have reached
+                the user configured max number of chunks per batch.
 
                 If we don't trust the estimation of `consecutive_chunks` or 
                 we don't know the size of `c` this function will always return false.
                 """
+                if args.merge_batch_size is not None and len(consecutive_chunks) == args.merge_batch_size:
+                    return True
                 trust_estimations = consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c
                 return (trust_estimations and
                         consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20))
 
-            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size():
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_merge_cap():
                 consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
@@ -1043,6 +1046,10 @@ if __name__ == "__main__":
         metavar='phase', dest="exec_phase", type=str, default='all', choices=[
             'all', 'phase1', 'phase2', 'phase3'
         ])
+    argsParser.add_argument(
+        '--phase1_merge_batch_size', 
+        help="""Maximum number of chunks to merge in a single merge operation.""",
+        metavar='merge_batch_size', dest="merge_batch_size", type=int, required=False)
     argsParser.add_argument(
         '--phase_2_max_migrations',
         help="""Maximum number of migrations.""",
