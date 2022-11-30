@@ -74,5 +74,5 @@
 
     issueMergeRequest();
 
-    logLine(' TOTAL CHUNKS PROCESSED: ' + numChunksScanned);
+    logLine('Total chunks processed: ' + numChunksScanned);
 })()
