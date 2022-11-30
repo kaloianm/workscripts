@@ -39,6 +39,10 @@
     const config = db.getSiblingDB('config');
     const collectionDoc = config.collections.findOne({_id: NS});
     const collUUID = collectionDoc.uuid;
+
+    const totalNumChunks = config.chunks.countDocuments({uuid: collUUID});
+    logLine('Total number of chunks before merging: ' + totalNumChunks);
+
     const chunks = config.chunks.find({uuid: collUUID}).sort({min: 1}).noCursorTimeout();
 
     var chunksToMerge = [];
@@ -50,9 +54,9 @@
             const max = chunksToMerge[chunksToMerge.length - 1].max;
             const shard = chunksToMerge[0].shard;
             db.getSiblingDB("admin").runCommand({mergeChunks: NS, bounds: [min, max]});
-            logLine('MERGED ' + chunksToMerge.length + ' CHUNKS FROM ' + JSON.stringify(min) +
-                    ' TO ' + JSON.stringify(max) + ' ON SHARD ' + shard);
-            logLine('CHUNKS PROCESSED SO FAR: ' + numChunksScanned);
+            logLine('Merged ' + chunksToMerge.length + ' chunks in range [min:' +
+                    JSON.stringify(min) + ', max:' + JSON.stringify(max) + '] on shard ' + shard);
+            logLine('Remaining chunks to process: ' + (totalNumChunks - numChunksScanned));
             sleep(SLEEP_TIME_MS);
         }
         chunksToMerge = [];
