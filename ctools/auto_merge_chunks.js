@@ -82,6 +82,8 @@
 
     issueMergeRequest();
 
+    print();
+    logLine("* Completed *");
     logLine('Total chunks processed: ' + numChunksScanned);
     logLine('Total chunks merged: ' + numChunksMerged);
     logLine('Total merge operations: ' + numRangesMerged);
