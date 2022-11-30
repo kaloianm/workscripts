@@ -14,17 +14,17 @@ const SLEEP_TIME_MS = 1000;
 /* ============= DO NOT MODIFY NEXT LINES ===================== */
 
 function logLine(str) {
-    print('----------------------- [AUTO-MERGER] ' + str);
+    print('[AUTO-MERGER] ' + str);
 }
 
 if (db.version() < "6.0.3") {
-    logLine("CAN'T RUN THE SCRIPT WITH A MONGODB BIN VERSION <= 6.0.3");
-    return;
+        logLine("ERROR: Incompatible mongodb version (" + db.version() + "). The auto merger script is compatible only with versions >= 6.0.3";
+        return;
 }
 
 if (db.adminCommand({balancerStatus: 1}).mode !== 'off') {
-    logLine("CAN'T RUN AUTO-MERGER WITH BALANCING ENABLED");
-    return;
+        logLine("ERROR: The balancer is enabled. Disable the balancer before to run the auto merger script);
+        return;
 }
 
 logLine('Starting for collection ' + NS + ' - Max chunks to squash per merge request: ' +
