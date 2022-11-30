@@ -47,6 +47,8 @@
 
     var chunksToMerge = [];
     var numChunksScanned = 0;
+    var numRangesMerged = 0;
+    var numChunksMerged = 0;
 
     function issueMergeRequest() {
         if (chunksToMerge.length > 1) {
@@ -54,6 +56,8 @@
             const max = chunksToMerge[chunksToMerge.length - 1].max;
             const shard = chunksToMerge[0].shard;
             db.getSiblingDB("admin").runCommand({mergeChunks: NS, bounds: [min, max]});
+            numRangesMerged++;
+            numChunksMerged = numChunksMerged + (chunksToMerge.length - 1);
             logLine('Merged ' + chunksToMerge.length + ' chunks in range [min:' +
                     JSON.stringify(min) + ', max:' + JSON.stringify(max) + '] on shard ' + shard);
             logLine('Remaining chunks to process: ' + (totalNumChunks - numChunksScanned));
@@ -79,4 +83,7 @@
     issueMergeRequest();
 
     logLine('Total chunks processed: ' + numChunksScanned);
+    logLine('Total chunks merged: ' + numChunksMerged);
+    logLine('Total merge operations: ' + numRangesMerged);
+    logLine('Total resulting chunks: ' + config.chunks.countDocuments({uuid: collUUID}));
 })()
