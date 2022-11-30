@@ -20,17 +20,21 @@
     }
 
     if (db.version() < "6.0.3") {
-        logLine("ERROR: Incompatible mongodb version (" + db.version() + "). The auto merger script is compatible only with versions >= 6.0.3";
+        logLine("ERROR: Incompatible mongodb version (" + db.version() +
+                "). The auto merger script is compatible only with versions >= 6.0.3");
         return;
     }
 
     if (db.adminCommand({balancerStatus: 1}).mode !== 'off') {
-        logLine("ERROR: The balancer is enabled. Disable the balancer before to run the auto merger script);
+        logLine(
+            "ERROR: The balancer is enabled. Disable the balancer before to run the auto merger script");
         return;
     }
 
-    logLine('Starting for collection ' + NS + ' - Max chunks to squash per merge request: ' +
-            MAX_CHUNKS_PER_MERGE + ' - Sleep between each merge request: ' + SLEEP_TIME_MS + 'ms');
+    logLine('   Auto merging collection: ' + NS);
+    logLine('   Max chunks to squash per merge request: ' + MAX_CHUNKS_PER_MERGE);
+    logLine('   Sleep between each merge request: ' + SLEEP_TIME_MS + 'ms');
+    print();
 
     const config = db.getSiblingDB('config');
     const collectionDoc = config.collections.findOne({_id: NS});
