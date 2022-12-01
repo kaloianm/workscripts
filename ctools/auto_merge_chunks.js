@@ -50,6 +50,10 @@
     var numRangesMerged = 0;
     var numChunksMerged = 0;
 
+    /*
+     * - Issue a merge request with the lower and upper bounds from `chunksToMerge`
+     * - Clear up `chunksToMerge`
+     */
     function issueMergeRequest() {
         if (chunksToMerge.length > 1) {
             const min = chunksToMerge[0].min;
@@ -66,18 +70,32 @@
         chunksToMerge = [];
     }
 
+    /*
+     * - Call into `issueMergeRequest` (issue merge and clear `chunksToMerge`)
+     * - Add back original min chunk in `chunksToMerge` (thous allowing additional merges
+     * considering the last merged chunk)
+     */
+    function issueMergeRequestDueToFullBatch() {
+        const minChunk = chunksToMerge[0];
+        issueMergeRequest();
+        chunksToMerge.push(minChunk);
+    }
+
     while (chunks.hasNext()) {
         var chunk = chunks.next();
 
         numChunksScanned++;
 
-        if (chunksToMerge.length == MAX_CHUNKS_PER_MERGE ||
-            (chunksToMerge.length > 0 &&
-             chunksToMerge[chunksToMerge.length - 1].shard != chunk.shard)) {
+        if (chunksToMerge.length > 0 &&
+            chunksToMerge[chunksToMerge.length - 1].shard != chunk.shard) {
             issueMergeRequest();
         }
 
         chunksToMerge.push(chunk);
+
+        if (chunksToMerge.length == MAX_CHUNKS_PER_MERGE) {
+            issueMergeRequestDueToFullBatch();
+        }
     }
 
     issueMergeRequest();
