@@ -38,6 +38,11 @@
 
     const config = db.getSiblingDB('config');
     const collectionDoc = config.collections.findOne({_id: NS});
+    if (!collectionDoc) {
+        logLine("ERROR: Could not find sharded collection \'" + NS + "\'");
+        return;
+    }
+
     const collUUID = collectionDoc.uuid;
 
     const totalNumChunks = config.chunks.countDocuments({uuid: collUUID});
