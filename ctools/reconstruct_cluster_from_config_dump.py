@@ -2,15 +2,15 @@
 #
 
 import argparse
+import asyncio
+import logging
 import os
 import psutil
-import pymongo
+import random
 import shutil
 import socket
-import logging
 import subprocess
 import sys
-import random
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
@@ -165,12 +165,14 @@ class MlaunchCluster:
         self._external_process = external_process
         self._num_shards_to_start = self._introspect.num_shards if self._config.numShards is None else self._config.numShards
 
-    # Uses mlaunch to start a cluster which matches that of the config dump.
-    def start_and_restore_destination_cluster(self):
+    # Uses mlaunch to start a cluster which matches that of the config dump
+    def start_cluster(self):
         if (self._num_shards_to_start > 10):
             yes_no(
                 f'The imported configuration data contains {str(self._num_shards_to_start)} shards. Proceeding will start a large number of mongod processes.'
             )
+
+        logging.info('Starting destination cluster using mlaunch ...')
 
         # yapf: disable
         self._external_process.mlaunch('init', self._config.clusterRoot, [
@@ -186,12 +188,15 @@ class MlaunchCluster:
         # yapf: enable
 
         # Set the FCV on the cluster being reconstructed to match that of the dump
-        cluster_connection = MongoClient('localhost', config.clusterStartingPort)
-        cluster_connection.admin.command('setFeatureCompatibilityVersion', introspect.FCV)
+        cluster_connection = MongoClient('localhost', self._config.clusterStartingPort)
+        cluster_connection.admin.command('setFeatureCompatibilityVersion', self._introspect.FCV)
+
+    def restore_config_collections(self):
+        logging.info('Restoring config collections ...')
 
         # TODO: Find a better way to determine the port of the config server's primary
-        self.configServerPort = config.clusterStartingPort + (self._num_shards_to_start + 1)
-        config_server_connection = MongoClient('localhost', self.configServerPort)
+        configServerPort = self._config.clusterStartingPort + (self._num_shards_to_start + 1)
+        config_server_connection = MongoClient('localhost', configServerPort)
         self.configDb = config_server_connection.config
 
         # Snapshot the shards from mlaunch before running restore
@@ -199,11 +204,11 @@ class MlaunchCluster:
         logging.info(f'Original shards:\n{str(self._shards_from_mlaunch_snapshot)}')
         self.configDb.shards.delete_many({})
 
-        self._external_process.mongorestore_config_db_to_port(self.configServerPort)
+        self._external_process.mongorestore_config_db_to_port(configServerPort)
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the shards collection)
     def fixup_shard_ids(self):
-        logging.info('Renaming shard ids in the config.shards collection:')
+        logging.info('Renaming shard ids in the config.shards collection ...')
 
         shards_from_dump = list(self._introspect.configDb.shards.find({}).sort('_id', 1))
 
@@ -265,7 +270,9 @@ class MlaunchCluster:
                                              }])
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
-    def fixup_shard_instances(self):
+    def create_per_shard_collections(self):
+        logging.info('Creating the per-shard collections ...')
+
         for shard in self.configDb.shards.find({}):
             logging.info(f"Creating shard key indexes on shard {shard['_id']}")
 
@@ -387,6 +394,38 @@ def create_empty_work_directories(config):
     os.makedirs(config.clusterRoot)
 
 
+async def main(args):
+    # Prepare the configuration and the workspace where the instances will be started
+    config = ToolConfiguration(args)
+    create_empty_work_directories(config)
+
+    external_process = ExternalProcessManager(config)
+
+    # Read the cluster configuration from the preprocess instance and construct the new cluster
+    introspect = ClusterIntrospect(config, external_process)
+    introspect.restore()
+
+    logging.info(
+        f'Cluster contains {introspect.num_shards} shards and is running at FCV {introspect.FCV}')
+
+    if (config.numShards is not None and introspect.num_zones > 0
+            and config.numShards < introspect.num_shards):
+        raise ValueError('Cannot use `--numshards` with smaller number of shards than those in the '
+                         'dump in the case when zones are defined')
+
+    cluster = MlaunchCluster(config, introspect, external_process)
+    cluster.start_cluster()
+    cluster.restore_config_collections()
+    cluster.fixup_shard_ids()
+    cluster.fixup_routing_table()
+    cluster.create_per_shard_collections()
+
+    # Restart the cluster so it picks up the new configuration cleanly
+    cluster.restart()
+
+    cluster.generate_data()
+
+
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(
         description=
@@ -422,34 +461,10 @@ if __name__ == "__main__":
                             help='Directory containing a dump of the cluster config database',
                             metavar='configdumpdir', type=str, nargs=1)
 
-    args = argsParser.parse_args()
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
-    # Prepare the configuration and the workspace where the instances will be started
-    config = ToolConfiguration(args)
-    create_empty_work_directories(config)
+    args = argsParser.parse_args()
+    logging.info(f"Starting with arguments: '{args}'")
 
-    external_process = ExternalProcessManager(config)
-
-    # Read the cluster configuration from the preprocess instance and construct the new cluster
-    introspect = ClusterIntrospect(config, external_process)
-    introspect.restore()
-
-    logging.info(
-        f'Cluster contains {introspect.num_shards} shards and is running at FCV {introspect.FCV}')
-
-    if (config.numShards is not None and introspect.num_zones > 0
-            and config.numShards < introspect.num_shards):
-        raise ValueError('Cannot use `--numshards` with smaller number of shards than those in the '
-                         'dump in the case when zones are defined')
-
-    cluster = MlaunchCluster(config, introspect, external_process)
-    cluster.start_and_restore_destination_cluster()
-    cluster.fixup_shard_ids()
-    cluster.fixup_routing_table()
-    cluster.fixup_shard_instances()
-
-    # Restart the cluster so it picks up the new configuration cleanly
-    cluster.restart()
-
-    cluster.generate_data()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main(args))
