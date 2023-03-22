@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 #
 help_string = '''
-This is a tool to launch a set of EC2 hosts for creating a new cluster.
+This is a tool to launch a set of EC2 hosts for creating a new cluster. Relies on a default
+`region_name` being set in $HOME/.aws/config.
 
 See the help for more commands.
 '''
@@ -248,7 +249,7 @@ if __name__ == "__main__":
 
     # Arguments for the 'launch' command
     parser_launch = subparsers.add_parser(
-        'launch', help='Launches the EC2 hosts which will comprise the cluster')
+        'launch', help='Launches the EC2 hosts which will comprise the cluster.')
     parser_launch.add_argument('--shard-repl-set-nodes',
                                help='Number of nodes to use for the shard replica sets.', type=int,
                                default=3)

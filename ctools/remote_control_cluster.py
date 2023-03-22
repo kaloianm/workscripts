@@ -2,7 +2,10 @@
 #
 help_string = '''
 This is a tool to create and manipulate a MongoDB sharded cluster given SSH and MongoDB port access
-to a set of hosts. The intended usage is:
+to a set of hosts. When launching the EC2 hosts, please ensure that the machine from which they are
+being connected to has access in the inbound rules.
+
+The intended usage is:
 
 1. Use the `launch_ec2_cluster_hosts.py launch` script in order to spawn a set of hosts in EC2
 which will be used to run the MongoDB processes on.
@@ -18,7 +21,9 @@ which will be used to run the MongoDB processes on.
                 "MongoBinPath": "<Path where the MongoDB binaries are stored>",
                 "RemoteMongoDPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
                 "RemoteMongoSPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
-                "FeatureFlags": [ "<List of strings with feature flag names to enable>" ]
+                "FeatureFlags": [ "<List of strings with feature flag names to enable>" ],
+                "MongoDParameters": [ "--wiredTigerCacheSizeGB 11" ],
+                "MongoSParameters": [],
         }
 3. `remote_control_cluster.py create cluster.json`
 
@@ -121,6 +126,8 @@ class Cluster:
         self.name = self.config['Name']
         self.feature_flags = [f'--setParameter {f}=true' for f in self.config["FeatureFlags"]
                               ] if "FeatureFlags" in self.config else []
+        self.mongod_parameters = self.config['MongoDParameters'] + self.feature_flags
+        self.mongos_parameters = self.config['MongoSParameters'] + self.feature_flags
 
         def make_remote_mongo_host_with_global_config(host_idx_and_info):
             '''
@@ -246,26 +253,27 @@ async def install_prerequisite_packages(cluster):
 async def start_config_replica_set(cluster):
     logging.info('Starting config processes')
 
-    config_extra_parameters = [] + cluster.feature_flags
-
-    await cluster.start_mongod_as_replica_set(cluster.config_hosts, 27019, 'config', [
-        '--configsvr',
-    ] + config_extra_parameters)
+    await cluster.start_mongod_as_replica_set(
+        cluster.config_hosts,
+        27019,
+        'config',
+        [
+            '--configsvr',
+        ] + cluster.mongod_parameters,
+    )
 
 
 async def start_shard_replica_set(cluster, shard_hosts, shard_name):
     logging.info(f'Starting shard processes for {shard_name}')
 
-    shard_extra_parameters = [
-        '--setParameter rangeDeleterBatchSize=200',
-        '--setParameter rangeDeleterBatchDelayMS=20',
-        '--setParameter orphanCleanupDelaySecs=0',
-        '--wiredTigerCacheSizeGB 11',
-    ] + cluster.feature_flags
-
-    await cluster.start_mongod_as_replica_set(shard_hosts, 27018, shard_name, [
-        '--shardsvr',
-    ] + shard_extra_parameters)
+    await cluster.start_mongod_as_replica_set(
+        shard_hosts,
+        27018,
+        shard_name,
+        [
+            '--shardsvr',
+        ] + cluster.mongod_parameters,
+    )
 
 
 async def initiate_replica_set(hosts, port, repl_set_name):
@@ -331,17 +339,17 @@ async def force_reconfig_replica_set(hosts, port, repl_set_name):
 
 
 async def start_mongos_processes(cluster):
-    # MongoS-only parameters
-    mongos_extra_parameters = [] + cluster.feature_flags
-
     logging.info('Starting mongos processes')
 
     tasks = []
     for host in cluster.available_hosts:
         tasks.append(
             asyncio.ensure_future(
-                host.start_mongos_instance(27017, cluster.config_hosts[0],
-                                           mongos_extra_parameters)))
+                host.start_mongos_instance(
+                    27017,
+                    cluster.config_hosts[0],
+                    cluster.mongos_parameters,
+                )))
     await asyncio.gather(*tasks)
 
 
@@ -587,8 +595,9 @@ if __name__ == "__main__":
         'stop',
         help='Stops all the processes of an already created cluster using a specified signal')
     parser_stop.add_argument(
-        'signal', type=lambda x: Signals[x],
-        help=f'The signal to use for terminating the processes. One of {[e.name for e in Signals]}')
+        '--signal', type=lambda x: Signals[x],
+        help=f'The signal to use for terminating the processes. One of {[e.name for e in Signals]}',
+        default=Signals.SIGTERM)
     parser_stop.add_argument('--shard', nargs='?', type=str,
                              help='Limit the command to just one shard')
     parser_stop.set_defaults(func=main_stop)
