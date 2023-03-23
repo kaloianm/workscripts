@@ -158,10 +158,12 @@ def describe_cluster(ec2, clustertag):
             "/mnt/data/mongod",
         "RemoteMongoSPath":
             "/mnt/data/mongos",
-        "FeatureFlags": []
+        "FeatureFlags": [],
+        "MongoDParameters": ["--wiredTigerCacheSizeGB 11", ],
+        "MongoSParameters": []
     }
 
-    logging.info('\n' + json.dumps(cluster_json, indent=2, separators=(', ', ': ')))
+    return json.dumps(cluster_json, indent=2, separators=(', ', ': '))
 
 
 async def main_launch(args, ec2):
@@ -230,11 +232,15 @@ async def main_launch(args, ec2):
             map(lambda x: x['InstanceId'], client_driver_instances + config_instances +
                 shard0_instances + shard1_instances)))
 
-    describe_cluster(ec2, args.clustertag)
+    print(describe_cluster(ec2, args.clustertag))
+
+    logging.info(
+        f'To deploy binaries to cluster, now run ./remote_control_cluster.py {args.clustertag}.cluster create  ...'
+    )
 
 
 async def main_describe(args, ec2):
-    describe_cluster(ec2, args.clustertag)
+    print(describe_cluster(ec2, args.clustertag))
 
 
 if __name__ == "__main__":
