@@ -24,6 +24,10 @@ maxInteger = sys.maxsize
 minInteger = -sys.maxsize - 1
 
 
+def kb_to_bytes(kilo):
+    return int(kilo) * 1024
+
+
 def fmt_bytes(num):
     suffix = "B"
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
@@ -65,6 +69,7 @@ async def main(args):
     logging.info(f'Chunk size: {chunk_size_desc()}, document size: {fmt_bytes(args.doc_size)}')
 
     uuid_shard_key_byte_order = None
+
     if args.shard_key_type == 'uuid-little':
         uuid_shard_key_byte_order = 'little'
         logging.info(f'Will use {uuid_shard_key_byte_order} byte order for generating UUIDs')
@@ -193,21 +198,21 @@ async def main(args):
 
             gap = ((maxKey - minKey) // (num_of_docs_per_chunk + 1))
             key = minKey
-            for i in range(num_of_docs_per_chunk):
+            for _ in range(num_of_docs_per_chunk):
                 yield {'shardKey': key, long_string: long_string}
                 key += gap
                 assert key < maxKey, f'key: {key}, maxKey: {maxKey}'
 
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
-            write_chunks_entries = asyncio.ensure_future(
+            write_chunk_documents_on_config = asyncio.ensure_future(
                 cluster.configDb.chunks.insert_many(chunks_subset, ordered=False))
 
-            write_data = asyncio.ensure_future(shard_connections[shard].get_database(
-                ns['db'])[ns['coll']].insert_many(
+            write_chunk_data_on_shards = asyncio.ensure_future(
+                shard_connections[shard].get_database(ns['db'])[ns['coll']].insert_many(
                     generate_shard_data_inserts(chunks_subset), ordered=False))
 
-            await asyncio.gather(write_chunks_entries, write_data)
+            await asyncio.gather(write_chunk_documents_on_config, write_chunk_data_on_shards)
             progress.update(len(chunks_subset))
 
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
@@ -240,54 +245,81 @@ async def main(args):
 
 
 if __name__ == "__main__":
-
-    def kb_to_bytes(kilo):
-        return int(kilo) * 1024
-
     argsParser = argparse.ArgumentParser(
         description='Tool to generated a sharded collection with various degree of fragmentation')
+
     argsParser.add_argument(
-        'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
-        type=str)
-    argsParser.add_argument('--ns', help='The namespace to create', type=str)
-    argsParser.add_argument('--num-chunks', help='The number of chunks to create',
-                            dest='num_chunks', type=int)
-    argsParser.add_argument('--shard-key-type', help='The type to use for a shard key',
-                            dest='shard_key_type', type=str,
-                            choices=['integer', 'uuid-little', 'uuid-big'], default='integer')
-    argsParser.add_argument('--chunk-size-kb', help='Final chunk size (in KiB)', dest='chunk_size',
-                            type=lambda x: kb_to_bytes(x), nargs='+',
-                            default=[kb_to_bytes(16), kb_to_bytes(32)])
-    argsParser.add_argument('--doc-size-kb', help='Size of the generated documents (in KiB)',
-                            dest='doc_size', type=lambda x: kb_to_bytes(x), default=kb_to_bytes(8))
+        'uri',
+        help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
+        type=str,
+    )
+    argsParser.add_argument(
+        'ns',
+        help='The namespace to create',
+        type=str,
+    )
+    argsParser.add_argument(
+        'num_chunks',
+        help='The number of chunks to generate',
+        type=int,
+    )
+
+    argsParser.add_argument(
+        '--shard-key-type',
+        help='The type to use for a shard key',
+        dest='shard_key_type',
+        type=str,
+        choices=['integer', 'uuid-little', 'uuid-big'],
+        default='integer',
+    )
     argsParser.add_argument(
         '--fragmentation',
         help="""A number between 0 and 1 indicating the level of fragmentation of the chunks. The
            fragmentation is a measure of how likely it is that a chunk, which needs to sequentially
            follow the previous one, on the same shard, is actually not on the same shard.""",
-        dest='fragmentation', type=float, default=0.10)
+        dest='fragmentation',
+        type=float,
+        default=0.10,
+    )
+    argsParser.add_argument(
+        '--chunk-size-range-kb',
+        help='Final chunk size (in KiB)',
+        dest='chunk_size_range',
+        type=lambda x: kb_to_bytes(x),
+        nargs='+',
+        default=[kb_to_bytes(8), kb_to_bytes(16)],
+    )
+    argsParser.add_argument(
+        '--doc-size-kb',
+        help='Size of the generated documents (in KiB)',
+        dest='doc_size',
+        type=lambda x: kb_to_bytes(x),
+        default=kb_to_bytes(4),
+    )
 
     list = " ".join(sys.argv[1:])
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-    logging.info(f"Starting with parameters: '{list}'")
 
     args = argsParser.parse_args()
+    logging.info(f"Starting with arguments: '{args}'")
 
-    if len(args.chunk_size) == 1:
-        args.chunk_size_min = args.chunk_size_max = args.chunk_size[0]
-    elif len(args.chunk_size) == 2:
-        args.chunk_size_min = args.chunk_size[0]
-        args.chunk_size_max = args.chunk_size[1]
+    if len(args.chunk_size_range) == 1:
+        args.chunk_size_min = args.chunk_size_max = args.chunk_size_range[0]
+    elif len(args.chunk_size_range) == 2:
+        args.chunk_size_min = args.chunk_size_range[0]
+        args.chunk_size_max = args.chunk_size_range[1]
     else:
-        raise Exception(f'Too many chunk sizes values provided, maximum 2 allowed')
+        raise Exception(
+            f'Too many chunk sizes values provided ({len(args.chunk_size_range)}), maximum 2 allowed'
+        )
 
-    del args.chunk_size
+    del args.chunk_size_range
 
     if args.doc_size > min(args.chunk_size_min, args.chunk_size_max):
         raise Exception(
-            f'''Specified document size is too big. It needs to be smaller than the chunk size: '''
-            f'''Doc size : {fmt_bytes(args.doc_size)}, Chunk size: {chunk_size_desc()}''')
+            f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc()}.'
+        )
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main(args))
