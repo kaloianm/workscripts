@@ -7,25 +7,12 @@ being connected to has access in the inbound rules.
 
 The intended usage is:
 
-1. Use the `launch_ec2_cluster_hosts.py launch` script in order to spawn a set of hosts in EC2
-which will be used to run the MongoDB processes on.
-2. Produce a cluster description cluster.json file with the following format:
-        {
-                "Name": "Test Cluster",
-                "Hosts": [
-                    # The output from step (1)
-                ],
-                "DriverHosts": [
-                    # The output from step (1)
-                ],
-                "MongoBinPath": "<Path where the MongoDB binaries are stored>",
-                "RemoteMongoDPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
-                "RemoteMongoSPath": "<Path on the remote machine where the MongoD data/log files will be placed>",
-                "FeatureFlags": [ "<List of strings with feature flag names to enable>" ],
-                "MongoDParameters": [ "--wiredTigerCacheSizeGB 11" ],
-                "MongoSParameters": [],
-        }
-3. `remote_control_cluster.py create cluster.json`
+1. Use the `launch_ec2_cluster_hosts.py Cluster launch` script in order to spawn a set of hosts in
+   EC2 on which the MongoDB processes will run.
+2. This script will produce a cluster description Cluster.json file which contains the specific
+   hosts and will serve as an input for the `remote_control_cluster.py` utilities.
+3. Update the 'MongoBinPath' parameter in Cluster.json and run the
+   `remote_control_cluster.py create Cluster.json` command in order to launch the processes.
 
 See the help for more commands.
 '''
@@ -35,11 +22,10 @@ import asyncio
 import copy
 import json
 import logging
-import pymongo
+import motor.motor_asyncio
 import sys
 
-from common import yes_no
-from pymongo import MongoClient
+from common import yes_no, Cluster
 from remote_common import RemoteSSHHost
 from signal import Signals
 
@@ -108,7 +94,7 @@ class RemoteMongoHost(RemoteSSHHost):
              f'--fork '))
 
 
-class Cluster:
+class ClusterBuilder:
     '''
     Wraps information and common management tasks for the whole cluster
     '''
@@ -165,13 +151,31 @@ class Cluster:
                 zip(range(0, len(self.config['Hosts'])), self.config['Hosts'])))
 
         logging.info(
-            f"Cluster consists of: {list(map(lambda h: (h.host_desc['host'], h.host_desc['shard']), self.available_hosts))}"
+            f"Cluster will consist of: {list(map(lambda h: (h.host_desc['host'], h.host_desc['shard']), self.available_hosts))}"
         )
 
         # Split the cluster hosts into 3 replica sets
         self.config_hosts = self.available_hosts[0:3]
         self.shard0_hosts = self.available_hosts[3:6]
         self.shard1_hosts = self.available_hosts[6:9]
+
+    @property
+    def connection_string(self):
+        '''
+        Chooses the connection string for the cluster. It effectively selects the config server
+        hosts because they contain no load.
+        '''
+
+        return f'mongodb://{self.config_hosts[0].host}'
+
+    async def get_description(self):
+        return f'''
+Cluster {cluster.name} started with:
+  MongoS: {cluster.connection_string}
+  ConfigServer: {cluster.config_hosts}
+  Shard0: {cluster.shard0_hosts}
+  Shard1: {cluster.shard1_hosts}
+'''
 
     async def start_mongod_as_replica_set(self, hosts, port, repl_set_name, extra_args):
         '''
@@ -187,15 +191,21 @@ class Cluster:
                 asyncio.ensure_future(host.start_mongod_instance(port, repl_set_name, extra_args)))
         await asyncio.gather(*tasks)
 
-    async def rsync(self, local_pattern, remote_path):
+    async def rsync(self, local_pattern, remote_path, single_shard=None):
         '''
-        Rsyncs all the files that match 'local_pattern' to the 'remote_path' on all nodes
+        Rsyncs all the files that match 'local_pattern' to the 'remote_path' on all nodes or on a
+        single shard only
         '''
 
         tasks = []
+
         for host in self.available_hosts:
+            if single_shard and host.host_desc['shard'] != single_shard:
+                continue
+
             tasks.append(
                 asyncio.ensure_future(host.rsync_files_to_remote(local_pattern, remote_path)))
+
         await asyncio.gather(*tasks)
 
 
@@ -282,64 +292,29 @@ async def initiate_replica_set(hosts, port, repl_set_name):
     '''
 
     connection_string = f'mongodb://{hosts[0].host}:{port}'
-    logging.info(f'Connecting to {connection_string} in order to initiate it as {repl_set_name}')
+    replica_set_members = list(
+        map(
+            lambda id_and_host: {
+                '_id': id_and_host[0],
+                'host': f'{id_and_host[1].host}:{port}',
+                'priority': 2 if id_and_host[0] == 0 else 1,
+            }, zip(range(0, len(hosts)), hosts)))
 
-    with MongoClient(connection_string, directConnection=True) as mongo_client:
-        replica_set_members_list = list(
-            map(
-                lambda id_and_host: {
-                    '_id': id_and_host[0],
-                    'host': f'{id_and_host[1].host}:{port}',
-                    'priority': 2 if id_and_host[0] == 0 else 1
-                }, zip(range(0, len(hosts)), hosts)))
-
-        logging.info(
-            mongo_client.admin.command(
-                {'replSetInitiate': {
-                    '_id': repl_set_name,
-                    'members': replica_set_members_list,
-                }}))
-
-
-async def force_reconfig_replica_set(hosts, port, repl_set_name):
-    '''
-    Force-reconfigures a set of 'hosts' which have been restored from exactly the same disk image
-    as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
-    '''
-
-    connection_string = f'mongodb://{hosts[0].host}:{port}'
     logging.info(
-        f'Connecting to {connection_string} in order to force reconfig it as {repl_set_name}')
+        f'Connecting to {connection_string} in order to initiate it as {repl_set_name} with members of {replica_set_members}'
+    )
 
-    with MongoClient(connection_string, directConnection=True) as mongo_client:
-        while True:
-            try:
-                repl_set_config = mongo_client.admin.command({'replSetGetConfig': 1})['config']
-                break
-            except pymongo.errors.OperationFailure as e:
-                # 94 == NotYetInitialized
-                if e.code == 94:
-                    await asyncio.sleep(1)
-                else:
-                    raise
-
-        repl_set_config['members'] = list(
-            map(
-                lambda id_and_host: {
-                    '_id': id_and_host[0],
-                    'host': f'{id_and_host[1].host}:{port}',
-                    'priority': 2 if id_and_host[0] == 0 else 1
-                }, zip(range(0, len(hosts)), hosts)))
-
-        logging.info(
-            mongo_client.admin.command({
-                'replSetReconfig': repl_set_config,
-                'force': True
-            }))
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(connection_string, directConnection=True)
+    logging.info(await mongo_client.admin.command({
+        'replSetInitiate': {
+            '_id': repl_set_name,
+            'members': replica_set_members,
+        },
+    }))
 
 
 async def start_mongos_processes(cluster):
-    logging.info('Starting mongos processes')
+    logging.info('Starting mongos processes ...')
 
     tasks = []
     for host in cluster.available_hosts:
@@ -351,6 +326,8 @@ async def start_mongos_processes(cluster):
                     cluster.mongos_parameters,
                 )))
     await asyncio.gather(*tasks)
+
+    logging.info('Mongos processes started')
 
 
 ##################################################################################################
@@ -369,7 +346,7 @@ async def main_create(args, cluster):
     await stop_mongo_processes(cluster, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster)
     await install_prerequisite_packages(cluster)
-    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
+    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/mongo*', '$HOME/binaries')
     await start_config_replica_set(cluster)
     await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
     await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
@@ -381,70 +358,23 @@ async def main_create(args, cluster):
     # MongoS instances
     await start_mongos_processes(cluster)
 
-    mongos_connection_string = f'mongodb://{cluster.available_hosts[0].host}'
-    logging.info(f'Connecting to {mongos_connection_string}')
+    logging.info(f'Connecting to {cluster.connection_string}')
 
-    mongo_client = MongoClient(mongos_connection_string)
-    logging.info(
-        mongo_client.admin.command({
-            'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
-            'name': 'shard0'
-        }))
-    logging.info(
-        mongo_client.admin.command({
-            'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
-            'name': 'shard1'
-        }))
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(cluster.connection_string)
+    logging.info(await mongo_client.admin.command({
+        'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
+        'name': 'shard0',
+    }))
+    logging.info(await mongo_client.admin.command({
+        'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
+        'name': 'shard1',
+    }))
 
-    logging.info(f'''
-Cluster {cluster.name} started with:
-  MongoS: {mongos_connection_string}
-  ConfigServer: {cluster.config_hosts}
-  Shard0: {cluster.shard0_hosts}
-  Shard1: {cluster.shard1_hosts}
-''')
+    logging.info(await cluster.get_description())
 
 
-async def main_create_from_image(args, cluster):
-    '''Implements the create-from-image command'''
-
-    yes_no('Start creating the cluster from image.')
-
-    await stop_mongo_processes(cluster, Signals.SIGTERM)
-    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/*', '$HOME/binaries')
-    await start_config_replica_set(cluster)
-    await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
-    await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
-
-    await initiate_replica_set(cluster.config_hosts, 27019, 'config')
-    await force_reconfig_replica_set(cluster.shard0_hosts, 27018, 'shard0')
-    await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
-
-    # MongoS instances
-    await start_mongos_processes(cluster)
-
-    mongos_connection_string = f'mongodb://{cluster.config_hosts[2].host}'
-    logging.info(f'Connecting to {mongos_connection_string}')
-
-    mongo_client = MongoClient(mongos_connection_string)
-    logging.info(
-        mongo_client.admin.command({
-            'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
-            'name': 'shard0'
-        }))
-    logging.info(
-        mongo_client.admin.command({
-            'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
-            'name': 'shard1'
-        }))
-
-    logging.info(f'''
-Cluster {cluster.name} started with:
-  MongoS: {mongos_connection_string}
-  ConfigServer: {cluster.config_hosts}
-  Shard0: {cluster.shard0_hosts}
-  Shard1: {cluster.shard1_hosts}
-''')
+async def main_describe(args, cluster):
+    logging.info(await cluster.get_description())
 
 
 async def main_start(args, cluster):
@@ -481,14 +411,13 @@ async def main_run(args, cluster):
 async def main_rsync(args, cluster):
     '''Implements the rsync command'''
 
-    tasks = []
-    for host in cluster.available_hosts:
-        if args.shard and host.host_desc['shard'] != args.shard:
-            continue
+    await cluster.rsync(args.local_pattern, args.remote_path, args.shard)
 
-        tasks.append(
-            asyncio.ensure_future(host.rsync_files_to_remote(args.local_pattern, args.remote_path)))
-    await asyncio.gather(*tasks)
+
+async def main_deploy_binaries(args, cluster):
+    '''Implements the deploy-binaries command'''
+
+    await cluster.rsync(f'{cluster.config["MongoBinPath"]}/mongo*', '$HOME/binaries', args.shard)
 
 
 async def main_gather_logs(args, cluster):
@@ -552,20 +481,6 @@ async def main_gather_logs(args, cluster):
     await asyncio.gather(*tasks)
 
 
-async def main_deploy_binaries(args, cluster):
-    '''Implements the deploy-binaries command'''
-
-    tasks = []
-    for host in cluster.available_hosts:
-        if args.shard and host.host_desc['shard'] != args.shard:
-            continue
-
-        tasks.append(
-            asyncio.ensure_future(
-                host.rsync_files_to_remote(f'{args.local_path}/*', '$HOME/binaries')))
-    await asyncio.gather(*tasks)
-
-
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     argsParser.add_argument(
@@ -573,16 +488,18 @@ if __name__ == "__main__":
         help='JSON-formatted text file which contains the configuration of the cluster', type=str)
     subparsers = argsParser.add_subparsers(title='subcommands')
 
+    ###############################################################################################
     # Arguments for the 'create' command
     parser_create = subparsers.add_parser('create',
                                           help='Creates (or overwrites) a brand new cluster')
     parser_create.set_defaults(func=main_create)
 
-    # Arguments for the 'create-from-image' command
-    parser_create_from_image = subparsers.add_parser(
-        'create-from-image', help='Creates (or overwrites) a brand new cluster from image')
-    parser_create_from_image.set_defaults(func=main_create_from_image)
+    ###############################################################################################
+    # Arguments for the 'describe' command
+    parser_create = subparsers.add_parser('describe', help='Describes the nodes of a cluster')
+    parser_create.set_defaults(func=main_describe)
 
+    ###############################################################################################
     # Arguments for the 'start' command
     parser_start = subparsers.add_parser(
         'start', help='Starts all the processes of an already created cluster')
@@ -602,6 +519,7 @@ if __name__ == "__main__":
                              help='Limit the command to just one shard')
     parser_stop.set_defaults(func=main_stop)
 
+    ###############################################################################################
     # Arguments for the 'run' command
     parser_run = subparsers.add_parser('run', help='Runs a command')
     parser_run.add_argument('command', help='The command to run')
@@ -609,6 +527,7 @@ if __name__ == "__main__":
                             help='Limit the command to just one shard')
     parser_run.set_defaults(func=main_run)
 
+    ###############################################################################################
     # Arguments for the 'rsync' command
     parser_rsync = subparsers.add_parser('rsync',
                                          help='Rsyncs a set of file from a local to remote path')
@@ -618,6 +537,16 @@ if __name__ == "__main__":
                               help='Limit the command to just one shard')
     parser_rsync.set_defaults(func=main_rsync)
 
+    ###############################################################################################
+    # Arguments for the 'deploy-binaries' command
+    parser_deploy_binaries = subparsers.add_parser(
+        'deploy-binaries',
+        help='Specialisation of the rsync command which only deploys binaries from MongoBinPath')
+    parser_deploy_binaries.add_argument('--shard', nargs='?', type=str,
+                                        help='Limit the command to just one shard')
+    parser_deploy_binaries.set_defaults(func=main_deploy_binaries)
+
+    ###############################################################################################
     # Arguments for the 'gather-logs' command
     parser_gather_logs = subparsers.add_parser(
         'gather-logs',
@@ -627,14 +556,7 @@ if __name__ == "__main__":
                                     help='Limit the command to just one shard')
     parser_gather_logs.set_defaults(func=main_gather_logs)
 
-    # Arguments for the 'deploy-binaries' command
-    parser_deploy_binaries = subparsers.add_parser(
-        'deploy-binaries',
-        help='Specialisation of the rsync command which deploys binaries to a fixed path')
-    parser_deploy_binaries.add_argument('local_path', help='The local path from which to deploy')
-    parser_deploy_binaries.add_argument('--shard', nargs='?', type=str,
-                                        help='Limit the command to just one shard')
-    parser_deploy_binaries.set_defaults(func=main_deploy_binaries)
+    ###############################################################################################
 
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
@@ -644,8 +566,9 @@ if __name__ == "__main__":
     with open(args.clusterconfigfile) as f:
         cluster_config = json.load(f)
 
-    logging.info(f"Configuration: '{cluster_config}'")
-    cluster = Cluster(cluster_config)
+    logging.info(f'Configuration: {json.dumps(cluster_config, indent=2)}')
+    cluster = ClusterBuilder(cluster_config)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(args.func(args, cluster))

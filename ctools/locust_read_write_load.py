@@ -4,7 +4,7 @@ help_string = '''
 Locust-based create/read/update workload.
 
 Example usage:
-  locust_read_write_load.py --users 500 --web-port 8090 <MongoDB URI>
+  locust_read_write_load.py --users 1000 --web-port 8090 <MongoDB URI>
 '''
 
 import argparse
@@ -25,7 +25,7 @@ collection = None
 
 # Workload configurations
 min_shard_key = 0
-max_shard_key = 35000000
+max_shard_key = 34999980000
 
 
 def nanos_to_millis(nanos):
@@ -67,31 +67,44 @@ class MongoUser(User):
         self.select_shard_key()
 
     @task(10)
-    def insert_shard_key(self):
+    def select_shard_key(self):
         self.shard_key = Int64(randrange(min_shard_key, max_shard_key))
 
         start_time = perf_counter_ns()
 
-        upsert_result = collection.update_one(
-            filter={
-                'shardKey': self.shard_key,
-            },
-            update={
-                '$inc': {
-                    'updates': 1,
-                },
-            },
-            upsert=True,
-        )
-        assert (upsert_result.modified_count > 0,
-                f"Upsert for {self.shard_key} didn't result in any documents being upserted")
+        shard_key_doc = collection.find_one(filter={
+            'shardKey': self.shard_key,
+        }, )
 
-        self.environment.events.request_success.fire(
-            request_type='insert_shard_key',
-            name='insert_shard_key',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
-            response_length=0,
-        )
+        if shard_key_doc is None:
+            start_time_insert = perf_counter_ns()
+
+            upsert_result = collection.update_one(
+                filter={
+                    'shardKey': self.shard_key,
+                },
+                update={
+                    '$inc': {
+                        'updates': 1,
+                    },
+                },
+                upsert=True,
+            )
+            assert upsert_result.upserted_id is not None or upsert_result.modified_count == 1, f"Upsert for {self.shard_key} didn't result in any documents being upserted"
+
+            self.environment.events.request_success.fire(
+                request_type='insert_shard_key',
+                name='insert_shard_key',
+                response_time=nanos_to_millis(perf_counter_ns() - start_time_insert),
+                response_length=0,
+            )
+        else:
+            self.environment.events.request_success.fire(
+                request_type='find_shard_key',
+                name='find_shard_key',
+                response_time=nanos_to_millis(perf_counter_ns() - start_time),
+                response_length=0,
+            )
 
     @task(40)
     def update_by_shard_key(self):
@@ -108,8 +121,7 @@ class MongoUser(User):
             },
             upsert=False,
         )
-        assert (update_result.modified_count > 0,
-                f"Update for {self.shard_key} didn't result in any documents being updated")
+        assert update_result.modified_count > 0, f"Update for {self.shard_key} didn't result in any documents being updated"
 
         self.environment.events.request_success.fire(
             request_type='update_by_shard_key',
@@ -118,37 +130,13 @@ class MongoUser(User):
             response_length=0,
         )
 
-    @task(50)
-    def find_by_shard_key(self):
-        start_time = perf_counter_ns()
-
-        self.select_shard_key()
-
-        self.environment.events.request_success.fire(
-            request_type='find_by_shard_key',
-            name='find_by_shard_key',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
-            response_length=0,
-        )
-
-    def select_shard_key(self):
-        closest_shard_key = collection.find_one(
-            filter={
-                'shardKey': {
-                    '$gte': Int64(randrange(min_shard_key, max_shard_key)),
-                },
-            }, )
-        assert closest_shard_key is not None
-
-        self.shard_key = closest_shard_key
-
 
 async def main(args):
     logging.info(f"Starting with configuration: '{args}'")
 
     tasks = []
 
-    # Start the coordinator
+    # Launch the coordinator
     coordinator_command = (f'locust -f {__file__} '
                            f'--master --master-bind-port {args.coordinator_port} '
                            f'--users {args.users} --spawn-rate 100 --autostart '
@@ -156,16 +144,17 @@ async def main(args):
                            f'--host {args.host} '
                            f'--ns {args.ns} ')
     logging.info(coordinator_command)
-
     tasks.append(
         asyncio.ensure_future(async_start_shell_command(coordinator_command, 'coordinator')))
 
+    # Launch the workers
     for _ in range(0, 4):
         worker_command = (f'{sys.executable} -m '
                           f'locust -f {__file__} '
                           f'--worker --master-port {args.coordinator_port} '
                           f'--host {args.host} '
                           f'--ns {args.ns} ')
+        logging.info(worker_command)
         tasks.append(asyncio.ensure_future(async_start_shell_command(worker_command, 'worker')))
 
     await asyncio.gather(*tasks)
@@ -175,18 +164,45 @@ if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
-    argsParser.add_argument('host', help='The host against which to run', metavar='host', type=str)
-    argsParser.add_argument('--coordinator-port',
-                            help='The port on which the coordinator server will listen',
-                            metavar='coordinator-port', type=int, default=9090)
-    argsParser.add_argument('--web-port', help='The port on which the web server will listen',
-                            metavar='web-port', type=int)
-    argsParser.add_argument('--users', help='How many users to generate', metavar='users', type=int)
-    argsParser.add_argument('--ns', help='Namespace to use', metavar='ns', type=str, default='Perf')
+    argsParser.add_argument(
+        'host',
+        help='The host against which to run',
+        metavar='host',
+        type=str,
+    )
+    argsParser.add_argument(
+        'ns',
+        help='Namespace to use',
+        metavar='ns',
+        type=str,
+    )
+    argsParser.add_argument(
+        'users',
+        help='How many users to generate',
+        metavar='users',
+        type=int,
+    )
+
+    argsParser.add_argument(
+        '--coordinator-port',
+        help='The port on which the coordinator server will listen',
+        metavar='coordinator-port',
+        type=int,
+        default=9090,
+    )
+    argsParser.add_argument(
+        '--web-port',
+        help='The port on which the web server will listen',
+        metavar='web-port',
+        type=int,
+        default=8090,
+    )
 
     logging.info(f'Running with Python source file of {__file__}')
     logging.info(f'Using interpreter of {sys.executable}')
+
     args = argsParser.parse_args()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main(args))

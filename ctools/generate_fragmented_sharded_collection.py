@@ -321,5 +321,6 @@ if __name__ == "__main__":
             f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc()}.'
         )
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main(args))
