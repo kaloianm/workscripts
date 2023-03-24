@@ -166,7 +166,7 @@ class ClusterBuilder:
         hosts because they contain no load.
         '''
 
-        return f'mongodb://{self.config_hosts[0].host}'
+        return f'mongodb://{self.config_hosts[1].host}'
 
     async def get_description(self):
         return f'''
