@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+Tool to interpret an export of a cluster config database and construct a new cluster with exactly
+the same configuration. Requires mlaunch to be installed and in the system path.
+'''
 
 import argparse
 import asyncio
@@ -14,7 +18,7 @@ import sys
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
-from common import exe_name, yes_no
+from common.common import exe_name, yes_no
 from copy import deepcopy
 from pymongo import MongoClient
 
@@ -427,10 +431,8 @@ async def main(args):
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description=
-        'Tool to interpret an export of a cluster config database and construct a new cluster with '
-        'exactly the same configuration. Requires mlaunch to be installed and in the system path.')
+    argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     # Optional arguments
     argsParser.add_argument(
@@ -461,10 +463,9 @@ if __name__ == "__main__":
                             help='Directory containing a dump of the cluster config database',
                             metavar='configdumpdir', type=str, nargs=1)
 
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-
     args = argsParser.parse_args()
     logging.info(f"Starting with arguments: '{args}'")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main(args))

@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+Tool to generate a sharded collection with various degree of fragmentation.
+
+Use --help for more information on the supported commands.
+'''
 
 import argparse
 import asyncio
 import bson
-import json
 import logging
 import math
 import random
 import sys
 import uuid
 
-from bson.binary import UuidRepresentation
-from bson.codec_options import CodecOptions
-from common import Cluster, ShardCollectionUtil, yes_no
+from common.common import Cluster, ShardCollectionUtil
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
@@ -216,12 +218,16 @@ async def main(args):
             progress.update(len(chunks_subset))
 
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
-        progress.write('Writing chunks entries ...')
         batch_size = 1000
 
         shard_to_chunks = {}
         tasks = []
-        for c in shard_collection.generate_config_chunks(gen_chunks(args.num_chunks)):
+
+        progress.write('Generating chunk documents ...')
+        generated_chunks = shard_collection.generate_config_chunks(gen_chunks(args.num_chunks))
+
+        progress.write(f'Scheduling {generated_chunks} chunk document writes ...')
+        for c in generated_chunks:
             shard = c['shard']
             if not shard in shard_to_chunks:
                 shard_to_chunks[shard] = [c]
@@ -237,16 +243,17 @@ async def main(args):
         for s in shard_to_chunks:
             tasks.append(asyncio.ensure_future(safe_write_chunks(s, shard_to_chunks[s], progress)))
 
+        progress.write('Waiting for chunk document writes to complete ...')
         await asyncio.gather(*tasks)
-        progress.write('Chunks write completed')
+        progress.write('Chunks document writes completed')
 
     logging.info('Writing collection entry')
     await cluster.configDb.collections.insert_one(shard_collection.generate_collection_entry())
 
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description='Tool to generated a sharded collection with various degree of fragmentation')
+    argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     argsParser.add_argument(
         'uri',
@@ -296,10 +303,6 @@ if __name__ == "__main__":
         type=lambda x: kb_to_bytes(x),
         default=kb_to_bytes(4),
     )
-
-    list = " ".join(sys.argv[1:])
-
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     args = argsParser.parse_args()
     logging.info(f"Starting with arguments: '{args}'")

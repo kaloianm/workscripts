@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 #
 help_string = '''
-This is a tool to create and manipulate a MongoDB sharded cluster given SSH and MongoDB port access
-to a set of hosts. When launching the EC2 hosts, please ensure that the machine from which they are
-being connected to has access in the inbound rules.
+Tool to create and manipulate a MongoDB sharded cluster given SSH and MongoDB port access to a set
+of hosts. When launching the EC2 hosts, please ensure that the machine from which they are being
+connected to has access in the inbound rules.
 
 The intended usage is:
 
@@ -14,7 +14,7 @@ The intended usage is:
 3. Update the 'MongoBinPath' parameter in Cluster.json and run the
    `remote_control_cluster.py create Cluster.json` command in order to launch the processes.
 
-See the help for more commands.
+Use --help for more information on the supported commands.
 '''
 
 import argparse
@@ -25,8 +25,8 @@ import logging
 import motor.motor_asyncio
 import sys
 
-from common import yes_no, Cluster
-from remote_common import RemoteSSHHost
+from common.common import yes_no
+from common.remote_common import RemoteSSHHost
 from signal import Signals
 
 # Ensure that the caller is using python 3
@@ -483,6 +483,8 @@ async def main_gather_logs(args, cluster):
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
     argsParser.add_argument(
         'clusterconfigfile',
         help='JSON-formatted text file which contains the configuration of the cluster', type=str)
@@ -557,8 +559,6 @@ if __name__ == "__main__":
     parser_gather_logs.set_defaults(func=main_gather_logs)
 
     ###############################################################################################
-
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     args = argsParser.parse_args()
     logging.info(f"Starting with arguments: '{args}'")

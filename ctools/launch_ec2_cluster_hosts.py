@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 #
 help_string = '''
-This is a tool to launch a set of EC2 hosts for creating a new cluster. Relies on a default
-`region_name` being set in $HOME/.aws/config.
+Tool to launch a set of clean (in the sense without MongoDB on them) EC2 hosts which can be used for
+constructing a MongoDB cluster.
 
-See the help for more commands.
+Since it interacts with AWS, a default region_name should be set in $HOME/.aws/config and the AWS
+parameters should be specified either in the same config file or as environment variables.
+
+Use --help for more information on the supported commands.
 '''
 
 import argparse
@@ -245,6 +248,8 @@ async def main_describe(args, ec2):
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
     argsParser.add_argument(
         'clustertag', help=
         ('String with which to tag all the instances which will be spawned for this cluster so they '
@@ -268,8 +273,6 @@ if __name__ == "__main__":
     parser_describe = subparsers.add_parser(
         'describe', help='Describes all the hosts which comprise the cluster')
     parser_describe.set_defaults(func=main_describe)
-
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
     args = argsParser.parse_args()
     logging.info(f"Starting with arguments: '{args}'")

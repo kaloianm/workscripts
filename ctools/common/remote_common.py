@@ -1,8 +1,4 @@
-help_string = '''
-Set of support utilities requiredd by the remote_*.py tools.
-'''
-
-from common import async_start_shell_command
+from common.common import async_start_shell_command
 
 
 class RemoteSSHHost:

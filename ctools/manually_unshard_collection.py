@@ -3,7 +3,7 @@
 help_string = '''
 This is a tool to unshard a collection which is already on a single shard, without downtime.
 
-See the help for more commands.
+Use --help for more information on the supported commands.
 '''
 
 import argparse
@@ -12,7 +12,7 @@ import bson
 import logging
 import sys
 
-from common import Cluster, ShardCollectionUtil, yes_no
+from common.common import Cluster
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -79,6 +79,8 @@ async def main(args):
 
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
     argsParser.add_argument(
         'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
         metavar='uri', type=str)
@@ -86,11 +88,8 @@ if __name__ == "__main__":
                             metavar='namespace', type=str)
 
     args = argsParser.parse_args()
+    logging.info(f"Starting with arguments: '{args}'")
 
-    list = " ".join(sys.argv[1:])
-
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-    logging.info(f"Starting with parameters: '{list}'")
-
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main(args))
