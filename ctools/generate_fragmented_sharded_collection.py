@@ -16,6 +16,7 @@ import sys
 import uuid
 
 from common.common import Cluster, ShardCollectionUtil
+from pymongo.write_concern import WriteConcern
 from tqdm import tqdm
 
 # Ensure that the caller is using python 3
@@ -85,7 +86,7 @@ async def main(args):
     await cluster.configDb.collections.delete_one({'_id': args.ns})
     logging.info(f'Cleaned up old entries for {args.ns}')
 
-    sem = asyncio.Semaphore(10)
+    sem = asyncio.Semaphore(8)
 
     ###############################################################################################
     # Create the collection on each shard
@@ -208,11 +209,17 @@ async def main(args):
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
             write_chunk_documents_on_config = asyncio.ensure_future(
-                cluster.configDb.chunks.insert_many(chunks_subset, ordered=False))
+                cluster.configDb.chunks.with_options(write_concern=WriteConcern(w=2)).insert_many(
+                    chunks_subset,
+                    ordered=False,
+                ))
 
             write_chunk_data_on_shards = asyncio.ensure_future(
-                shard_connections[shard].get_database(ns['db'])[ns['coll']].insert_many(
-                    generate_shard_data_inserts(chunks_subset), ordered=False))
+                shard_connections[shard].get_database(
+                    ns['db'])[ns['coll']].with_options(write_concern=WriteConcern(w=2)).insert_many(
+                        generate_shard_data_inserts(chunks_subset),
+                        ordered=False,
+                    ))
 
             await asyncio.gather(write_chunk_documents_on_config, write_chunk_data_on_shards)
             progress.update(len(chunks_subset))
@@ -226,7 +233,7 @@ async def main(args):
         progress.write('Generating chunk documents ...')
         generated_chunks = shard_collection.generate_config_chunks(gen_chunks(args.num_chunks))
 
-        progress.write(f'Scheduling {generated_chunks} chunk document writes ...')
+        progress.write(f'Scheduling chunk document writes ...')
         for c in generated_chunks:
             shard = c['shard']
             if not shard in shard_to_chunks:
