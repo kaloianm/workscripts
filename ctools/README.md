@@ -3,7 +3,7 @@ The CTools package is a set of command-line tools for manipulating sharded clust
 
 Click on the links below or run the tool with `--help` for more information on how to use it.
 
-### [deframent_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/deframent_sharded_collection.py#L3)
+### [defragment_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/defragment_sharded_collection.py#L3)
 ### [generate_fragmented_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/generate_fragmented_sharded_collection.py#L3)
 ### [launch_ec2_cluster_hosts](https://github.com/kaloianm/workscripts/blob/master/ctools/launch_ec2_cluster_hosts.py#L3)
 ### [locust_read_write_load](https://github.com/kaloianm/workscripts/blob/master/ctools/locust_read_write_load.py#L3)

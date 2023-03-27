@@ -1,1 +1,1 @@
-# Placeholder file to indicate the common package
+# Placeholder file to mark that this directory is a package

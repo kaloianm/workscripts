@@ -209,19 +209,30 @@ async def main(args):
     async def safe_write_chunks(shard, chunks_subset, progress):
         async with sem:
             write_chunk_documents_on_config = asyncio.ensure_future(
-                cluster.configDb.chunks.with_options(write_concern=WriteConcern(w=2)).insert_many(
+                cluster.configDb.chunks.with_options(write_concern=WriteConcern(w=1)).insert_many(
                     chunks_subset,
                     ordered=False,
                 ))
 
             write_chunk_data_on_shards = asyncio.ensure_future(
                 shard_connections[shard].get_database(
-                    ns['db'])[ns['coll']].with_options(write_concern=WriteConcern(w=2)).insert_many(
+                    ns['db'])[ns['coll']].with_options(write_concern=WriteConcern(w=1)).insert_many(
                         generate_shard_data_inserts(chunks_subset),
                         ordered=False,
                     ))
 
-            await asyncio.gather(write_chunk_documents_on_config, write_chunk_data_on_shards)
+            try:
+                await write_chunk_documents_on_config
+            except Exception as e:
+                logging.error(f'Failed to write chunk documents batch due to {e.message}')
+                pass
+
+            try:
+                await write_chunk_data_on_shards
+            except Exception as e:
+                logging.error(f'Failed to write chunk data documents batch due to {e.message}')
+                pass
+
             progress.update(len(chunks_subset))
 
     with tqdm(total=args.num_chunks, unit=' chunks') as progress:
