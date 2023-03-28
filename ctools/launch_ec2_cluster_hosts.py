@@ -17,6 +17,8 @@ import json
 import logging
 import sys
 
+from common.common import yes_no
+
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
@@ -170,6 +172,8 @@ def describe_cluster(ec2, clustertag):
 
 
 async def main_launch(args, ec2):
+    '''Implementation of the launch command'''
+
     # Client driver instance
     client_driver_instances = ec2.run_instances(
         LaunchTemplate={
@@ -242,8 +246,22 @@ async def main_launch(args, ec2):
     )
 
 
+async def main_terminate(args, ec2):
+    '''Implementation of the terminate command'''
+    cluster_instances = list(
+        map(lambda x: x['InstanceId'], describe_all_instances(ec2, args.clustertag)))
+
+    if (len(cluster_instances) == 0):
+        raise Exception(f'No hosts found with the cluster tag {args.clustertag}')
+
+    yes_no(f'About to terminate {len(cluster_instances)} instances')
+    ec2.terminate_instances(InstanceIds=cluster_instances)
+
+
 async def main_describe(args, ec2):
-    print(describe_cluster(ec2, args.clustertag))
+    '''Implementation of the describe command'''
+    cluster_desc = describe_cluster(ec2, args.clustertag)
+    print(cluster_desc)
 
 
 if __name__ == "__main__":
@@ -258,6 +276,7 @@ if __name__ == "__main__":
 
     subparsers = argsParser.add_subparsers(title='subcommands')
 
+    ###############################################################################################
     # Arguments for the 'launch' command
     parser_launch = subparsers.add_parser(
         'launch', help='Launches the EC2 hosts which will comprise the cluster.')
@@ -269,6 +288,13 @@ if __name__ == "__main__":
                                default='xfs')
     parser_launch.set_defaults(func=main_launch)
 
+    ###############################################################################################
+    # Arguments for the 'terminate' command
+    parser_launch = subparsers.add_parser('terminate',
+                                          help='Terminates the EC2 hosts for a cluster.')
+    parser_launch.set_defaults(func=main_terminate)
+
+    ###############################################################################################
     # Arguments for the 'describe' command
     parser_describe = subparsers.add_parser(
         'describe', help='Describes all the hosts which comprise the cluster')
