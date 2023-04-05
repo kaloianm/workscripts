@@ -256,7 +256,8 @@ async def install_prerequisite_packages(cluster):
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command(
-                    'sudo apt update -y && sudo apt -y install libsnmp-dev')))
+                    'sudo apt -y update && sudo apt -y install libsnmp-dev'))
+        )
     await asyncio.gather(*tasks)
 
 
