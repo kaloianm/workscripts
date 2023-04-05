@@ -15,7 +15,7 @@ import sys
 
 from common.remote_common import async_start_shell_command
 from bson import Int64
-from locust import User, constant_pacing, events, tag, task
+from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
 from random import randrange
 from time import perf_counter_ns
@@ -25,8 +25,8 @@ mongo_client = None
 collection = None
 
 # Workload configurations
-min_shard_key = 0
-max_shard_key = 34999980000
+MIN_SHARD_KEY = 0
+MAX_SHARD_KEY = 34999980000
 
 
 def nanos_to_millis(nanos):
@@ -43,8 +43,8 @@ def on_locust_init(environment, **kwargs):
     global connection_string
     connection_string = 'mongodb://localhost' if environment.host is None else environment.host
 
-    logging.info('Starting run with a MongoDB host of ', connection_string)
-    logging.info('Collection: ', environment.parsed_options.ns)
+    logging.info(f'Starting run with a MongoDB host of {connection_string}')
+    logging.info(f'Collection {environment.parsed_options.ns}')
 
     ns = {
         'db': environment.parsed_options.ns.split('.', 1)[0],
@@ -69,13 +69,15 @@ class MongoUser(User):
 
     @task(10)
     def select_shard_key(self):
-        self.shard_key = Int64(randrange(min_shard_key, max_shard_key))
+        self.shard_key = Int64(randrange(MIN_SHARD_KEY, MAX_SHARD_KEY))
 
         start_time = perf_counter_ns()
 
-        shard_key_doc = collection.find_one(filter={
-            'shardKey': self.shard_key,
-        }, )
+        shard_key_doc = collection.with_options(
+            read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+                filter={
+                    'shardKey': self.shard_key,
+                }, )
 
         if shard_key_doc is None:
             start_time_insert = perf_counter_ns()
