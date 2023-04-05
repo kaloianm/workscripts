@@ -16,6 +16,7 @@ import sys
 import uuid
 
 from common.common import Cluster, ShardCollectionUtil
+from common.version import CTOOLS_VERSION
 from pymongo.write_concern import WriteConcern
 from tqdm import tqdm
 
@@ -224,13 +225,13 @@ async def main(args):
             try:
                 await write_chunk_documents_on_config
             except Exception as e:
-                logging.error(f'Failed to write chunk documents batch due to {e.message}')
+                logging.error(f'Failed to write chunk documents batch due to {e}')
                 pass
 
             try:
                 await write_chunk_data_on_shards
             except Exception as e:
-                logging.error(f'Failed to write chunk data documents batch due to {e.message}')
+                logging.error(f'Failed to write chunk data documents batch due to {e}')
                 pass
 
             progress.update(len(chunks_subset))
@@ -323,7 +324,7 @@ if __name__ == "__main__":
     )
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     if len(args.chunk_size_range) == 1:
         args.chunk_size_min = args.chunk_size_max = args.chunk_size_range[0]

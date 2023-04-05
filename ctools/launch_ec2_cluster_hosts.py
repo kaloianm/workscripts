@@ -18,6 +18,7 @@ import logging
 import sys
 
 from common.common import yes_no
+from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -301,7 +302,7 @@ if __name__ == "__main__":
     parser_describe.set_defaults(func=main_describe)
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     ec2 = boto3.client('ec2')
 

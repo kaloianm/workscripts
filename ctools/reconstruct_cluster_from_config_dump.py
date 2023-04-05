@@ -19,6 +19,7 @@ import sys
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
 from common.common import exe_name, yes_no
+from common.version import CTOOLS_VERSION
 from copy import deepcopy
 from pymongo import MongoClient
 
@@ -464,7 +465,7 @@ if __name__ == "__main__":
                             metavar='configdumpdir', type=str, nargs=1)
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

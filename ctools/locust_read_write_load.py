@@ -14,6 +14,7 @@ import logging
 import sys
 
 from common.remote_common import async_start_shell_command
+from common.version import CTOOLS_VERSION
 from bson import Int64
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
@@ -201,10 +202,10 @@ if __name__ == "__main__":
         default=8090,
     )
 
+    args = argsParser.parse_args()
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
     logging.info(f'Running with Python source file of {__file__}')
     logging.info(f'Using interpreter of {sys.executable}')
-
-    args = argsParser.parse_args()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

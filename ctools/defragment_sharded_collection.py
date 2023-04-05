@@ -17,6 +17,7 @@ import time
 import pickle
 
 from common.common import Cluster, yes_no
+from common.version import CTOOLS_VERSION
 from pymongo import errors as pymongo_errors
 from tqdm import tqdm
 
@@ -964,7 +965,7 @@ async def main(args):
 
         shard_entry = await coll.cluster.configDb.shards.find_one({'_id': shard})
         if shard_entry is None:
-            raise Exception(f"cannot resolve shard {chunk['shard']}")
+            raise Exception(f'Cannot resolve shard {shard}')
 
         conn = await coll.cluster.make_direct_shard_connection(shard_entry)
         last_split_time = time.perf_counter()
@@ -1118,7 +1119,7 @@ if __name__ == "__main__":
         metavar='secs', dest='phase3_throttle_secs', type=float, default=0)
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

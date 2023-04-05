@@ -27,6 +27,7 @@ import sys
 
 from common.common import yes_no
 from common.remote_common import RemoteSSHHost
+from common.version import CTOOLS_VERSION
 from signal import Signals
 
 # Ensure that the caller is using python 3
@@ -256,8 +257,7 @@ async def install_prerequisite_packages(cluster):
         tasks.append(
             asyncio.ensure_future(
                 host.exec_remote_ssh_command(
-                    'sudo apt -y update && sudo apt -y install libsnmp-dev'))
-        )
+                    'sudo apt -y update && sudo apt -y install libsnmp-dev')))
     await asyncio.gather(*tasks)
 
 
@@ -562,7 +562,7 @@ if __name__ == "__main__":
     ###############################################################################################
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     with open(args.clusterconfigfile) as f:
         cluster_config = json.load(f)

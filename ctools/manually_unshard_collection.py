@@ -13,6 +13,7 @@ import logging
 import sys
 
 from common.common import Cluster
+from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
 if (sys.version_info[0] < 3):
@@ -88,7 +89,7 @@ if __name__ == "__main__":
                             metavar='namespace', type=str)
 
     args = argsParser.parse_args()
-    logging.info(f"Starting with arguments: '{args}'")
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
