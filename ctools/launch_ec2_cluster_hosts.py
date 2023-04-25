@@ -28,13 +28,10 @@ if (sys.version_info[0] < 3):
 # Host configuration scripts. Their output will show up in /var/log/cloud-init-output.log.
 #
 
-any_host_configuration = '''#!/bin/bash
+ANY_HOST_CONFIGURATION = '''#!/bin/bash
 set -e
 
 export UBUNTU_USER_HOME_DIR=`getent passwd ubuntu | cut -d: -f6`
-
-sudo mkdir /mnt/data
-sudo chown ubuntu:ubuntu /mnt/data
 
 ###################################################################################################
 echo "Applying OS configuration (Home: $UBUNTU_USER_HOME_DIR)"
@@ -66,18 +63,18 @@ python3.9 -m pip install -r $UBUNTU_USER_HOME_DIR/workscripts/ctools/requirement
 '''
 
 
-def make_client_driver_host_configuration():
-    return any_host_configuration + f'''
+def make_client_driver_host_configuration(clustertag):
+    return ANY_HOST_CONFIGURATION + f'''
 ###################################################################################################
-echo "Configuring driver host workscripts"
+echo "Configuring driver host workscripts for {clustertag}"
 ###################################################################################################
 '''
 
 
-def make_cluster_host_configuration(filesystem):
-    return any_host_configuration + f'''
+def make_cluster_host_configuration(clustertag, filesystem):
+    return ANY_HOST_CONFIGURATION + f'''
 ###################################################################################################
-echo "Configuring shard host volumes"
+echo "Configuring shard host volumes for {clustertag}"
 ###################################################################################################
 
 echo "Waiting for data volume to be attached ..."
@@ -94,18 +91,26 @@ if [ ! -e "/dev/nvme1n1p1" ]; then
 fi
 
 echo "Mounting data volume ..."
+sudo mkdir /mnt/data
 sudo mount /dev/nvme1n1p1 /mnt/data
-sudo chown ubuntu:ubuntu /mnt/data
+sudo chown -R ubuntu:ubuntu /mnt/data
+
+echo "Data volume mounted, persisting mount point so it survives reboots ..."
+if [ -z $(grep "/mnt/data" "/etc/fstab") ]; then echo $(cat "/proc/mounts" | grep "/mnt/data") >> /etc/fstab; fi
+
+echo "Completed configuration for {clustertag} !"
 '''
 
 
-def make_instance_tag_specifications(cluster_tag, role):
+def make_instance_tag_specifications(clustertag, role):
+    '''Instantiates an AWS instance tag specification for the specified cluster node'''
+
     return [{
         'ResourceType':
             'instance',
         'Tags': [{
             'Key': 'mongoversion',
-            'Value': cluster_tag
+            'Value': clustertag
         }, {
             'Key': 'mongorole',
             'Value': role
@@ -116,7 +121,9 @@ def make_instance_tag_specifications(cluster_tag, role):
     }]
 
 
-def describe_all_instances(ec2, clustertag=None):
+def describe_all_instances(ec2, clustertag):
+    '''Issues a query to describe all running instances with the specified cluster tag'''
+
     filters = [{
         'Name': 'tag:owner',
         'Values': ['kaloian.manassiev']
@@ -145,7 +152,7 @@ def describe_cluster(ec2, clustertag):
         return list(
             filter(lambda x: {
                 'Key': 'mongorole',
-                'Value': role
+                'Value': role,
             } in x['Tags'], all_instances))
 
     cluster_json = {
@@ -166,7 +173,7 @@ def describe_cluster(ec2, clustertag):
             "/mnt/data/mongos",
         "FeatureFlags": [],
         "MongoDParameters": ["--wiredTigerCacheSizeGB 11", ],
-        "MongoSParameters": []
+        "MongoSParameters": [],
     }
 
     return json.dumps(cluster_json, indent=2, separators=(', ', ': '))
@@ -175,62 +182,61 @@ def describe_cluster(ec2, clustertag):
 async def main_launch(args, ec2):
     '''Implementation of the launch command'''
 
-    # Client driver instance
+    ##############################################################################################
+    # DRIVER INSTANCES
+
     client_driver_instances = ec2.run_instances(
         LaunchTemplate={
             'LaunchTemplateId': 'lt-042b07169886af208',
-        }, TagSpecifications=make_instance_tag_specifications(args.clustertag, 'driver'),
-        UserData=make_client_driver_host_configuration(), MinCount=1, MaxCount=1)['Instances']
+        },
+        InstanceType='m5.2xlarge',
+        TagSpecifications=make_instance_tag_specifications(args.clustertag, 'driver'),
+        UserData=make_client_driver_host_configuration(args.clustertag),
+        MinCount=1,
+        MaxCount=1,
+    )['Instances']
 
-    # Config server instances
+    ##############################################################################################
+    # SHARD INSTANCES
+
+    cluster_node_block_device_mappings = [
+        {
+            'DeviceName': '/dev/sdf',
+            'Ebs': {
+                'VolumeType': 'gp3',
+                'VolumeSize': 1500,
+                'Iops': 6000
+            },
+        },
+    ]
+
+    # Config instances
     config_instances = ec2.run_instances(
         LaunchTemplate={
             'LaunchTemplateId': 'lt-042b07169886af208',
-        }, BlockDeviceMappings=[
-            {
-                'DeviceName': '/dev/sdf',
-                'Ebs': {
-                    'VolumeType': 'gp3',
-                    'VolumeSize': 256,
-                },
-            },
-        ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'config'),
-        UserData=make_cluster_host_configuration(args.filesystem), MinCount=3,
-        MaxCount=3)['Instances']
+        },
+        InstanceType='m5.2xlarge',
+        BlockDeviceMappings=cluster_node_block_device_mappings,
+        TagSpecifications=make_instance_tag_specifications(args.clustertag, 'config'),
+        UserData=make_cluster_host_configuration(args.clustertag, args.filesystem),
+        MinCount=3,
+        MaxCount=3,
+    )['Instances']
 
-    # Shard0 instances
-    shard0_instances = ec2.run_instances(
-        LaunchTemplate={
-            'LaunchTemplateId': 'lt-042b07169886af208',
-        }, BlockDeviceMappings=[
-            {
-                'DeviceName': '/dev/sdf',
-                'Ebs': {
-                    'VolumeType': 'gp3',
-                    'VolumeSize': 1500,
-                    'Iops': 3000
-                },
+    # Shard(s) instances
+    shard_instances = []
+    for shard_id in ['shard0', 'shard1']:
+        shard_instances += ec2.run_instances(
+            LaunchTemplate={
+                'LaunchTemplateId': 'lt-042b07169886af208',
             },
-        ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard0'),
-        UserData=make_cluster_host_configuration(args.filesystem),
-        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
-
-    # Shard1 instances
-    shard1_instances = ec2.run_instances(
-        LaunchTemplate={
-            'LaunchTemplateId': 'lt-042b07169886af208',
-        }, BlockDeviceMappings=[
-            {
-                'DeviceName': '/dev/sdf',
-                'Ebs': {
-                    'VolumeType': 'gp3',
-                    'VolumeSize': 1500,
-                    'Iops': 3000
-                },
-            },
-        ], TagSpecifications=make_instance_tag_specifications(args.clustertag, 'shard1'),
-        UserData=make_cluster_host_configuration(args.filesystem),
-        MinCount=args.shard_repl_set_nodes, MaxCount=args.shard_repl_set_nodes)['Instances']
+            InstanceType='m5.2xlarge',
+            BlockDeviceMappings=cluster_node_block_device_mappings,
+            TagSpecifications=make_instance_tag_specifications(args.clustertag, shard_id),
+            UserData=make_cluster_host_configuration(args.clustertag, args.filesystem),
+            MinCount=args.shard_repl_set_nodes,
+            MaxCount=args.shard_repl_set_nodes,
+        )['Instances']
 
     logging.info('Instances launched, now waiting for them to start running ...')
 
@@ -238,7 +244,7 @@ async def main_launch(args, ec2):
     waiter.wait(
         InstanceIds=list(
             map(lambda x: x['InstanceId'], client_driver_instances + config_instances +
-                shard0_instances + shard1_instances)))
+                shard_instances)))
 
     print(describe_cluster(ec2, args.clustertag))
 
@@ -304,8 +310,8 @@ if __name__ == "__main__":
     args = argsParser.parse_args()
     logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
-    ec2 = boto3.client('ec2')
+    ec2_instance = boto3.client('ec2')
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(args.func(args, ec2))
+    loop.run_until_complete(args.func(args, ec2_instance))
