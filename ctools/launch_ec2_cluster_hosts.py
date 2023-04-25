@@ -172,7 +172,7 @@ def describe_cluster(ec2, clustertag):
         "RemoteMongoSPath":
             "/mnt/data/mongos",
         "FeatureFlags": [],
-        "MongoDParameters": ["--wiredTigerCacheSizeGB 11", ],
+        "MongoDParameters": ["--wiredTigerCacheSizeGB 18", ],
         "MongoSParameters": [],
     }
 
@@ -205,7 +205,7 @@ async def main_launch(args, ec2):
             'Ebs': {
                 'VolumeType': 'gp3',
                 'VolumeSize': 1500,
-                'Iops': 6000
+                'Iops': 6000,
             },
         },
     ]
