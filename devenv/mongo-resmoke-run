@@ -1,0 +1,14 @@
+set -e
+
+export INSTALL_DIR="./build/install/bin"
+export DATA_DIR="$HOME/Temp/Data"
+
+export CMD="python3.10 $INSTALL_DIR/resmoke.py run \
+  --log file \
+  --mrlog \
+  --dbpathPrefix $DATA_DIR/resmoke \
+  -j$(nproc --all) \
+  ${@}"
+
+echo $CMD
+$CMD

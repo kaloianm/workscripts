@@ -1,0 +1,21 @@
+set -e
+
+export INSTALL_DIR="./build/install/bin"
+export DATA_DIR="$HOME/Temp/Data"
+
+export CMD="python3.10 $INSTALL_DIR/resmoke.py run \
+  --log file \
+  --mrlog \
+  --dbpathPrefix $DATA_DIR/resmoke"
+
+echo "$CMD -j$(nproc --all)"
+$CMD -j$(nproc --all) \
+    --suites=dbtest,unittests \
+    --continueOnFailure
+
+BENCHMARKS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/benchmark*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')
+echo "$BENCHMARKS"
+echo "$CMD -j1"
+$CMD -j1 \
+    --suites=$BENCHMARKS \
+    --continueOnFailure

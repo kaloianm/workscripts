@@ -1,0 +1,41 @@
+# This is a script with custom configurations relevant for all Linux develoment worksations. Source
+# it from .bashrc by adding this line to the end:
+#    source $HOME/workspace/workscripts/devenv/.bashrc_custom_generic
+
+# BEGIN - PATH
+export PATH=$HOME/workspace/workscripts/devenv:$PATH
+# END - PATH
+
+# BEGIN - bash history config
+export HISTTIMEFORMAT="%h %d %H:%M:%S "
+export HISTSIZE=10000
+export HISTCONTROL="erasedups"
+export HISTIGNORE="ls:history"
+# END - bash history config
+
+# BEGIN - aliases
+alias cls='clear'
+alias ls='ls -h --color=auto'
+# END - aliases
+
+# BEGIN - bash shell formatting
+export CLICOLOR=1
+PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+# END - bash shell formatting
+
+# BEGIN - custom shell scripts
+
+# Script to reconnect the SSH agent
+ssh-reagent () {
+  for agent in /tmp/ssh-*/agent.*; do
+    export SSH_AUTH_SOCK=$agent
+    if ssh-add -l 2>&1 > /dev/null; then
+      echo Found working SSH Agent:
+      ssh-add -l
+      return
+    fi
+  done
+  echo Cannot find ssh agent - maybe you should reconnect and forward it?
+}
+
+# END - custom shell scripts

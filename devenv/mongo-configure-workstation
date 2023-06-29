@@ -1,0 +1,10 @@
+set -e
+
+git config --global user.name "Kaloian Manassiev"
+git config --global user.email "kaloian.manassiev@mongodb.com"
+git config --global core.editor "vim"
+git config --global pull.rebase false
+
+mkdir $HOME/workspace
+pushd $HOME/workspace
+popd

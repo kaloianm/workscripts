@@ -1,0 +1,4 @@
+set -e
+
+buildscripts/clang_format.py lint-all
+buildscripts/pylinters.py lint-all

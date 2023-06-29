@@ -1,0 +1,6 @@
+set -e
+
+CORE_DUMP_FILE=$1
+BINARY_FILE=$(file -Pelf_phnum=10000 $1 | awk -F',' '{ for( i=1; i<=NF; i++ ) print $i }' | grep 'execfn' | awk -F':' '{print $2;}' | tr -d \' | tr -d " ")
+echo /opt/mongodbtoolchain/v4/bin/gdb $BINARY_FILE $1
+/opt/mongodbtoolchain/v4/bin/gdb $BINARY_FILE $1
