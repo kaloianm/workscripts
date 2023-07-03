@@ -1,10 +1,26 @@
 set -e
 
+sudo bash -c 'echo kal-virtual-workstation-2 > /etc/hostname'
+
+sudo apt update -y
+sudo apt upgrade -y
+
 git config --global user.name "Kaloian Manassiev"
 git config --global user.email "kaloian.manassiev@mongodb.com"
 git config --global core.editor "vim"
 git config --global pull.rebase false
 
-mkdir $HOME/workspace
+mkdir -p $HOME/workspace
 pushd $HOME/workspace
+  git clone git@github.com:10gen/mongo.git
+  pushd ./mongo/src/mongo/db
+    mkdir -p modules
+    pushd ./modules
+      git clone git@github.com:10gen/mongo-enterprise-modules.git enterprise
+    popd
+  popd
 popd
+
+# MongoDB toolchain upgrade:
+#
+# Follow the instructions on http://mongodbtoolchain.build.10gen.cc/
