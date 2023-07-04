@@ -8,9 +8,10 @@ export CMD="python3.10 $INSTALL_DIR/resmoke.py run \
   --mrlog \
   --dbpathPrefix $DATA_DIR/resmoke"
 
+INTEGRATION_TESTS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/integration*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')
 echo "$CMD -j$(nproc --all)"
 $CMD -j$(nproc --all) \
-    --suites=dbtest,unittests \
+    --suites=dbtest,unittests,$INTEGRATION_TESTS \
     --continueOnFailure
 
 BENCHMARKS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/benchmark*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')

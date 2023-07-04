@@ -10,7 +10,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git config --global user.name "Kaloian Manassiev"
 git config --global user.email "kaloian.manassiev@mongodb.com"
 git config --global core.editor "vim"
-git config --global pull.rebase false
+git config --global pull.ff "only"
+
+mkdir -p $HOME/Temp/Data/resmoke
+mkdir -p $HOME/Temp/Data/shell
 
 mkdir -p $HOME/workspace
 pushd $HOME/workspace
