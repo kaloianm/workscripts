@@ -3,7 +3,7 @@
 #    source $HOME/workspace/workscripts/devenv/.bashrc_custom_generic
 
 # BEGIN - PATH
-export PATH=$HOME/workspace/workscripts/devenv:$PATH
+export PATH=$HOME/workspace/workscripts/devenv:$HOME/.local/bin:$PATH
 # END - PATH
 
 # BEGIN - bash history config
