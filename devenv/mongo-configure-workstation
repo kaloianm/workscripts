@@ -1,6 +1,6 @@
 set -e
 
-sudo bash -c 'echo kal-virtual-workstation-2 > /etc/hostname'
+sudo bash -c 'echo kal-virtual-workstation > /etc/hostname'
 
 sudo apt update -y
 sudo apt upgrade -y

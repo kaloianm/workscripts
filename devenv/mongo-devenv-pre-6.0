@@ -1,0 +1,13 @@
+set -e
+
+export CC=/opt/mongodbtoolchain/v3/bin/gcc
+export CCX=/opt/mongodbtoolchain/v3/bin/g++
+export PYTHON_CMD=/opt/mongodbtoolchain/v3/bin/python2
+
+$PYTHON_CMD -m virtualenv python2-venv
+source python2-venv/bin/activate
+
+$PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
+echo "Using pip from $(which pip)"
+
+pip install -r ./buildscripts/requirements.txt
