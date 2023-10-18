@@ -1,0 +1,26 @@
+# No startup message
+#
+startup_message off
+
+# Do not flash on 'beep'
+#
+vbell off
+vbell_msg "Ring"
+
+# Auto-detach on hangup
+#
+autodetach on
+
+# Scroll back
+#
+defscrollback 10000
+
+# Setup a caption on the bottom of the screen
+#
+hardstatus alwayslastline "%{-b ck}%-w%{+b kc}%50>%n %t%{-b ck}%+w %=%H %C%a"
+
+altscreen on
+
+shell bash
+
+TERM screen
