@@ -203,7 +203,7 @@ async def main(args):
             gap = ((maxKey - minKey) // (num_of_docs_per_chunk + 1))
             key = minKey
             for _ in range(num_of_docs_per_chunk):
-                yield {'shardKey': key, long_string: long_string}
+                yield {'shardKey': key, 'longString': long_string}
                 key += gap
                 assert key < maxKey, f'key: {key}, maxKey: {maxKey}'
 

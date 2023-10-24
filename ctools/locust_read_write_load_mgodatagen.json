@@ -1,0 +1,27 @@
+[
+    {
+        "database": "locust_read_write_load",
+        "collection": "load",
+        "count": 1000000,
+        "content": {
+            "shardKey": {
+                "type": "int"
+            },
+            "longString": {
+                "type": "string",
+                "maxDistinctValue": 500,
+                "minLength": 10,
+                "maxLength": 20
+            }
+        },
+        "indexes": [
+            {
+                "name": "shardKey",
+                "key": {
+                    "shardKey": 1
+                },
+                "unique": true
+            }
+        ]
+    }
+]
