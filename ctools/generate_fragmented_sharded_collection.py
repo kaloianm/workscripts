@@ -8,14 +8,15 @@ Use --help for more information on the supported commands.
 
 import argparse
 import asyncio
-import bson
 import logging
+import sys
+
+import bson
 import math
 import random
-import sys
 import uuid
 
-from common.common import Cluster, ShardCollectionUtil
+from common.common import Cluster, CToolsException, ShardCollectionUtil
 from common.version import CTOOLS_VERSION
 from pymongo.write_concern import WriteConcern
 from tqdm import tqdm
@@ -98,7 +99,8 @@ async def main(args):
 
     async def safe_create_shard_indexes(shard):
         async with sem:
-            logging.info('Creating shard key indexes on shard ' + shard['_id'])
+            logging.info(f"Creating shard key indexes on shard {shard['_id']}")
+
             client = shard_connections[shard['_id']] = await cluster.make_direct_shard_connection(
                 shard)
             db = client[ns['db']]
@@ -230,13 +232,11 @@ async def main(args):
                 await write_chunk_documents_on_config
             except Exception as e:
                 logging.error(f'Failed to write chunk documents batch due to {e}')
-                pass
 
             try:
                 await write_chunk_data_on_shards
             except Exception as e:
                 logging.error(f'Failed to write chunk data documents batch due to {e}')
-                pass
 
             progress.update(len(chunks_subset))
 
@@ -249,7 +249,7 @@ async def main(args):
         progress.write('Generating chunk documents ...')
         generated_chunks = shard_collection.generate_config_chunks(gen_chunks(args.num_chunks))
 
-        progress.write(f'Scheduling chunk document writes ...')
+        progress.write('Scheduling chunk document writes ...')
         for c in generated_chunks:
             shard = c['shard']
             if not shard in shard_to_chunks:
@@ -343,14 +343,14 @@ if __name__ == "__main__":
         args.chunk_size_min = args.chunk_size_range[0]
         args.chunk_size_max = args.chunk_size_range[1]
     else:
-        raise Exception(
+        raise CToolsException(
             f'Too many chunk sizes values provided ({len(args.chunk_size_range)}), maximum 2 allowed'
         )
 
     del args.chunk_size_range
 
     if args.doc_size > min(args.chunk_size_min, args.chunk_size_max):
-        raise Exception(
+        raise CToolsException(
             f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc()}.'
         )
 

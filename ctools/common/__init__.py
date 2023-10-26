@@ -1,1 +1,3 @@
-# Placeholder file to mark that this directory is a package
+#
+# Placeholder file to indicate that this directory is a package
+#

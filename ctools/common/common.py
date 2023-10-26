@@ -1,15 +1,29 @@
-import aiofiles
+"""
+Module providing common functionality for the ctools set of scripts.
+"""
+
 import asyncio
-import bson
 import datetime
 import logging
-import motor.motor_asyncio
 import sys
+
+import aiofiles
+import bson
+import motor.motor_asyncio
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
 from bson.objectid import ObjectId
 from pymongo import uri_parser
+
+
+class CToolsException(Exception):
+    """
+    Exception which serves as a common base for all exceptions thrown by the ctools suite.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(CToolsException, self).__init__(*args, **kwargs)
 
 
 def yes_no(answer):
@@ -37,7 +51,9 @@ def exe_name(name):
 
 
 async def async_start_shell_command(command, logging_prefix):
-    '''Asynchronously starts a shell command'''
+    """
+    Asynchronously starts a shell command and logs its stdin/stderr to the logging subsystem.
+    """
 
     logging.info(f'[{logging_prefix}]: {command}')
 
@@ -52,14 +68,17 @@ async def async_start_shell_command(command, logging_prefix):
             logging.info(f'[{logging_prefix}]: {stripped_line}')
 
         if command_shell_process.returncode != 0:
-            raise Exception(
+            raise CToolsException(
                 f'[{logging_prefix}]: Command failed with code {command_shell_process.returncode}')
 
 
-# Abstracts the connection to and some administrative operations against a MongoDB cluster. This
-# class is highly tailored to the usage in the ctools scripts in the same directory and is not a
-# generic utility.
 class Cluster:
+    """
+    Abstracts the connection to and some administrative operations against a MongoDB cluster. This
+    class is highly tailored to the usage in the ctools scripts in the same directory and is not a
+    generic utility.
+    """
+
     def __init__(self, uri, loop):
         self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
@@ -143,9 +162,12 @@ class Cluster:
         await asyncio.gather(*tasks)
 
 
-# Utility class to generate the documents for manually sharding a collection through a process
-# external to the core server. Does not perform any modifications to the cluster itself.
 class ShardCollectionUtil:
+    """
+    Utility class to generate the documents for manually sharding a collection through a process
+    external to the core server. Does not perform any modifications to the cluster itself.
+    """
+
     def __init__(self, ns, uuid, shard_key, unique, fcv):
         self.ns = ns
         self.uuid = uuid
@@ -169,6 +191,7 @@ class ShardCollectionUtil:
     #    min, max, shard
     # AND MUST be sorted according to range['min']
     def generate_config_chunks(self, chunks):
+
         def make_chunk_id(i):
             if self.shard_key_is_string:
                 return f'shard-key-{self.ns}-{str(i).zfill(8)}'
@@ -195,12 +218,6 @@ class ShardCollectionUtil:
 
             chunk_idx += 1
             yield chunk_obj
-
-    # Accepts an array of tuples which must contain exactly the following fields:
-    #    min, max, shard
-    # AND MUST be sorted according to range['min']
-    def generate_shard_chunks(self, chunks):
-        pass
 
     def generate_collection_entry(self):
         coll_obj = {
