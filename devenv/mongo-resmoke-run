@@ -1,6 +1,6 @@
 set -e
 
-export INSTALL_DIR="./build/install/bin"
+export INSTALL_DIR="./build/install_ninja/bin"
 export DATA_DIR="$HOME/Temp/Data"
 
 export CMD="python3.10 $INSTALL_DIR/resmoke.py run \
