@@ -1,4 +1,5 @@
 set -e
+set -x
 
 export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
 

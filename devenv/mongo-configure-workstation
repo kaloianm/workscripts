@@ -1,4 +1,5 @@
 set -e
+set -x
 
 sudo bash -c 'echo kal-virtual-workstation > /etc/hostname'
 

@@ -1,7 +1,8 @@
 set -e
+set -x
 
 export INSTALL_DIR="./build/install_ninja/bin"
-export DATA_DIR="$HOME/Temp/Data"
+export DATA_DIR="$HOME/Temp/Data/nodb"
 
 $INSTALL_DIR/mongo \
   --nodb \
@@ -11,3 +12,4 @@ $INSTALL_DIR/mongo \
     MongoRunner.dataDir = \"$DATA_DIR/shell\"; \
     MongoRunner.dataPath = \"$DATA_DIR/shell\"; \
     "
+  $@

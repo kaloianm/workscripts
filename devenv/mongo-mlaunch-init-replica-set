@@ -1,0 +1,16 @@
+set -e
+set -x
+
+export INSTALL_DIR="./build/install_ninja/bin"
+echo "Using binaries from $INSTALL_DIR ..."
+
+export DATA_DIR="$HOME/Temp/Data/mongo-mlaunch-replica-set"
+echo "Using data path as $DATA_DIR ..."
+
+mkdir -p $DATA_DIR
+rm -rf $DATA_DIR/*
+rm -rf $DATA_DIR/.*
+
+mlaunch init --replicaset \
+  --nodes 1 \
+  --dir $DATA_PATH --binarypath $BINARY_PATH
