@@ -8,9 +8,10 @@ export DATA_DIR="$HOME/Temp/Data/mongo-mlaunch-replica-set"
 echo "Using data path as $DATA_DIR ..."
 
 mkdir -p $DATA_DIR
-rm -rf $DATA_DIR/*
-rm -rf $DATA_DIR/.*
+pushd $DATA_DIR
+rm -rf -- ..?* .[!.]* *
+popd
 
 mlaunch init --replicaset \
   --nodes 1 \
-  --dir $DATA_PATH --binarypath $BINARY_PATH
+  --binarypath $INSTALL_DIR --dir $DATA_DIR
