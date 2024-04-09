@@ -1,13 +1,11 @@
 set -e
 set -x
 
-export INSTALL_DIR="./build/install_ninja/bin"
-export DATA_DIR="$HOME/Temp/Data/resmoke"
+INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
+DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/resmoke}"
 
-$INSTALL_DIR/resmoke.py run --log file --mrlog \
-  --dbpathPrefix $DATA_DIR/resmoke \
+"$INSTALL_DIR/resmoke.py" run \
+  --log file --mrlog \
+  --dbpathPrefix $DATA_DIR \
   -j$(nproc --all) \
   $@
-
-echo $CMD
-$CMD

@@ -1,13 +1,12 @@
 set -e
 set -x
 
-export INSTALL_DIR="./build/install_ninja/bin"
-export DATA_DIR="$HOME/Temp/Data/resmoke"
+INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
+DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/resmoke}"
 
-export CMD="python3.10 $INSTALL_DIR/resmoke.py run \
-  --log file \
-  --mrlog \
-  --dbpathPrefix $DATA_DIR/resmoke"
+CMD="python3.10 $INSTALL_DIR/resmoke.py run \
+  --log file --mrlog \
+  --dbpathPrefix $DATA_DIR"
 
 INTEGRATION_TESTS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/integration*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')
 $CMD -j$(nproc --all) \
