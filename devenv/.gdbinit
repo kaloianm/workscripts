@@ -1,11 +1,11 @@
-# This is a script with custom gdb configuration. Copy it to ~/.gdbinit.
+# This is a script with custom gdb configuration. Symlink or copy it to ~/.gdbinit.
 
 set pagination off
 set print static-members off
 set print max-depth 2
 set print pretty on
 
-add-auto-load-safe-path $HOME/workspace/mongo*/.gdbinit
+add-auto-load-safe-path ~/workspace/mongo*/.gdbinit
 
 python
 try:
