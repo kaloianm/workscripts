@@ -13,20 +13,21 @@ git config --global user.email "kaloian.manassiev@mongodb.com"
 git config --global core.editor "vim"
 git config --global pull.ff "only"
 
+mkdir -p $HOME/Temp/Data/nodb
 mkdir -p $HOME/Temp/Data/resmoke
 mkdir -p $HOME/Temp/Data/shell
 
 mkdir -p $HOME/workspace
 pushd $HOME/workspace
-  git clone git@github.com:markbenvenuto/mrlog.git
-  git clone git@github.com:10gen/mongo.git
-  pushd ./mongo/src/mongo/db
-    mkdir -p modules
-    pushd ./modules
-      git clone git@github.com:10gen/mongo-enterprise-modules.git enterprise
-    popd
-  popd
+  git clone -b master git@github.com:10gen/mongo.git mongo
+  git clone -b v8.0 git@github.com:10gen/mongo.git mongo-8.0
+
+  git clone git@github.com:markbenvenuto/mrlog.git mrlog
+  git clone git@github.com:visemet/gdb-mongodb-server.git gdbmongo
 popd
+
+ln -s $HOME/workspace/workscripts/devenv/.gdbinit $HOME/.gdbinit
+ln -s $HOME/workspace/workscripts/devenv/.tmux.conf $HOME/.tmux.conf
 
 # MongoDB toolchain upgrade (optional):
 #
