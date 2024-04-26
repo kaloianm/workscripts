@@ -4,7 +4,7 @@ set -x
 INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
 DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/resmoke}"
 
-CMD="python3.10 $INSTALL_DIR/resmoke.py run \
+CMD="python3 $INSTALL_DIR/resmoke.py run \
   --log file --mrlog \
   --dbpathPrefix $DATA_DIR"
 
