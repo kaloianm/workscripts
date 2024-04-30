@@ -10,6 +10,6 @@ $PYTHON_CMD -m virtualenv python2-venv
 source python2-venv/bin/activate
 
 $PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
-echo "Using pip from $(which pip)"
+echo "Using python3 from $(which python3) and pip from $(which pip)"
 
 pip install -r ./buildscripts/requirements.txt

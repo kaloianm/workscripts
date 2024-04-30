@@ -1,4 +1,5 @@
 set -e
+set -x
 
 export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
 
@@ -8,7 +9,6 @@ source python3-venv/bin/activate
 $PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
 echo "Using python3 from $(which python3) and pip from $(which pip)"
 
-set -x
 python3 -m pip install 'poetry==1.5.1'
 
 export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
