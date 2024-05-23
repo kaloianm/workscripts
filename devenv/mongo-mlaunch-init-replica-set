@@ -6,7 +6,7 @@ DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/mongo-mlaunch-replica-set}"
 
 mkdir -p $DATA_DIR
 pushd $DATA_DIR
-rm -rf -- ..?* .[!.]* *
+  rm -rf -- ..?* .[!.]* *
 popd
 
 mlaunch init --replicaset \
