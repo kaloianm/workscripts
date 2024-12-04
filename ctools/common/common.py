@@ -80,7 +80,7 @@ class Cluster:
     """
 
     def __init__(self, uri, loop):
-        self.uri_options = uri_parser.parse_uri(uri)['options']
+        self.parsed_uri = uri_parser.parse_uri(uri)
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
         # The internal cluster collections always use the standard UUID representation
@@ -143,9 +143,13 @@ class Cluster:
             shard = await self.configDb.shards.find_one({'_id': shard})
 
         conn_parts = shard['host'].split('/', 1)
-        uri = 'mongodb://' + conn_parts[1]
+        if self.parsed_uri['username']:
+            uri = 'mongodb://' + self.parsed_uri['username'] + ':' + self.parsed_uri['password'] + '@' + conn_parts[1]
+        else:
+            uri = 'mongodb://' + conn_parts[1]
+
         return motor.motor_asyncio.AsyncIOMotorClient(uri, replicaset=conn_parts[0],
-                                                      **self.uri_options)
+                                                      **self.parsed_uri['options'])
 
     async def make_direct_config_server_connection(self):
         return await self.make_direct_shard_connection({
