@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+This is a tool to defragment a sharded cluster in a way which minimises the rate at which the major
+shard version gets bumped in order to minimise the amount of stalls due to refresh.
+
+See the help for more commands.
+'''
 
 import argparse
 import asyncio
@@ -10,7 +16,8 @@ import sys
 import time
 import pickle
 
-from common import Cluster, yes_no
+from common.common import Cluster, yes_no
+from common.version import CTOOLS_VERSION
 from pymongo import errors as pymongo_errors
 from tqdm import tqdm
 
@@ -52,11 +59,24 @@ class ShardedCollection:
         {<shard_id>: <size>}
         with collection size in KiB for each shard
         """
-        pipeline = [{'$collStats': {'storageStats': {}}},
-                    {'$project': {'shard': True, 'storageStats': {'size': True}}}]
-        storage_stats = await self.cluster.client[self.ns['db']][self.ns['coll']].aggregate(pipeline).to_list(300)
+        pipeline = [{
+            '$collStats': {
+                'storageStats': {}
+            }
+        }, {
+            '$project': {
+                'shard': True,
+                'storageStats': {
+                    'size': True
+                }
+            }
+        }]
+        storage_stats = await self.cluster.client[self.ns['db']][
+            self.ns['coll']].aggregate(pipeline).to_list(300)
+
         def bytes_to_kb(size):
             return max(float(size), 1024.0) / 1024.0
+
         sizes = {}
         for s in storage_stats:
             shard_id = s['shard']
@@ -83,7 +103,7 @@ class ShardedCollection:
         num_split_points = chunk_size_kb // maxChunkSize_kb
         surplus = chunk_size_kb - num_split_points * maxChunkSize_kb
 
-        new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1);
+        new_maxChunkSize_kb = maxChunkSize_kb - (maxChunkSize_kb - surplus) / (num_split_points + 1)
 
         remove_last_split_point = False
         if surplus >= maxChunkSize_kb * 0.8:
@@ -96,14 +116,16 @@ class ShardedCollection:
             # Fairly distribute split points so resulting chunks will be of similar sizes
             maxChunkSize_kb = new_maxChunkSize_kb
 
-        res = await conn.admin.command({
+        res = await conn.admin.command(
+            {
                 'splitVector': self.name,
                 'keyPattern': self.shard_key_pattern,
                 # Double size because splitVector splits at half maxChunkSize
                 'maxChunkSizeBytes': maxChunkSize_kb * 2 * 1024,
-                'min': chunk['min'], 
+                'min': chunk['min'],
                 'max': chunk['max']
-            }, codec_options=self.cluster.client.codec_options)
+            },
+            codec_options=self.cluster.client.codec_options)
 
         split_keys = res['splitKeys']
         if len(split_keys) > 0:
@@ -116,14 +138,14 @@ class ShardedCollection:
                     'middle': key
                 }, codec_options=self.cluster.client.codec_options)
 
-            splits_performed_per_shard[chunk['shard']] += len(split_keys);
+            splits_performed_per_shard[chunk['shard']] += len(split_keys)
 
     async def move_chunk(self, chunk, to):
         await self.cluster.adminDb.command({
-                'moveChunk': self.name,
-                'bounds': [chunk['min'], chunk['max']],
-                'to': to
-            }, codec_options=self.cluster.client.codec_options)
+            'moveChunk': self.name,
+            'bounds': [chunk['min'], chunk['max']],
+            'to': to
+        }, codec_options=self.cluster.client.codec_options)
 
     async def merge_chunks(self, consecutive_chunks):
         assert (len(consecutive_chunks) > 1)
@@ -140,11 +162,11 @@ class ShardedCollection:
                 'min': range[0],
                 'max': range[1],
                 'shard': expected_owning_shard
-                })
+            })
             update_result = await self.cluster.configDb.chunks.update_one(
-                chunk_selector,
-                {'$set': {'defrag_collection_est_size': size_to_write_kb}}
-                )
+                chunk_selector, {'$set': {
+                    'defrag_collection_est_size': size_to_write_kb
+                }})
 
             if update_result.matched_count != 1:
                 raise Exception(
@@ -154,10 +176,11 @@ class ShardedCollection:
 
     async def clear_chunk_size_estimations(self):
         update_result = await self.cluster.configDb.chunks.update_many(
-            self.chunks_query_filter(),
-            {'$unset': {'defrag_collection_est_size': ''}}
-            )
+            self.chunks_query_filter(), {'$unset': {
+                'defrag_collection_est_size': ''
+            }})
         return update_result.modified_count
+
 
 def fmt_bytes(num):
     suffix = "B"
@@ -167,14 +190,17 @@ def fmt_bytes(num):
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
 
+
 def fmt_kb(num):
-    return fmt_bytes(num*1024)
+    return fmt_bytes(num * 1024)
+
 
 async def throttle_if_necessary(last_time_secs, min_delta_secs):
     secs_elapsed_since_last = (time.perf_counter() - last_time_secs)
     if secs_elapsed_since_last < min_delta_secs:
         secs_to_sleep = min_delta_secs - secs_elapsed_since_last
         await asyncio.sleep(secs_to_sleep)
+
 
 async def main(args):
     cluster = Cluster(args.uri, asyncio.get_event_loop())
@@ -215,7 +241,7 @@ async def main(args):
             target_chunk_size_kb = args.dryrun
     elif chunk_size_doc['value'] <= 0:
         raise Exception(
-                f"""Found an invalid chunk size in config.settings: '{chunk_size_doc['value']}'""")
+            f"""Found an invalid chunk size in config.settings: '{chunk_size_doc['value']}'""")
     else:
         target_chunk_size_kb = chunk_size_doc['value'] * 1024
 
@@ -232,9 +258,10 @@ async def main(args):
     args.write_chunk_size = not args.no_write_chunk_size
 
     if args.dryrun:
-        logging.info(f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)} """
-                f"""and an estimated chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
-                f"""No actual modifications to the cluster will occur.""")
+        logging.info(
+            f"""Performing a dry run with target chunk size of {fmt_kb(target_chunk_size_kb)} """
+            f"""and an estimated chunk size of {fmt_kb(args.phase_1_estimated_chunk_size_kb)}."""
+            f"""No actual modifications to the cluster will occur.""")
     else:
         yes_no(
             f'The next steps will perform an actual merge with target chunk size of {fmt_kb(target_chunk_size_kb)}.'
@@ -250,7 +277,9 @@ async def main(args):
     ###############################################################################################
 
     num_chunks = await cluster.configDb.chunks.count_documents(coll.chunks_query_filter())
-    logging.info(f"""Collection '{coll.name}' has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks""")
+    logging.info(
+        f"""Collection '{coll.name}' has a shardKeyPattern of {coll.shard_key_pattern} and {num_chunks} chunks"""
+    )
     shard_to_chunks = {}
 
     async def load_chunks():
@@ -259,19 +288,23 @@ async def main(args):
         assert not shard_to_chunks
         collectionVersion = None
         with tqdm(total=num_chunks, unit=' chunk') as progress:
-            async for c in cluster.configDb.chunks.find(coll.chunks_query_filter(), sort=[('min',
-                                                                                pymongo.ASCENDING)]):
+            async for c in cluster.configDb.chunks.find(coll.chunks_query_filter(),
+                                                        sort=[('min', pymongo.ASCENDING)]):
                 shard_id = c['shard']
                 if collectionVersion is None:
                     collectionVersion = c['lastmod']
                 if c['lastmod'] > collectionVersion:
                     collectionVersion = c['lastmod']
                 if shard_id not in shard_to_chunks:
-                    shard_to_chunks[shard_id] = {'chunks': [], 'num_merges_performed': 0, 'num_moves_performed': 0}
+                    shard_to_chunks[shard_id] = {
+                        'chunks': [],
+                        'num_merges_performed': 0,
+                        'num_moves_performed': 0
+                    }
                 shard = shard_to_chunks[shard_id]
                 shard['chunks'].append(c)
                 progress.update()
-    
+
         if not args.dryrun:
             sizes = await coll.data_size_kb_per_shard()
             assert (len(sizes) == len(shard_to_chunks))
@@ -296,12 +329,11 @@ async def main(args):
         if not num_chunks_missing_size:
             return
 
-        logging.info("Calculating missing chunk size estimations") 
+        logging.info("Calculating missing chunk size estimations")
         with tqdm(total=num_chunks_missing_size, unit=' chunks') as progress:
             tasks = []
             async for ch in cluster.configDb.chunks.find(missing_size_query):
-                tasks.append(
-                        asyncio.ensure_future(write_size(ch, progress)))
+                tasks.append(asyncio.ensure_future(write_size(ch, progress)))
             await asyncio.gather(*tasks)
 
     # Mirror the config.chunks indexes in memory
@@ -314,7 +346,7 @@ async def main(args):
         num_chunks_no_size = 0
         for s in shard_to_chunks:
             for c in shard_to_chunks[s]['chunks']:
-                assert(chunks_id_index.get(c['_id']) == None)
+                assert (chunks_id_index.get(c['_id']) == None)
                 chunks_id_index[c['_id']] = c
                 chunks_min_index[pickle.dumps(c['min'])] = c
                 chunks_max_index[pickle.dumps(c['max'])] = c
@@ -323,7 +355,6 @@ async def main(args):
                         num_small_chunks += 1
                 else:
                     num_chunks_no_size += 1
-
 
     ###############################################################################################
     #
@@ -406,7 +437,7 @@ async def main(args):
 
             chunk_range = [ch['min'], ch['max']]
             ch[size_label] = await coll.data_size_kb_from_shard(chunk_range)
-            
+
             if args.write_chunk_size:
                 await coll.try_write_chunk_size(chunk_range, shard, ch[size_label])
 
@@ -443,7 +474,7 @@ async def main(args):
                     self.batch_size_estimation += ch['defrag_collection_est_size']
 
             def update_size(self, size):
-                """Update batch size estimation"""             
+                """Update batch size estimation"""
                 self.batch_size_estimation = size
                 self.trust_batch_estimation = True
 
@@ -465,8 +496,8 @@ async def main(args):
 
             if len(consecutive_chunks) == 0:
 
-                # Assume that the user might run phase I more than once. We may encouter chunks with 
-                # defrag_collection_est_size set and minimum 75% target chunk size. Do not attempt 
+                # Assume that the user might run phase I more than once. We may encouter chunks with
+                # defrag_collection_est_size set and minimum 75% target chunk size. Do not attempt
                 # to merge these further
                 skip_chunk = False
                 if 'defrag_collection_est_size' in c:
@@ -482,17 +513,20 @@ async def main(args):
 
             merge_consecutive_chunks_without_size_check = False
 
-            
-            def will_overflow_target_size():
+            def will_overflow_merge_cap():
                 """Returns true if merging the `consecutive_chunks` with the current one `c` will
-                produce a chunk that is 20% bigger that the target chunk size.
+                produce a chunk that is 20% bigger that the target chunk size or if we have reached
+                the user configured max number of chunks per batch.
 
                 If we don't trust the estimation of `consecutive_chunks` or 
                 we don't know the size of `c` this function will always return false.
                 """
+                if args.merge_batch_size and len(consecutive_chunks) == args.merge_batch_size:
+                    return True
                 trust_estimations = consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c
                 return (trust_estimations and
-                        consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] > (target_chunk_size_kb * 1.20))
+                        consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] >
+                        (target_chunk_size_kb * 1.20))
 
             def too_many_chunks_to_merge_at_once():
                 """Merging too many chunks in one go can hit the 16 MB BSON size limit. 
@@ -501,7 +535,7 @@ async def main(args):
                 max_chunks_to_merge = 20000
                 return len(consecutive_chunks) > max_chunks_to_merge
 
-            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_target_size() and not too_many_chunks_to_merge_at_once():
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_merge_cap() and not too_many_chunks_to_merge_at_once():
                 consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
@@ -514,7 +548,7 @@ async def main(args):
                     await update_chunk_size_estimation(consecutive_chunks.batch[0])
                     remain_chunks.append(consecutive_chunks.batch[0])
                     consecutive_chunks.reset()
-                    
+
                 continue
             else:
                 merge_consecutive_chunks_without_size_check = True
@@ -553,20 +587,20 @@ async def main(args):
 
             # Perform the actual merge, obeying the configured concurrency
             sem = (sem_at_collection_version
-                        if shard_is_at_collection_version else sem_at_less_than_collection_version)
+                   if shard_is_at_collection_version else sem_at_less_than_collection_version)
             async with sem:
                 new_chunk = consecutive_chunks.batch[0].copy()
                 new_chunk['max'] = consecutive_chunks.batch[-1]['max']
                 new_chunk['defrag_collection_est_size'] = consecutive_chunks.batch_size_estimation
                 remain_chunks.append(new_chunk)
-                        
+
                 if not args.dryrun:
                     try:
                         await throttle_if_necessary(last_merge_time, args.phase1_throttle_secs)
                         await coll.merge_chunks(consecutive_chunks.batch)
                         if args.write_chunk_size:
-                            await coll.try_write_chunk_size(merge_bounds, shard,
-                                                            consecutive_chunks.batch_size_estimation)
+                            await coll.try_write_chunk_size(
+                                merge_bounds, shard, consecutive_chunks.batch_size_estimation)
                         last_merge_time = time.perf_counter()
                     except pymongo_errors.OperationFailure as ex:
                         if ex.details['code'] == 46:  # The code for LockBusy
@@ -605,7 +639,7 @@ async def main(args):
         logging.info(
             f'Collection version is {collectionVersion} and chunks are spread over {len(shard_to_chunks)} shards'
         )
-        
+
         with tqdm(total=num_chunks, unit=' chunk') as progress:
             if args.no_parallel_merges or args.phase1_throttle_secs:
                 for s in shard_to_chunks:
@@ -614,7 +648,8 @@ async def main(args):
                 tasks = []
                 for s in shard_to_chunks:
                     tasks.append(
-                        asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion, progress)))
+                        asyncio.ensure_future(
+                            merge_chunks_on_shard(s, collectionVersion, progress)))
                 await asyncio.gather(*tasks)
     else:
         logging.info("Skipping Phase I")
@@ -673,7 +708,7 @@ async def main(args):
         progress.write(f'Moving small chunks off shard {shard}')
 
         sorted_chunks = shard_chunks.copy()
-        sorted_chunks.sort(key = lambda c: c.get('defrag_collection_est_size', 0))
+        sorted_chunks.sort(key=lambda c: c.get('defrag_collection_est_size', 0))
         last_migration_time = time.perf_counter()
 
         for c in sorted_chunks:
@@ -682,12 +717,12 @@ async def main(args):
                 continue
 
             center_size_kb = await get_chunk_size(c)
-            
+
             had_size = 'phase2_calculated_size' not in c
 
             # size should miss only in dryrun mode
             assert had_size or args.dryrun or not args.write_chunk_size
-            
+
             # chunk are sorted so if we encounter a chunk too big that has not being previously merged
             # we can safely exit from the loop since all the subsequent chunks will be bigger
             if center_size_kb > small_chunk_size_kb:
@@ -699,17 +734,20 @@ async def main(args):
                 else:
                     break
 
-            # chunks should be on other shards, but if this script was executed multiple times or 
-            # due to parallelism the chunks might now be on the same shard            
+            # chunks should be on other shards, but if this script was executed multiple times or
+            # due to parallelism the chunks might now be on the same shard
 
             left_chunk = chunks_max_index.get(pickle.dumps(c['min']))
             right_chunk = chunks_min_index.get(pickle.dumps(c['max']))
-            
+
             # Exclude overweight target shards
-            if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
-                if total_shard_size[left_chunk['shard']] > total_shard_size[right_chunk['shard']] * args.shard_imbalance_frac:
+            if (left_chunk is not None
+                    and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
+                if total_shard_size[left_chunk['shard']] > total_shard_size[
+                        right_chunk['shard']] * args.shard_imbalance_frac:
                     left_chunk = None
-                elif total_shard_size[right_chunk['shard']] > total_shard_size[left_chunk['shard']] * args.shard_imbalance_frac:
+                elif total_shard_size[right_chunk['shard']] > total_shard_size[
+                        left_chunk['shard']] * args.shard_imbalance_frac:
                     right_chunk = None
                 else:
                     pass
@@ -720,28 +758,30 @@ async def main(args):
                 new_size = left_size + center_size_kb
                 is_overweight = False
                 if shard != target_shard:
-                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
-                
+                    is_overweight = total_shard_size[
+                        shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+
                 # only move a smaller chunk unless shard is bigger
-                if (center_size_kb <= left_size or is_overweight) and (
-                    await get_remain_chunk_imbalance(c, left_chunk)) < (await get_remain_chunk_imbalance(c, right_chunk)):
+                if (center_size_kb <= left_size
+                        or is_overweight) and (await get_remain_chunk_imbalance(
+                            c, left_chunk)) < (await get_remain_chunk_imbalance(c, right_chunk)):
 
                     merge_bounds = [left_chunk['min'], c['max']]
                     if not args.dryrun:
                         await throttle_if_necessary(last_migration_time, args.phase2_throttle_secs)
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
-                        
+
                         await coll.merge_chunks([left_chunk, c])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                         last_migration_time = time.perf_counter()
                     else:
                         progress.write(f'Moving chunk left from {shard} to {target_shard}, '
-                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
+                                       f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
-                    # update local map, 
-                    chunks_id_index.pop(c['_id']) # only first chunk is kept
+                    # update local map,
+                    chunks_id_index.pop(c['_id'])  # only first chunk is kept
                     chunks_min_index.pop(pickle.dumps(c['min']))
                     chunks_max_index.pop(pickle.dumps(c['max']))
                     chunks_max_index[pickle.dumps(c['max'])] = left_chunk
@@ -762,15 +802,16 @@ async def main(args):
 
                     check_max_migrations()
                     continue
-            
+
             if right_chunk is not None:
                 target_shard = right_chunk['shard']
                 right_size = await get_chunk_size(right_chunk)
                 new_size = right_size + center_size_kb
                 is_overweight = False
                 if shard != target_shard:
-                    is_overweight = total_shard_size[shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
-                
+                    is_overweight = total_shard_size[
+                        shard] > total_shard_size[target_shard] * args.shard_imbalance_frac
+
                 if center_size_kb <= right_size or is_overweight:
 
                     merge_bounds = [c['min'], right_chunk['max']]
@@ -778,17 +819,18 @@ async def main(args):
                         await throttle_if_necessary(last_migration_time, args.phase2_throttle_secs)
                         if shard != target_shard:
                             await coll.move_chunk(c, target_shard)
-                        
+
                         await coll.merge_chunks([c, right_chunk])
                         if args.write_chunk_size:
                             await coll.try_write_chunk_size(merge_bounds, target_shard, new_size)
                         last_migration_time = time.perf_counter()
                     else:
-                        progress.write(f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
-                                        f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
+                        progress.write(
+                            f'Moving chunk right from {c["shard"]} to {right_chunk["shard"]}, '
+                            f'merging {merge_bounds}, new size: {fmt_kb(new_size)}')
 
                     # update local map
-                    chunks_id_index.pop(right_chunk['_id']) # only first chunk is kept
+                    chunks_id_index.pop(right_chunk['_id'])  # only first chunk is kept
                     chunks_min_index.pop(pickle.dumps(right_chunk['min']))
                     chunks_max_index.pop(pickle.dumps(c['max']))
                     chunks_max_index[pickle.dumps(right_chunk['max'])] = c
@@ -812,14 +854,16 @@ async def main(args):
                     continue
         # </for c in sorted_chunks:>
         return total_moved_data_kb
-    
+
     async def phase_2():
         # Move and merge small chunks. The way this is written it might need to run multiple times
         total_moved_data_kb = 0
 
         total_chunks_to_process = num_small_chunks + num_chunks_no_size
 
-        logging.info(f"Number of small chunks: {num_small_chunks}, Number of chunks with unkown size: {num_chunks_no_size}")
+        logging.info(
+            f"Number of small chunks: {num_small_chunks}, Number of chunks with unkown size: {num_chunks_no_size}"
+        )
         if not total_chunks_to_process:
             return total_moved_data_kb
 
@@ -827,11 +871,13 @@ async def main(args):
             iteration = 0
             while iteration < 25:
                 iteration += 1
-                progress.write(f"""Phase II: iteration {iteration}. Remainging chunks to process {progress.total - progress.n}, total chunks {len(chunks_id_index)}""")
+                progress.write(
+                    f"""Phase II: iteration {iteration}. Remainging chunks to process {progress.total - progress.n}, total chunks {len(chunks_id_index)}"""
+                )
 
                 moved_data_kb = 0
                 shards_to_process = [s for s in shard_to_chunks]
-                while(shards_to_process):
+                while (shards_to_process):
                     # get the shard with most data
                     shard_id = max(shards_to_process, key=lambda s: total_shard_size[s])
                     moved_data_kb += await move_merge_chunks_by_size(shard_id, progress)
@@ -841,19 +887,19 @@ async def main(args):
                 # update shard_to_chunks
                 for s in shard_to_chunks:
                     shard_to_chunks[s]['chunks'] = []
-                
+
                 for cid in chunks_id_index:
                     c = chunks_id_index[cid]
                     shard_to_chunks[c['shard']]['chunks'].append(c)
-                
+
                 num_chunks = len(chunks_id_index)
                 if not args.dryrun:
-                    num_chunks_actual = await cluster.configDb.chunks.count_documents(coll.chunks_query_filter())
-                    assert(num_chunks_actual == num_chunks)
+                    num_chunks_actual = await cluster.configDb.chunks.count_documents(
+                        coll.chunks_query_filter())
+                    assert (num_chunks_actual == num_chunks)
 
                 if moved_data_kb == 0 or progress.n == progress.total:
                     return total_moved_data_kb
-
 
     if not shard_to_chunks:
         # all subsequent phases assumes we have sizes for all chunks
@@ -863,9 +909,8 @@ async def main(args):
 
     build_chunk_index()
 
-
     ###############  Calculate stats #############
-    
+
     total_shard_size = {}
 
     sum_coll_size = 0
@@ -881,7 +926,7 @@ async def main(args):
                 data_size += estimated_chunk_size_kb
         total_shard_size[shard_id] = data_size
         sum_coll_size += data_size
-    
+
     coll_size_kb = await coll.data_size_kb()
     # If we run on a dummy cluster assume collection size
     if args.dryrun and coll_size_kb == 1:
@@ -891,32 +936,34 @@ async def main(args):
     avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
 
     ###############  End stats calculation #############
-    
 
-    logging.info(f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}')
-    
+    logging.info(
+        f'Collection size {fmt_kb(coll_size_kb)}. Avg chunk size Phase I {fmt_kb(avg_chunk_size_phase_1)}'
+    )
+
     for s in shard_to_chunks:
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks'])
         data_size = total_shard_size[s]
-        logging.info(f"Number chunks on shard {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9}")
+        logging.info(
+            f"Number chunks on shard {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(data_size): >9}"
+        )
 
-    
     orig_shard_sizes = total_shard_size.copy()
 
     # Only conditionally execute phase2, break here to get above log lines
     if args.exec_phase == 'phase2' or args.exec_phase == 'all':
         logging.info('Phase II: Moving and merging small chunks')
-        
+
         total_moved_data_kb = await phase_2()
     else:
         logging.info("Skipping Phase II")
         total_moved_data_kb = 0
-
     '''
     for each chunk C in the shard:
     - No split if chunk size < 133% target chunk size
     - Split otherwise
     '''
+
     async def split_oversized_chunks(shard, progress):
         shard_entry = shard_to_chunks[shard]
         shard_chunks = shard_entry['chunks']
@@ -925,20 +972,19 @@ async def main(args):
 
         shard_entry = await coll.cluster.configDb.shards.find_one({'_id': shard})
         if shard_entry is None:
-            raise Exception(f"cannot resolve shard {chunk['shard']}")
+            raise Exception(f'Cannot resolve shard {shard}')
 
         conn = await coll.cluster.make_direct_shard_connection(shard_entry)
         last_split_time = time.perf_counter()
         for c in shard_chunks:
             progress.update()
-            
+
             chunk_size = await get_chunk_size(c)
 
             if chunk_size > target_chunk_size_kb * 1.33:
                 await throttle_if_necessary(last_split_time, args.phase3_throttle_secs)
                 await coll.split_chunk(c, target_chunk_size_kb, conn)
                 last_split_time = time.perf_counter()
-
 
         conn.close()
 
@@ -951,9 +997,8 @@ async def main(args):
         with tqdm(total=num_chunks, unit=' chunks') as progress:
             tasks = []
             for s in shard_to_chunks:
-                splits_performed_per_shard[s] = 0;
-                tasks.append(
-                    asyncio.ensure_future(split_oversized_chunks(s, progress)))
+                splits_performed_per_shard[s] = 0
+                tasks.append(asyncio.ensure_future(split_oversized_chunks(s, progress)))
                 if args.phase3_throttle_secs:
                     await asyncio.gather(*tasks)
                     tasks.clear()
@@ -961,20 +1006,20 @@ async def main(args):
 
     else:
         logging.info("Skipping Phase III")
-    
 
     if not args.dryrun and args.write_size_on_exit:
         await write_all_missing_chunk_size()
-
 
     print("\n")
     for s in shard_to_chunks:
         num_splits_per_shard = splits_performed_per_shard.get(s, 0)
         num_chunks_per_shard = len(shard_to_chunks[s]['chunks']) + num_splits_per_shard
-        avg_chunk_size_shard = total_shard_size[s] / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
-        print(f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(total_shard_size[s]): >9} "
-                f" ({fmt_kb(total_shard_size[s] - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
-                f"  Splits performed {num_splits_per_shard}")
+        avg_chunk_size_shard = total_shard_size[
+            s] / num_chunks_per_shard if num_chunks_per_shard > 0 else 0
+        print(
+            f"Number chunks on {s: >15}: {num_chunks_per_shard:7}  Data-Size: {fmt_kb(total_shard_size[s]): >9} "
+            f" ({fmt_kb(total_shard_size[s] - orig_shard_sizes[s]): >9})  Avg chunk size {fmt_kb(avg_chunk_size_shard): >9}"
+            f"  Splits performed {num_splits_per_shard}")
 
     total_coll_size_kb = sum(total_shard_size.values())
     total_num_chunks_phase_2 = len(chunks_id_index)
@@ -983,19 +1028,29 @@ async def main(args):
     avg_chunk_size_phase_3 = total_coll_size_kb / total_num_chunks_phase_3
     ideal_num_chunks = math.ceil(total_coll_size_kb / target_chunk_size_kb)
 
-    print("\n");
-    print(f"""Number of chunks is {total_num_chunks_phase_3} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(total_coll_size_kb)}""")
-    print(f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_phase_3)}')
-    print(f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / total_coll_size_kb):.2f} %")
+    print("\n")
+    print(
+        f"""Number of chunks is {total_num_chunks_phase_3} the ideal number of chunks would be {ideal_num_chunks} for a collection size of {fmt_kb(total_coll_size_kb)}"""
+    )
+    print(
+        f'Average chunk size: Phase I {fmt_kb(avg_chunk_size_phase_1)} | Phase II {fmt_kb(avg_chunk_size_phase_2)} | Phase III {fmt_kb(avg_chunk_size_phase_3)}'
+    )
+    print(
+        f"Total moved data: {fmt_kb(total_moved_data_kb)} i.e. {(100 * total_moved_data_kb / total_coll_size_kb):.2f} %"
+    )
+
 
 if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description=
-        """Tool to defragment a sharded cluster in a way which minimises the rate at which the major
-           shard version gets bumped in order to minimise the amount of stalls due to refresh.""")
+    argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
     argsParser.add_argument(
-        'uri', help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
-        metavar='uri', type=str)
+        'uri',
+        help='URI of the mongos to connect to in the mongodb://[user:password@]host format',
+        metavar='uri',
+        type=str,
+    )
+
     argsParser.add_argument(
         '--dryrun', help=
         """Indicates whether the script should perform actual durable changes to the cluster or just
@@ -1007,16 +1062,17 @@ if __name__ == "__main__":
         type=lambda x: int(x) * 1024, required=False)
     argsParser.add_argument('--ns', help="""The namespace on which to perform defragmentation""",
                             metavar='ns', type=str, required=True)
-    argsParser.add_argument('--small-chunk-threshold', help="""Threshold for the size of chunks 
-        eligable to be moved in Phase II. Fractional value between 0 and 0.5""",
-        metavar='fraction', dest='small_chunk_frac', type=float, default=0.25)
-    argsParser.add_argument('--shard-imbalance-threshold', help="""Threshold for the size difference 
+    argsParser.add_argument(
+        '--small-chunk-threshold', help="""Threshold for the size of chunks 
+        eligable to be moved in Phase II. Fractional value between 0 and 0.5""", metavar='fraction',
+        dest='small_chunk_frac', type=float, default=0.25)
+    argsParser.add_argument(
+        '--shard-imbalance-threshold', help="""Threshold for the size difference 
         between two shards where chunks can be moved to. Fractional value between 1.0 and 1.5""",
         metavar='fraction', dest="shard_imbalance_frac", type=float, default=1.2)
-    argsParser.add_argument(
-            '--no-write-chunk-size',
-            help="""Store chunk sizes in `config.chunks`""",
-            dest="no_write_chunk_size", action='store_true')
+    argsParser.add_argument('--no-write-chunk-size',
+                            help="""Store chunk sizes in `config.chunks`""",
+                            dest="no_write_chunk_size", action='store_true')
     argsParser.add_argument(
         '--phase_1_reset_progress',
         help="""Applies only to Phase 1 and instructs the script to clear the chunk size estimation
@@ -1036,46 +1092,42 @@ if __name__ == "__main__":
         help="""Applies only to Phase 1: when the estimated size of a batch surpasses this threshold
         (expressed as a percentage of the target chunk size), a real calculation of the batch size
         will be triggered. Fractional value between 0.0 and 1.0""",
-        metavar="fraction_of_chunk_size",
-        dest='threshold_for_size_calculation',
-        type=float,
+        metavar="fraction_of_chunk_size", dest='threshold_for_size_calculation', type=float,
         default=0.9)
+    argsParser.add_argument('--phases',
+                            help="""Which phase of the defragmentation algorithm to execute.""",
+                            metavar='phase', dest="exec_phase", type=str, default='all',
+                            choices=['all', 'phase1', 'phase2', 'phase3'])
     argsParser.add_argument(
-        '--phases',
-        help="""Which phase of the defragmentation algorithm to execute.""",
-        metavar='phase', dest="exec_phase", type=str, default='all', choices=[
-            'all', 'phase1', 'phase2', 'phase3'
-        ])
+        '--phase1_merge_batch_size',
+        help="""Maximum number of chunks to merge in a single merge operation.""",
+        metavar='merge_batch_size', dest="merge_batch_size", type=int, required=False)
+    argsParser.add_argument('--phase_2_max_migrations', help="""Maximum number of migrations.""",
+                            metavar='max_migrations', dest="max_migrations", type=int, default=-1)
     argsParser.add_argument(
-        '--phase_2_max_migrations',
-        help="""Maximum number of migrations.""",
-        metavar='max_migrations', dest="max_migrations", type=int, default=-1)
-    argsParser.add_argument(
-        '--write-size-on-exit',
-        help="""Used for debugging purposes, write all missing data size estimation on disk before exit.""",
+        '--write-size-on-exit', help=
+        """Used for debugging purposes, write all missing data size estimation on disk before exit.""",
         dest="write_size_on_exit", action='store_true')
     argsParser.add_argument(
         '--no-parallel-merges',
         help="""Specify whether merges should be executed in parallel or not.""",
         dest="no_parallel_merges", action='store_true')
     argsParser.add_argument(
-        '--phase1-throttle-secs',
-        help="""Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
+        '--phase1-throttle-secs', help=
+        """Specify the time in fractional seconds used to throttle phase1. Only one merge will be performed every X seconds.""",
         metavar='secs', dest='phase1_throttle_secs', type=float, default=0)
     argsParser.add_argument(
-        '--phase2-throttle-secs',
-        help="""Specify the time in fractional seconds used to throttle phase2. Only one merge will be performed every X seconds.""",
+        '--phase2-throttle-secs', help=
+        """Specify the time in fractional seconds used to throttle phase2. Only one merge will be performed every X seconds.""",
         metavar='secs', dest="phase2_throttle_secs", type=float, default=0)
     argsParser.add_argument(
-        '--phase3-throttle-secs',
-        help="""Specify the time in fractional seconds used to throttle phase3. Only one split will be performed every X seconds.""",
+        '--phase3-throttle-secs', help=
+        """Specify the time in fractional seconds used to throttle phase3. Only one split will be performed every X seconds.""",
         metavar='secs', dest='phase3_throttle_secs', type=float, default=0)
 
-    list = " ".join(sys.argv[1:])
-    
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-    logging.info(f"Starting with parameters: '{list}'")
-
     args = argsParser.parse_args()
-    loop = asyncio.get_event_loop()
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main(args))

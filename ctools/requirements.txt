@@ -1,6 +1,8 @@
+aiofiles == 22.1.0
 argparse == 1.4.0
-motor == 2.4.0
-mtools == 1.6.4
-psutil == 5.7.0
-pymongo == 3.12.1
-tqdm == 4.60.0
+boto3 == 1.24.7
+motor == 3.1.1
+locust == 2.14.2
+psutil == 5.8.0
+pymongo == 4.6.3
+tqdm == 4.66.3

@@ -1,0 +1,14 @@
+set -e
+set -x
+
+export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
+
+$PYTHON_CMD -m venv python3-venv
+source python3-venv/bin/activate
+
+$PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
+echo "Using python3 from $(which python3) and pip from $(which pip)"
+
+pip install -r etc/pip/core-requirements.txt
+pip install -r etc/pip/dev-requirements.txt
+pip install -r etc/pip/lint-requirements.txt

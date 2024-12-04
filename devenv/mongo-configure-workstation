@@ -1,0 +1,37 @@
+set -e
+set -x
+
+sudo bash -c 'echo kal-virtual-workstation > /etc/hostname'
+
+sudo apt update -y
+sudo apt upgrade -y
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+git config --global user.name "Kaloian Manassiev"
+git config --global user.email "kaloian.manassiev@mongodb.com"
+git config --global core.editor "vim"
+git config --global pull.ff "only"
+
+mkdir -p $HOME/Temp/Data/nodb
+mkdir -p $HOME/Temp/Data/resmoke
+mkdir -p $HOME/Temp/Data/shell
+
+mkdir -p $HOME/workspace
+pushd $HOME/workspace
+  git clone -b master git@github.com:10gen/mongo.git mongo
+  git clone -b v8.0 git@github.com:10gen/mongo.git mongo-8.0
+
+  git clone git@github.com:markbenvenuto/mrlog.git mrlog
+  git clone git@github.com:visemet/gdb-mongodb-server.git gdbmongo
+popd
+
+ln -s $HOME/workspace/workscripts/devenv/.gdbinit $HOME/.gdbinit
+ln -s $HOME/workspace/workscripts/devenv/.tmux.conf $HOME/.tmux.conf
+
+# MongoDB toolchain upgrade (optional):
+#
+# Follow the instructions on http://mongodbtoolchain.build.10gen.cc/
+
+/opt/mongodbtoolchain/v3/bin/python3 -m pip install pymongo gdbmongo
+/opt/mongodbtoolchain/v4/bin/python3 -m pip install pymongo gdbmongo

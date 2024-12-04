@@ -1,0 +1,17 @@
+set -e
+set -x
+
+INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
+PATH=$INSTALL_DIR:$PATH
+DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/nodb}"
+
+
+"$INSTALL_DIR/mongo" \
+  --nodb \
+  --shell \
+  --eval "
+    TestData = {enableTestCommands: true, testName: \"mongo-nodb\"}; \
+    MongoRunner.dataDir = \"$DATA_DIR\"; \
+    MongoRunner.dataPath = \"$DATA_DIR\"; \
+    "
+  $@

@@ -1,0 +1,20 @@
+set -e
+set -x
+
+INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
+DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/resmoke}"
+
+CMD="python3 $INSTALL_DIR/resmoke.py run \
+  --log file --mrlog \
+  --dbpathPrefix $DATA_DIR"
+
+INTEGRATION_TESTS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/integration*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')
+$CMD -j$(nproc --all) \
+  --suites=dbtest,unittests,$INTEGRATION_TESTS \
+  --continueOnFailure
+
+BENCHMARKS=$(git ls-files -- 'buildscripts/resmokeconfig/suites/benchmark*' | awk -F\/ '{print $4;}' | awk -F\. '{result = result (NR==1 ? "" : ",") $1} END{ print result }')
+echo "Running benchmarks: $BENCHMARKS"
+$CMD -j1 \
+  --suites=$BENCHMARKS \
+  --continueOnFailure

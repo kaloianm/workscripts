@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 #
+help_string = '''
+Tool to interpret an export of a cluster config database and construct a new cluster with exactly
+the same configuration. Requires mlaunch to be installed and in the system path.
+'''
 
 import argparse
+import asyncio
+import logging
 import os
 import psutil
-import pymongo
+import random
 import shutil
 import socket
-import logging
 import subprocess
 import sys
-import random
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
-from common import exe_name, yes_no
+from common.common import exe_name, yes_no
+from common.version import CTOOLS_VERSION
 from copy import deepcopy
 from pymongo import MongoClient
 
@@ -32,6 +37,8 @@ class ToolConfiguration:
     # Class initialization. The 'args' parameter contains the parsed tool command line arguments.
     def __init__(self, args):
         self.binarypath = args.binarypath
+        self.toolbinarypath = args.toolbinarypath
+        self.mongoRestoreBinary = os.path.join(self.toolbinarypath, exe_name('mongorestore'))
         self.root = args.dir
         self.introspectRoot = os.path.join(self.root, 'introspect')
         self.clusterRoot = os.path.join(self.root, 'cluster')
@@ -39,12 +46,11 @@ class ToolConfiguration:
         self.numShards = args.numshards
         self.genData = args.gen_data
 
-        self.mongoRestoreBinary = os.path.join(self.binarypath, exe_name('mongorestore'))
-
         self.clusterIntrospectMongoDPort = 20000
         self.clusterStartingPort = 27017
 
         logging.info(f'Running cluster import with binaries located at: {self.binarypath}')
+        logging.info(f'Tool binaries at: {self.toolbinarypath}')
         logging.info(f'Config dump directory at: {self.configdump}')
         logging.info(f'Reconstruction root at: {self.root}')
         logging.info(f'Introspect directory at: {self.introspectRoot}')
@@ -164,12 +170,14 @@ class MlaunchCluster:
         self._external_process = external_process
         self._num_shards_to_start = self._introspect.num_shards if self._config.numShards is None else self._config.numShards
 
-    # Uses mlaunch to start a cluster which matches that of the config dump.
-    def start_and_restore_destination_cluster(self):
+    # Uses mlaunch to start a cluster which matches that of the config dump
+    def start_cluster(self):
         if (self._num_shards_to_start > 10):
             yes_no(
                 f'The imported configuration data contains {str(self._num_shards_to_start)} shards. Proceeding will start a large number of mongod processes.'
             )
+
+        logging.info('Starting destination cluster using mlaunch ...')
 
         # yapf: disable
         self._external_process.mlaunch('init', self._config.clusterRoot, [
@@ -185,12 +193,15 @@ class MlaunchCluster:
         # yapf: enable
 
         # Set the FCV on the cluster being reconstructed to match that of the dump
-        cluster_connection = MongoClient('localhost', config.clusterStartingPort)
-        cluster_connection.admin.command('setFeatureCompatibilityVersion', introspect.FCV)
+        cluster_connection = MongoClient('localhost', self._config.clusterStartingPort)
+        cluster_connection.admin.command('setFeatureCompatibilityVersion', self._introspect.FCV)
+
+    def restore_config_collections(self):
+        logging.info('Restoring config collections ...')
 
         # TODO: Find a better way to determine the port of the config server's primary
-        self.configServerPort = config.clusterStartingPort + (self._num_shards_to_start + 1)
-        config_server_connection = MongoClient('localhost', self.configServerPort)
+        configServerPort = self._config.clusterStartingPort + (self._num_shards_to_start + 1)
+        config_server_connection = MongoClient('localhost', configServerPort)
         self.configDb = config_server_connection.config
 
         # Snapshot the shards from mlaunch before running restore
@@ -198,11 +209,11 @@ class MlaunchCluster:
         logging.info(f'Original shards:\n{str(self._shards_from_mlaunch_snapshot)}')
         self.configDb.shards.delete_many({})
 
-        self._external_process.mongorestore_config_db_to_port(self.configServerPort)
+        self._external_process.mongorestore_config_db_to_port(configServerPort)
 
     # Renames the shards from the dump to the shards launched by mlaunch (in the shards collection)
     def fixup_shard_ids(self):
-        logging.info('Renaming shard ids in the config.shards collection:')
+        logging.info('Renaming shard ids in the config.shards collection ...')
 
         shards_from_dump = list(self._introspect.configDb.shards.find({}).sort('_id', 1))
 
@@ -264,7 +275,9 @@ class MlaunchCluster:
                                              }])
 
     # Create the collections and construct sharded indexes on all shard nodes in the mlaunch cluster
-    def fixup_shard_instances(self):
+    def create_per_shard_collections(self):
+        logging.info('Creating the per-shard collections ...')
+
         for shard in self.configDb.shards.find({}):
             logging.info(f"Creating shard key indexes on shard {shard['_id']}")
 
@@ -386,40 +399,7 @@ def create_empty_work_directories(config):
     os.makedirs(config.clusterRoot)
 
 
-if __name__ == "__main__":
-    argsParser = argparse.ArgumentParser(
-        description=
-        'Tool to interpret an export of a cluster config database and construct a new cluster with '
-        'exactly the same configuration. Requires mlaunch to be installed and in the system path.')
-
-    # Optional arguments
-    argsParser.add_argument(
-        '--numshards',
-        help='How many shards to create in the constructed cluster. If specified and is less than '
-        'the number of the shards in the dump, the extra shards will be assigned in round-robin '
-        'fashion on the created cluster. If more than the number of the shards in the dump are '
-        'requested, the extra shards will not have any chunks placed on them.', metavar='numshards',
-        type=int, required=False)
-
-    # Mandatory arguments
-    argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
-                            metavar='binarypath', type=str, required=True)
-    argsParser.add_argument(
-        '--dir', help='Directory in which to place the data files (will create subdirectories)',
-        metavar='dir', type=str, required=True)
-    argsParser.add_argument(
-        '--gen_data',
-        help="""Generate random data in the collection after reconstructing the cluster""",
-        action='store_true')
-
-    # Positional arguments
-    argsParser.add_argument('configdumpdir',
-                            help='Directory containing a dump of the cluster config database',
-                            metavar='configdumpdir', type=str, nargs=1)
-
-    args = argsParser.parse_args()
-    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-
+async def main(args):
     # Prepare the configuration and the workspace where the instances will be started
     config = ToolConfiguration(args)
     create_empty_work_directories(config)
@@ -439,12 +419,54 @@ if __name__ == "__main__":
                          'dump in the case when zones are defined')
 
     cluster = MlaunchCluster(config, introspect, external_process)
-    cluster.start_and_restore_destination_cluster()
+    cluster.start_cluster()
+    cluster.restore_config_collections()
     cluster.fixup_shard_ids()
     cluster.fixup_routing_table()
-    cluster.fixup_shard_instances()
+    cluster.create_per_shard_collections()
 
     # Restart the cluster so it picks up the new configuration cleanly
     cluster.restart()
 
     cluster.generate_data()
+
+
+if __name__ == "__main__":
+    argsParser = argparse.ArgumentParser(description=help_string)
+    logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+    # Optional arguments
+    argsParser.add_argument(
+        '--numshards',
+        help='How many shards to create in the constructed cluster. If specified and is less than '
+        'the number of the shards in the dump, the extra shards will be assigned in round-robin '
+        'fashion on the created cluster. If more than the number of the shards in the dump are '
+        'requested, the extra shards will not have any chunks placed on them.', metavar='numshards',
+        type=int, required=False)
+
+    # Mandatory arguments
+    argsParser.add_argument('--binarypath', help='Directory containing the MongoDB binaries',
+                            metavar='binarypath', type=str, required=True)
+    argsParser.add_argument(
+        '--toolbinarypath',
+        help='''Directory containing the MongoDB tools binaries (mongorestore, etc)''',
+        metavar='toolbinarypath', type=str, required=True)
+    argsParser.add_argument(
+        '--dir', help='''Directory in which to place the data files (will create subdirectories)''',
+        metavar='dir', type=str, required=True)
+    argsParser.add_argument(
+        '--gen_data',
+        help='''Generate random data in the collection after reconstructing the cluster''',
+        action='store_true')
+
+    # Positional arguments
+    argsParser.add_argument('configdumpdir',
+                            help='Directory containing a dump of the cluster config database',
+                            metavar='configdumpdir', type=str, nargs=1)
+
+    args = argsParser.parse_args()
+    logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main(args))

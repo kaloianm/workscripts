@@ -1,14 +1,15 @@
-# Helper utilities to be used by the ctools scripts
-#
+"""
+Module providing common functionality for the ctools set of scripts.
+"""
 
 import asyncio
-import bson
 import datetime
 import logging
-import motor.motor_asyncio
-import subprocess
 import sys
-import uuid
+
+import aiofiles
+import bson
+import motor.motor_asyncio
 
 from bson.binary import UuidRepresentation
 from bson.codec_options import CodecOptions
@@ -16,8 +17,18 @@ from bson.objectid import ObjectId
 from pymongo import uri_parser
 
 
-# Function for a Yes/No result based on the answer provided as an argument
+class CToolsException(Exception):
+    """
+    Exception which serves as a common base for all exceptions thrown by the ctools suite.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(CToolsException, self).__init__(*args, **kwargs)
+
+
 def yes_no(answer):
+    '''Function for a Yes/No result based on the answer provided as an argument'''
+
     yes = set(['yes', 'y', 'y'])
     no = set(['no', 'n', ''])
 
@@ -31,25 +42,52 @@ def yes_no(answer):
             print("Please respond with 'yes' or 'no'\n")
 
 
-# Abstracts constructing the name of an executable on POSIX vs Windows platforms
 def exe_name(name):
+    '''Abstracts constructing the name of an executable on POSIX vs Windows platforms'''
+
     if (sys.platform == 'win32'):
         return name + '.exe'
     return name
 
 
-# Abstracts the connection to and some administrative operations against a MongoDB cluster. This
-# class is highly tailored to the usage in the ctools scripts in the same directory and is not a
-# generic utility.
+async def async_start_shell_command(command, logging_prefix):
+    """
+    Asynchronously starts a shell command and logs its stdin/stderr to the logging subsystem.
+    """
+
+    logging.info(f'[{logging_prefix}]: {command}')
+
+    async with aiofiles.tempfile.TemporaryFile() as temp_file:
+        command_shell_process = await asyncio.create_subprocess_shell(command, stdout=temp_file,
+                                                                      stderr=temp_file)
+        await command_shell_process.wait()
+
+        await temp_file.seek(0)
+        async for line in temp_file:
+            stripped_line = line.decode('ascii').replace('\n', '')
+            logging.info(f'[{logging_prefix}]: {stripped_line}')
+
+        if command_shell_process.returncode != 0:
+            raise CToolsException(
+                f'[{logging_prefix}]: Command failed with code {command_shell_process.returncode}')
+
+
 class Cluster:
+    """
+    Abstracts the connection to and some administrative operations against a MongoDB cluster. This
+    class is highly tailored to the usage in the ctools scripts in the same directory and is not a
+    generic utility.
+    """
+
     def __init__(self, uri, loop):
         self.uri_options = uri_parser.parse_uri(uri)['options']
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 
-        self.adminDb = self.client.get_database('admin', 
-            codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
-        self.configDb = self.client.get_database(
-            'config', codec_options=CodecOptions(uuid_representation=UuidRepresentation.STANDARD))
+        # The internal cluster collections always use the standard UUID representation
+        self.system_codec_options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
+
+        self.adminDb = self.client.get_database('admin', codec_options=self.system_codec_options)
+        self.configDb = self.client.get_database('config', codec_options=self.system_codec_options)
 
     class NotMongosException(Exception):
         pass
@@ -124,8 +162,12 @@ class Cluster:
         await asyncio.gather(*tasks)
 
 
-# Utility class to generate the components for sharding a collection externally
-class ShardCollection:
+class ShardCollectionUtil:
+    """
+    Utility class to generate the documents for manually sharding a collection through a process
+    external to the core server. Does not perform any modifications to the cluster itself.
+    """
+
     def __init__(self, ns, uuid, shard_key, unique, fcv):
         self.ns = ns
         self.uuid = uuid
@@ -149,6 +191,7 @@ class ShardCollection:
     #    min, max, shard
     # AND MUST be sorted according to range['min']
     def generate_config_chunks(self, chunks):
+
         def make_chunk_id(i):
             if self.shard_key_is_string:
                 return f'shard-key-{self.ns}-{str(i).zfill(8)}'
@@ -176,12 +219,6 @@ class ShardCollection:
             chunk_idx += 1
             yield chunk_obj
 
-    # Accepts an array of tuples which must contain exactly the following fields:
-    #    min, max, shard
-    # AND MUST be sorted according to range['min']
-    def generate_shard_chunks(self, chunks):
-        pass
-
     def generate_collection_entry(self):
         coll_obj = {
             '_id': self.ns,
@@ -198,38 +235,3 @@ class ShardCollection:
             coll_obj.update({'dropped': False})
 
         return coll_obj
-
-
-# This class implements an iterable wrapper around the 'mgeneratejs' script from
-# https://github.com/rueckstiess/mgeneratejs. It allows custom-shaped MongoDB documents to be
-# generated in a streaming fashion for scripts which need to generate some data according to a given
-# shard key.
-#
-# The mgeneratejs script must be installed in advance and must be on the system's PATH.
-#
-# Example usages:
-#   it = iter(common.MGenerateJSGenerator("{a:\'\"$name\"\'}", 100)
-#       This will generate 100 documents with the form `{a:'John Smith'}`
-class MGenerateJSGenerator:
-    def __init__(self, doc_pattern, num_docs):
-        self.doc_pattern = doc_pattern
-        self.num_docs = num_docs
-
-    def __iter__(self):
-        self.mgeneratejs_process = subprocess.Popen(
-            f'mgeneratejs --number {self.num_docs} {self.doc_pattern}', shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
-
-        self.stdout_iter = iter(self.mgeneratejs_process.stdout.readline, '')
-        return self
-
-    def __next__(self):
-        try:
-            return next(self.stdout_iter).strip()
-        except StopIteration:
-            if self.mgeneratejs_process.returncode == 0:
-                raise
-            else:
-                raise Exception(
-                    f"Error occurred running mgeneratejs {''.join(self.mgeneratejs_process.stderr.readlines())}"
-                )
