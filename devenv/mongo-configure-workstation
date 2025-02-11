@@ -1,7 +1,7 @@
 set -e
 set -x
 
-sudo bash -c 'echo kal-virtual-workstation > /etc/hostname'
+sudo bash -c "echo ${HOSTNAME:-kal-virtual-workstation} > /etc/hostname"
 
 sudo apt update -y
 sudo apt upgrade -y
@@ -20,8 +20,8 @@ mkdir -p $HOME/Temp/Data/shell
 mkdir -p $HOME/workspace
 pushd $HOME/workspace
   git clone -b master git@github.com:10gen/mongo.git mongo
-  git clone -b v8.0 git@github.com:10gen/mongo.git mongo-8.0
 
+  # Auxiliary repositories
   git clone git@github.com:markbenvenuto/mrlog.git mrlog
   git clone git@github.com:visemet/gdb-mongodb-server.git gdbmongo
 popd
@@ -33,5 +33,5 @@ ln -s $HOME/workspace/workscripts/devenv/.tmux.conf $HOME/.tmux.conf
 #
 # Follow the instructions on http://mongodbtoolchain.build.10gen.cc/
 
-/opt/mongodbtoolchain/v3/bin/python3 -m pip install pymongo gdbmongo
-/opt/mongodbtoolchain/v4/bin/python3 -m pip install pymongo gdbmongo
+# /opt/mongodbtoolchain/v3/bin/python3 -m pip install pymongo gdbmongo
+# /opt/mongodbtoolchain/v4/bin/python3 -m pip install pymongo gdbmongo
