@@ -1,11 +1,12 @@
 set -e
 set -x
 
-INSTALL_DIR="${INSTALL_DIR:-./build/install_ninja/bin}"
+INSTALL_DIR="${INSTALL_DIR:-bazel-bin/install-dist-test/bin}"
 DATA_DIR="${DATA_DIR:-$HOME/Temp/Data/resmoke}"
 
-python3 "$INSTALL_DIR/resmoke.py" run \
+python3 buildscripts/resmoke.py run \
   --log file --mrlog \
   --dbpathPrefix "$DATA_DIR" \
+  --installDir "$INSTALL_DIR" \
   -j$(nproc --all) \
   $@

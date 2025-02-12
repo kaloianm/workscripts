@@ -6,6 +6,9 @@ sudo bash -c "echo ${HOSTNAME:-kal-virtual-workstation} > /etc/hostname"
 sudo apt update -y
 sudo apt upgrade -y
 
+# Install required development libraries
+sudo apt install libssl-dev libkrb5-dev libcurl4-openssl-dev libldap2-dev libsasl2-dev
+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 git config --global user.name "Kaloian Manassiev"

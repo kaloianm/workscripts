@@ -1,10 +1,9 @@
 # This is a script with custom configurations relevant for all Linux develoment worksations. Source
 # it from .bashrc by adding this line to the end:
-#    source $HOME/workspace/workscripts/devenv/.bashrc_custom_generic
+#    source "$HOME/workspace/workscripts/devenv/.bashrc_custom_generic"
 
 # BEGIN - PATH
-export GOPATH="$HOME/.local/go"
-export PATH="$HOME/workspace/workscripts/devenv:$GOPATH/bin:$PATH"
+export PATH="$HOME/workspace/workscripts/devenv:$PATH"
 # END - PATH
 
 # BEGIN - bash history config

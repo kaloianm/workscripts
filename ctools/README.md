@@ -1,7 +1,7 @@
 # CTools: Set of Python tools for manipulating sharded clusters
 The CTools package is a set of command-line tools for manipulating sharded clusters. All the tools are built on a common Python framework and use asyncio in order to achieve parallelism.
 
-Click on the links below or run the tool with `--help` for more information on how to use it.
+Click on the links below or run the respective tool with `--help` for more information on how to use it.
 
 ### [defragment_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/defragment_sharded_collection.py#L3)
 ### [generate_fragmented_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/generate_fragmented_sharded_collection.py#L3)
