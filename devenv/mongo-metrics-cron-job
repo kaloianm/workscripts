@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Script for uploading the mongo metrics to the metrics cluster
+#
+# Prerequisite steps:
+#
+# 1. Create a clone of the master branch to be used only for the purposes of this script:
+#       git clone -b master --single-branch git@github.com:10gen/mongo.git $HOME/workspace/mongo-metrics-cron-job/
+#
+# 2. Create a log file:
+#       touch $HOME/workspace/mongo-metrics-cron-job/mongo-metrics-cron-job.log
+#
+# 3. Add this script to user's crontab
+#       crontab -e
+#       ...
+#       0   8   *   *   *   MONGODB_URI="<URI>" $HOME/workspace/workscripts/devenv/mongo-metrics-cron-job >> $HOME/workspace/mongo-metrics-cron-job/mongo-metrics-cron-job.log 2>&1
+
+set -e
+set -x
+
+export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
+
+pushd $HOME/workspace/mongo-metrics-cron-job/
+git pull
+
+$PYTHON_CMD -m venv python3-venv
+source python3-venv/bin/activate
+
+$PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
+echo "Using python3 from $(which python3) and pip from $(which pip)"
+
+# Generate the metrics
+find bazel-out/ -name '*.mod_scanner_decls.json' -delete
+bazel build --config=mod-scanner  "//src/mongo/..."
+python "modules_poc/merge_decls.py" --intra-module
+
+# Upload the metrics to the metrics cluster
+python "modules_poc/upload.py" "$MONGODB_URI"
+
+popd
