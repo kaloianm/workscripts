@@ -1,3 +1,5 @@
+#!/bin/bash
+
 set -e
 set -x
 
@@ -8,6 +10,8 @@ source python3-venv/bin/activate
 
 $PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
 echo "Using python3 from $(which python3) and pip from $(which pip)"
+
+# Script for setting-up a post-8.0 mongodb environment
 
 python3 -m pip install 'poetry==1.5.1'
 
