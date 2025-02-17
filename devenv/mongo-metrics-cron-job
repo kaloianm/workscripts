@@ -1,5 +1,19 @@
 #!/bin/bash
 
+pushd $HOME/workspace/mongo-metrics-cron-job/
+git pull
+
+set -e
+set -x
+
+export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
+
+$PYTHON_CMD -m venv python3-venv
+source python3-venv/bin/activate
+
+$PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
+echo "Using python3 from $(which python3) and pip from $(which pip)"
+
 # Script for uploading the mongo metrics to the metrics cluster
 #
 # Prerequisite steps:
@@ -15,22 +29,10 @@
 #       ...
 #       0   8   *   *   *   MONGODB_URI="<URI>" $HOME/workspace/workscripts/devenv/mongo-metrics-cron-job >> $HOME/workspace/mongo-metrics-cron-job/mongo-metrics-cron-job.log 2>&1
 
-set -e
-set -x
-
-export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
-
-pushd $HOME/workspace/mongo-metrics-cron-job/
-git pull
-
-$PYTHON_CMD -m venv python3-venv
-source python3-venv/bin/activate
-
-$PYTHON_CMD -c "import sys; print('Not in a virtual environment' if sys.prefix == sys.base_prefix else 'In a virtual environment')"
-echo "Using python3 from $(which python3) and pip from $(which pip)"
+buildscripts/poetry_sync.sh
 
 # Generate the metrics
-find bazel-out/ -name '*.mod_scanner_decls.json' -delete
+test -d bazel-out/ && find bazel-out/ -name '*.mod_scanner_decls.json' -delete
 bazel build --config=mod-scanner  "//src/mongo/..."
 python "modules_poc/merge_decls.py" --intra-module
 
