@@ -1,12 +1,15 @@
 #!/bin/bash
-
-pushd $HOME/workspace/mongo-metrics-cron-job/
-git pull
-
 set -e
 set -x
 
 export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
+
+echo "-----------------------------------------------"
+echo "$(date): Starting mongo-metrics-cron-job"
+echo "-----------------------------------------------"
+
+pushd $HOME/workspace/mongo-metrics-cron-job/
+git pull
 
 $PYTHON_CMD -m venv python3-venv
 source python3-venv/bin/activate
@@ -40,3 +43,7 @@ python "modules_poc/merge_decls.py" --intra-module
 python "modules_poc/upload.py" "$MONGODB_URI"
 
 popd
+
+echo "-----------------------------------------------"
+echo "$(date): Completed mongo-metrics-cron-job"
+echo "-----------------------------------------------"
