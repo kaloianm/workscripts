@@ -18,15 +18,5 @@
             "port": 5678,
             "host": "localhost"
         },
-        {
-            "name": "Python: Reconstruct cluster script",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/ctools/reconstruct_cluster_from_config_dump.py",
-            "args": [
-                "--binarypath", "E:\\workspace\\mongo", "--dir", "D:\\Temp\\Repro", "D:\\Temp\\dump"
-            ],
-            "console": "integratedTerminal"
-        }
     ]
 }

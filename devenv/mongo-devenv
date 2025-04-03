@@ -2,7 +2,7 @@
 set -e
 set -x
 
-export PYTHON_CMD=/opt/mongodbtoolchain/v4/bin/python3
+export PYTHON_CMD=/opt/mongodbtoolchain/v5/bin/python3
 
 $PYTHON_CMD -m venv python3-venv
 source python3-venv/bin/activate

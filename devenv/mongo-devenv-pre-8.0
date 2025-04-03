@@ -13,3 +13,31 @@ echo "Using python3 from $(which python3) and pip from $(which pip)"
 pip install -r etc/pip/core-requirements.txt
 pip install -r etc/pip/dev-requirements.txt
 pip install -r etc/pip/lint-requirements.txt
+
+: '
+Compilation command lines:
+
+###########################################################
+###### Development build (debug and no optimization) ######
+###########################################################
+buildscripts/scons.py --ssl --variables-files=etc/scons/developer_versions.vars --variables-files=etc/scons/mongodbtoolchain_stable_clang.vars \
+    -j128 --jlink=4 --link-model=dynamic ICECC=icecc CCACHE=ccache \
+    VARIANT_DIR=ninja DESTDIR=build/install_ninja \
+    --dbg=on --opt=off \
+    --ninja \
+    generate-ninja
+
+ninja -j128 install-all
+ninja -j128 install-dist-test
+ninja -j128 install-unittests
+
+#######################################
+###### Optimized (release) build ######
+#######################################
+buildscripts/scons.py --ssl --variables-files=etc/scons/developer_versions.vars --variables-files=etc/scons/mongodbtoolchain_stable_gcc.vars \
+    -j128 --jlink=4 ICECC=icecc CCACHE=ccache \
+    VARIANT_DIR=release DESTDIR=build/install_release \
+    --separate-debug=on --use-diagnostic-latches=off GDB_INDEX=0 \
+    --release \
+    install-core
+'
