@@ -6,7 +6,7 @@ set print max-depth 2
 set print pretty on
 
 set history save on
-set history size 100
+set history size 1000
 set history filename ~/.gdb_history
 
 add-auto-load-safe-path ~/workspace/mongo*/.gdbinit
@@ -14,6 +14,10 @@ add-auto-load-safe-path ~/workspace/mongo*/.gdbinit
 # BEGIN - Skip
 skip -function "operator new"
 skip -function "mongo::Timestamp::Timestamp"
+skip -function "mongo::WithLock::WithLock"
+skip -function "std::__cxx11::basic_string"
+skip -function "mongo::Status::Status"
+skip -function "mongo::StringData::StringData"
 # END - Skip
 
 python
