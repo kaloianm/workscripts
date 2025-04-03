@@ -12,7 +12,7 @@ echo "Using python3 from $(which python3) and pip from $(which pip)"
 
 # Script for setting-up a post-8.0 mongodb environment
 
-python3 -m pip install 'poetry==1.5.1'
+python3 -m pip install 'poetry==2.0.0'
 
 export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
 python3 -m poetry install --no-root --sync
