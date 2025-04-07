@@ -33,10 +33,13 @@ async def clear_collection_sharding(cluster, args):
     await cluster.adminDb.command({
         'mergeChunks':
             args.namespace,
-        'bounds': [{k: bson.min_key.MinKey
-                    for k in collection['key'].keys()},
-                   {k: bson.max_key.MaxKey
-                    for k in collection['key'].keys()}]
+        'bounds': [{
+            k: bson.min_key.MinKey
+            for k in collection['key'].keys()
+        }, {
+            k: bson.max_key.MaxKey
+            for k in collection['key'].keys()
+        }]
     })
 
     if await cluster.configDb.chunks.count_documents({'uuid': collection['uuid']}) != 1:

@@ -67,8 +67,8 @@ class ExternalProcessManager:
 
         # Make it unbuffered so the output of the subprocesses shows up immediately in the file
         kOutputLogFileBufSize = 256
-        self._outputLogFile = open(
-            os.path.join(self._config.root, 'reconstruct.log'), 'w', kOutputLogFileBufSize)
+        self._outputLogFile = open(os.path.join(self._config.root, 'reconstruct.log'), 'w',
+                                   kOutputLogFileBufSize)
 
     # Invokes mongorestore of the config database dump against the instance running on
     # 'instance_port'
@@ -85,8 +85,8 @@ class ExternalProcessManager:
             # Discover if there are compressed files in order in order to decide whether to add the
             # '--gzip' prefix to mongorestore
             if (os.path.exists(
-                    os.path.join(
-                        os.path.join(self._config.configdump, 'config'), 'databases.bson.gz'))):
+                    os.path.join(os.path.join(self._config.configdump, 'config'),
+                                 'databases.bson.gz'))):
                 logging.info(
                     'Discovered gzipped contents, adding the --gzip option to mongorestore')
                 mongorestore_command += ['--gzip']
@@ -220,8 +220,8 @@ class MlaunchCluster:
         self._shardid_remap = {}
 
         if len(shards_from_dump) <= len(self._shards_from_mlaunch_snapshot):
-            for from_shard, to_shard in zip(
-                    deepcopy(shards_from_dump), deepcopy(self._shards_from_mlaunch_snapshot)):
+            for from_shard, to_shard in zip(deepcopy(shards_from_dump),
+                                            deepcopy(self._shards_from_mlaunch_snapshot)):
                 self.configDb.shards.delete_one({'_id': from_shard['_id']})
 
                 self._shardid_remap[from_shard['_id']] = to_shard['_id']

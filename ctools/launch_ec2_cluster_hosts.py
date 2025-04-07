@@ -241,10 +241,9 @@ async def main_launch(args, ec2):
     logging.info('Instances launched, now waiting for them to start running ...')
 
     waiter = ec2.get_waiter('instance_running')
-    waiter.wait(
-        InstanceIds=list(
-            map(lambda x: x['InstanceId'], client_driver_instances + config_instances +
-                shard_instances)))
+    waiter.wait(InstanceIds=list(
+        map(lambda x: x['InstanceId'], client_driver_instances + config_instances +
+            shard_instances)))
 
     print(describe_cluster(ec2, args.clustertag))
 

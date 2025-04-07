@@ -27,6 +27,7 @@ if (sys.version_info[0] < 3):
 
 
 class ShardedCollection:
+
     def __init__(self, cluster, ns):
         self.cluster = cluster
         self.name = ns
@@ -49,9 +50,12 @@ class ShardedCollection:
             return {'ns': self.name}
 
     async def data_size_kb(self):
-        data_size_response = await self.cluster.client[self.ns['db']].command({
-            'collStats': self.ns['coll'],
-        }, codec_options=self.cluster.client.codec_options)
+        data_size_response = await self.cluster.client[self.ns['db']].command(
+            {
+                'collStats': self.ns['coll'],
+            },
+            codec_options=self.cluster.client.codec_options,
+        )
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
 
     async def data_size_kb_per_shard(self):
@@ -71,8 +75,8 @@ class ShardedCollection:
                 }
             }
         }]
-        storage_stats = await self.cluster.client[self.ns['db']][
-            self.ns['coll']].aggregate(pipeline).to_list(300)
+        storage_stats = await self.cluster.client[self.ns['db']][self.ns['coll']
+                                                                 ].aggregate(pipeline).to_list(300)
 
         def bytes_to_kb(size):
             return max(float(size), 1024.0) / 1024.0
@@ -84,13 +88,16 @@ class ShardedCollection:
         return sizes
 
     async def data_size_kb_from_shard(self, range):
-        data_size_response = await self.cluster.client[self.ns['db']].command({
-            'dataSize': self.name,
-            'keyPattern': self.shard_key_pattern,
-            'min': range[0],
-            'max': range[1],
-            'estimate': True
-        }, codec_options=self.cluster.client.codec_options)
+        data_size_response = await self.cluster.client[self.ns['db']].command(
+            {
+                'dataSize': self.name,
+                'keyPattern': self.shard_key_pattern,
+                'min': range[0],
+                'max': range[1],
+                'estimate': True
+            },
+            codec_options=self.cluster.client.codec_options,
+        )
 
         # Round up the data size of the chunk to the nearest kilobyte
         return math.ceil(max(float(data_size_response['size']), 1024.0) / 1024.0)
@@ -125,7 +132,8 @@ class ShardedCollection:
                 'min': chunk['min'],
                 'max': chunk['max']
             },
-            codec_options=self.cluster.client.codec_options)
+            codec_options=self.cluster.client.codec_options,
+        )
 
         split_keys = res['splitKeys']
         if len(split_keys) > 0:
@@ -133,27 +141,36 @@ class ShardedCollection:
                 split_keys.pop()
 
             for key in res['splitKeys']:
-                res = await self.cluster.adminDb.command({
-                    'split': self.name,
-                    'middle': key
-                }, codec_options=self.cluster.client.codec_options)
+                res = await self.cluster.adminDb.command(
+                    {
+                        'split': self.name,
+                        'middle': key
+                    },
+                    codec_options=self.cluster.client.codec_options,
+                )
 
             splits_performed_per_shard[chunk['shard']] += len(split_keys)
 
     async def move_chunk(self, chunk, to):
-        await self.cluster.adminDb.command({
-            'moveChunk': self.name,
-            'bounds': [chunk['min'], chunk['max']],
-            'to': to
-        }, codec_options=self.cluster.client.codec_options)
+        await self.cluster.adminDb.command(
+            {
+                'moveChunk': self.name,
+                'bounds': [chunk['min'], chunk['max']],
+                'to': to
+            },
+            codec_options=self.cluster.client.codec_options,
+        )
 
     async def merge_chunks(self, consecutive_chunks):
         assert (len(consecutive_chunks) > 1)
 
-        await self.cluster.adminDb.command({
-            'mergeChunks': self.name,
-            'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
-        }, codec_options=self.cluster.adminDb.codec_options)
+        await self.cluster.adminDb.command(
+            {
+                'mergeChunks': self.name,
+                'bounds': [consecutive_chunks[0]['min'], consecutive_chunks[-1]['max']]
+            },
+            codec_options=self.cluster.adminDb.codec_options,
+        )
 
     async def try_write_chunk_size(self, range, expected_owning_shard, size_to_write_kb):
         try:
@@ -458,6 +475,7 @@ async def main(args):
             yield last, False
 
         class ChunkBatch:
+
             def __init__(self, chunk_size_estimation):
                 self.chunk_size_estimation = chunk_size_estimation
                 self.batch = []
@@ -524,9 +542,9 @@ async def main(args):
                 if args.merge_batch_size and len(consecutive_chunks) == args.merge_batch_size:
                     return True
                 trust_estimations = consecutive_chunks.trust_batch_estimation and 'defrag_collection_est_size' in c
-                return (trust_estimations and
-                        consecutive_chunks.batch_size_estimation + c['defrag_collection_est_size'] >
-                        (target_chunk_size_kb * 1.20))
+                return trust_estimations and (consecutive_chunks.batch_size_estimation +
+                                              c['defrag_collection_est_size']
+                                              > (target_chunk_size_kb * 1.20))
 
             def too_many_chunks_to_merge_at_once():
                 """Merging too many chunks in one go can hit the 16 MB BSON size limit. 
@@ -535,13 +553,14 @@ async def main(args):
                 max_chunks_to_merge = 20000
                 return len(consecutive_chunks) > max_chunks_to_merge
 
-            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_merge_cap() and not too_many_chunks_to_merge_at_once():
+            if consecutive_chunks.batch[-1]['max'] == c['min'] and not will_overflow_merge_cap(
+            ) and not too_many_chunks_to_merge_at_once():
                 consecutive_chunks.append(c)
             elif len(consecutive_chunks) == 1:
                 await update_chunk_size_estimation(consecutive_chunks.batch[0])
                 remain_chunks.append(consecutive_chunks.batch[0])
-                consecutive_chunks.reset()
 
+                consecutive_chunks.reset()
                 consecutive_chunks.append(c)
 
                 if not has_more:
@@ -560,8 +579,9 @@ async def main(args):
             # After we have collected a run of chunks whose estimated size is 90% of the maximum
             # chunk size, invoke `dataSize` in order to determine whether we can merge them or if
             # we should continue adding more chunks to be merged
-            if consecutive_chunks.batch_size_estimation < target_chunk_size_kb * args.threshold_for_size_calculation \
-                and not merge_consecutive_chunks_without_size_check and has_more:
+            if (consecutive_chunks.batch_size_estimation
+                    < target_chunk_size_kb * args.threshold_for_size_calculation
+                ) and not merge_consecutive_chunks_without_size_check and has_more:
                 continue
 
             merge_bounds = [consecutive_chunks.batch[0]['min'], consecutive_chunks.batch[-1]['max']]
@@ -648,8 +668,8 @@ async def main(args):
                 tasks = []
                 for s in shard_to_chunks:
                     tasks.append(
-                        asyncio.ensure_future(
-                            merge_chunks_on_shard(s, collectionVersion, progress)))
+                        asyncio.ensure_future(merge_chunks_on_shard(s, collectionVersion,
+                                                                    progress)))
                 await asyncio.gather(*tasks)
     else:
         logging.info("Skipping Phase I")
@@ -741,8 +761,8 @@ async def main(args):
             right_chunk = chunks_min_index.get(pickle.dumps(c['max']))
 
             # Exclude overweight target shards
-            if (left_chunk is not None
-                    and right_chunk is not None) and (left_chunk['shard'] != right_chunk['shard']):
+            if (left_chunk is not None and right_chunk is not None) and (left_chunk['shard']
+                                                                         != right_chunk['shard']):
                 if total_shard_size[left_chunk['shard']] > total_shard_size[
                         right_chunk['shard']] * args.shard_imbalance_frac:
                     left_chunk = None
@@ -932,7 +952,6 @@ async def main(args):
     if args.dryrun and coll_size_kb == 1:
         coll_size_kb = sum_coll_size
 
-    num_shards = len(shard_to_chunks)
     avg_chunk_size_phase_1 = coll_size_kb / len(chunks_id_index)
 
     ###############  End stats calculation #############
@@ -958,10 +977,11 @@ async def main(args):
     else:
         logging.info("Skipping Phase II")
         total_moved_data_kb = 0
+
     '''
     for each chunk C in the shard:
-    - No split if chunk size < 133% target chunk size
-    - Split otherwise
+        - No split if chunk size < 133% target chunk size
+        - Split otherwise
     '''
 
     async def split_oversized_chunks(shard, progress):

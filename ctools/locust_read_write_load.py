@@ -38,7 +38,8 @@ def nanos_to_millis(nanos):
 
 @events.init_command_line_parser.add_listener
 def on_locust_init_command_line_parser(parser):
-    parser.add_argument('--ns', help='Namespace to use', metavar='ns', type=str, default='locust_read_write_load')
+    parser.add_argument('--ns', help='Namespace to use', metavar='ns', type=str,
+                        default='locust_read_write_load')
 
 
 @events.init.add_listener
