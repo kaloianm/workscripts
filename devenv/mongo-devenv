@@ -16,3 +16,13 @@ python3 -m pip install 'poetry==2.0.0'
 
 export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
 python3 -m poetry install --no-root --sync
+
+: '
+Compilation command lines:
+
+###########################################################
+###### Development build (debug and no optimization) ######
+###########################################################
+bazel build --mongo_toolchain_version=v5 --config=dbg compiledb install-dist-test
+
+'

@@ -144,7 +144,8 @@ class Cluster:
 
         conn_parts = shard['host'].split('/', 1)
         if self.parsed_uri['username']:
-            uri = 'mongodb://' + self.parsed_uri['username'] + ':' + self.parsed_uri['password'] + '@' + conn_parts[1]
+            uri = 'mongodb://' + self.parsed_uri['username'] + ':' + self.parsed_uri[
+                'password'] + '@' + conn_parts[1]
         else:
             uri = 'mongodb://' + conn_parts[1]
 
