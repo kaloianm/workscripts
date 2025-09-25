@@ -40,6 +40,15 @@ RUN echo "ubuntu:ubuntu" | chpasswd && \
 COPY .tmux.conf /home/ubuntu/.tmux.conf
 RUN chown ubuntu:ubuntu /home/ubuntu/.tmux.conf
 
+# Copy custom bashrc defaults and source it from .bashrc
+COPY .bashrc_custom_defaults /home/ubuntu/.bashrc_custom_defaults
+RUN chown ubuntu:ubuntu /home/ubuntu/.bashrc_custom_defaults && \
+    echo "" >> /home/ubuntu/.bashrc && \
+    echo "# Source custom defaults" >> /home/ubuntu/.bashrc && \
+    echo "if [ -f ~/.bashrc_custom_defaults ]; then" >> /home/ubuntu/.bashrc && \
+    echo "    . ~/.bashrc_custom_defaults" >> /home/ubuntu/.bashrc && \
+    echo "fi" >> /home/ubuntu/.bashrc
+
 # Add useful commands to bash history
 RUN echo "tmux new-session -A -s main" >> /home/ubuntu/.bash_history && \
     chown ubuntu:ubuntu /home/ubuntu/.bash_history

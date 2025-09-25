@@ -1,0 +1,27 @@
+# This is a script with custom configurations relevant for all Linux develoment worksations. Source
+# it from .bashrc by adding this line to the end:
+#    source "$HOME/workspace/workscripts/devenv/.bashrc_custom_limits"
+# 
+# Add to /etc/sysctl.conf:
+#  kernel.core_pattern=dump_%e.%p.core
+#  net.ipv4.tcp_fastopen=3
+#
+# Add to /etc/security/limits.conf:
+# # BEGIN USER ULIMITS BLOCK
+# ubuntu hard nofile 64000
+# ubuntu hard nproc 64000
+# ubuntu soft nofile 64000
+# ubuntu soft nproc 64000
+# # END USER ULIMITS BLOCK
+
+# BEGIN - ulimits
+ulimit -v unlimited
+ulimit -n 64000
+ulimit -u 64000
+ulimit -l 256000
+ulimit -c unlimited
+# END - ulimits
+
+# BEGIN - PATH
+export PATH="$HOME/workspace/workscripts/devenv:$PATH"
+# END - PATH
