@@ -4,13 +4,7 @@
 #   docker build -t mongo-ubuntu-dev:1.0 -f MongoDev.Dockerfile .
 #
 #   # For interactive development without volume mounting:
-#   docker run -it --name mongo-container-dev --hostname mongo-container-dev --network mongo-net -v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent mongo-ubuntu-dev:1.0
-#
-#   # For interactive development with volume mounting:
-#   docker run -it --name mongo-container-dev --hostname mongo-container-dev --network mongo-net \
-#     -v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent \
-#     -v $(pwd):/workspace \
-#     mongo-ubuntu-dev:1.0
+#   docker run -it --name mongo-container-dev --hostname mongo-container-dev --network mongo-net mongo-ubuntu-dev:1.0
 #
 #   # To reconnect to an already started container (or start and connect):
 #   docker start -ai mongo-container-dev
