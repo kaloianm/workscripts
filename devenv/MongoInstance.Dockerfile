@@ -3,13 +3,24 @@
 # Usage:
 #   docker build -t mongo-ubuntu-instance:8.0 -f MongoInstance.Dockerfile .
 #
-#   docker run -d -p 27017:27017 --name mongo-8.0 --network mongo-net --hostname mongo-8-0 --network-alias mongo-8-0 mongo-ubuntu-instance:8.0
+#   # Run with named volume:
+#   docker run -d -p 27017:27017 \
+#     --name mongo-8.0 \
+#     --network mongo-net \
+#     --hostname mongo-8-0 \
+#     --network-alias mongo-8-0 \
+#     --memory="4g" \
+#     --memory-swap="4g" \
+#     --volume=mongo-8.0:/mongo-data \
+#     mongo-ubuntu-instance:8.0
 #
 #   # To connect to the running MongoDB instance:
 #   docker exec -it --user ubuntu mongo-8.0 /usr/bin/bash
 #
 # The MongoDB instance will be initialized as a single-node replica set named 'rs0'
-# Connect with: mongosh mongodb://mongo-8-0:27017
+# Connect with:
+#   mongosh mongodb://mongo-8-0:27017
+#   mongosh mongodb://localhost:27017
 
 # Use mongo-ubuntu 1.0 as base image
 FROM mongo-ubuntu:1.0
@@ -32,11 +43,12 @@ RUN sudo apt-get update && sudo apt-get install -y \
     mongodb-mongosh \
     && sudo rm -rf /var/lib/apt/lists/*
 
-# Create MongoDB data directory
-RUN sudo mkdir -p /data/db && sudo chown -R mongodb:mongodb /data/db
+# Create MongoDB directories within a single volume
+RUN sudo mkdir -p /mongo-data/db && sudo chown -R mongodb:mongodb /mongo-data/db
+RUN sudo mkdir -p /mongo-data/logs && sudo chown -R mongodb:mongodb /mongo-data/logs
 
-# Create MongoDB log directory
-RUN sudo mkdir -p /var/log/mongodb && sudo chown -R mongodb:mongodb /var/log/mongodb
+# Create single volume for all MongoDB data
+VOLUME ["/mongo-data"]
 
 # Expose MongoDB port
 EXPOSE 27017
@@ -45,4 +57,4 @@ EXPOSE 27017
 USER mongodb
 
 # Simply start MongoDB
-CMD ["mongod", "--bind_ip", "0.0.0.0", "--port", "27017", "--dbpath", "/data/db", "--logpath", "/var/log/mongodb/mongod.log", "--replSet", "rs0"]
+CMD ["mongod", "--bind_ip", "0.0.0.0", "--port", "27017", "--dbpath", "/mongo-data/db", "--logpath", "/mongo-data/logs/mongod.log", "--replSet", "rs0"]
