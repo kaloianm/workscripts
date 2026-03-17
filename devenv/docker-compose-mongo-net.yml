@@ -1,0 +1,8 @@
+networks:
+  mongo-net:
+    name: mongo-net
+    driver: bridge
+    internal: true
+  mongo-external:
+    name: mongo-external
+    driver: bridge

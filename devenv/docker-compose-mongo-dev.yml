@@ -1,0 +1,87 @@
+# Docker Compose for MongoDB development container
+#
+# Usage:
+#   docker compose -f docker-compose-mongo-dev.yml up -d --build
+#   docker exec -it mongo-dev bash
+
+include:
+  - docker-compose-mongo-net.yml
+
+services:
+  mongo-dev:
+    container_name: mongo-dev
+    hostname: mongo-dev
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM ubuntu:24.04
+
+        ENV DEBIAN_FRONTEND=noninteractive
+        ENV TZ=UTC
+
+        RUN apt-get update && apt-get upgrade -y
+
+        RUN apt-get update && apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            htop \
+            less \
+            lsb-release \
+            net-tools \
+            software-properties-common \
+            sudo \
+            telnet \
+            tmux \
+            vim \
+            wget \
+            && rm -rf /var/lib/apt/lists/*
+
+        RUN echo "ubuntu:ubuntu" | chpasswd && \
+            usermod -aG sudo ubuntu && \
+            echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+        WORKDIR /home/ubuntu
+        USER ubuntu
+
+        ENV SHELL=/usr/bin/bash
+        ENV USER=ubuntu
+        ENV HOME=/home/ubuntu
+
+        RUN sudo apt-get update && sudo apt-get install -y \
+            build-essential \
+            git \
+            iputils-ping \
+            openssh-client \
+            procps \
+            python3 \
+            python3-pip \
+            && sudo rm -rf /var/lib/apt/lists/*
+
+        RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
+            sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor
+
+        RUN echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse" | \
+            sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+
+        RUN sudo apt-get update && sudo apt-get install -y \
+            mongodb-mongosh
+
+        CMD ["sleep", "infinity"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ~/.ssh:/home/ubuntu/.ssh:ro
+      - mongo-dev-home:/home/ubuntu
+    networks:
+      mongo-net:
+        aliases:
+          - mongo-dev
+      mongo-external:
+
+volumes:
+  mongo-dev-home:
+    driver: local
+    # Note: On Docker Desktop (macOS), named volumes live on the VM's virtual
+    # disk and size cannot be directly capped per-volume. The VM disk itself
+    # can be resized in Docker Desktop settings.
