@@ -99,18 +99,20 @@ class MongoUser(User):
             )
             assert upsert_result.upserted_id is not None or upsert_result.modified_count == 1, f"Upsert for {self.shard_key} didn't result in any documents being upserted"
 
-            self.environment.events.request_success.fire(
+            self.environment.events.request.fire(
                 request_type='insert_shard_key',
                 name='insert_shard_key',
                 response_time=nanos_to_millis(perf_counter_ns() - start_time_insert),
                 response_length=0,
+                exception=None,
             )
         else:
-            self.environment.events.request_success.fire(
+            self.environment.events.request.fire(
                 request_type='find_shard_key',
                 name='find_shard_key',
                 response_time=nanos_to_millis(perf_counter_ns() - start_time),
                 response_length=0,
+                exception=None,
             )
 
     @task(40)
@@ -130,11 +132,12 @@ class MongoUser(User):
         )
         assert update_result.modified_count > 0, f"Update for {self.shard_key} didn't result in any documents being updated"
 
-        self.environment.events.request_success.fire(
+        self.environment.events.request.fire(
             request_type='update_by_shard_key',
             name='update_by_shard_key',
             response_time=nanos_to_millis(perf_counter_ns() - start_time),
             response_length=0,
+            exception=None,
         )
 
 
@@ -155,7 +158,7 @@ async def main(args):
         asyncio.ensure_future(async_start_shell_command(coordinator_command, 'coordinator')))
 
     # Launch the workers
-    for _ in range(0, 4):
+    for _ in range(0, args.workers):
         worker_command = (f'{sys.executable} -m '
                           f'locust -f {__file__} '
                           f'--worker --master-port {args.coordinator_port} '
@@ -204,12 +207,17 @@ if __name__ == "__main__":
         type=int,
         default=8090,
     )
+    argsParser.add_argument(
+        '--workers',
+        help='The number of worker processes to launch',
+        metavar='workers',
+        type=int,
+        default=4,
+    )
 
     args = argsParser.parse_args()
     logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
     logging.info(f'Running with Python source file of {__file__}')
     logging.info(f'Using interpreter of {sys.executable}')
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main(args))
+    asyncio.run(main(args))
