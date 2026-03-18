@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 #
 help_string = '''
-Tool to launch a set of clean (in the sense without MongoDB on them) EC2 hosts which can be used for
-constructing a sharded MongoDB cluster.
+Tool to launch a set of clean EC2 hosts which can be used as a MongoDB replica set.
 
 Since it interacts with AWS, a default region_name should be set in $HOME/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
@@ -29,19 +28,14 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
-def describe_cluster(ec2, clustertag):
+def describe_replicaset(ec2, clustertag):
     all_instances = describe_all_instances(ec2, clustertag)
 
-    cluster_json = {
+    replicaset_json = {
         "Name":
             clustertag,
         "Hosts":
-            list(
-                map(
-                    lambda x: x["PublicDnsName"],
-                    filter_instances_by_role(all_instances, 'config') +
-                    filter_instances_by_role(all_instances, 'shard0') +
-                    filter_instances_by_role(all_instances, 'shard1'))),
+            list(map(lambda x: x["PublicDnsName"], filter_instances_by_role(all_instances, 'rs'))),
         "DriverHosts":
             list(
                 map(lambda x: x["PublicDnsName"], filter_instances_by_role(all_instances,
@@ -50,14 +44,11 @@ def describe_cluster(ec2, clustertag):
             "<Substitute with the local binaries path>",
         "RemoteMongoDPath":
             "/mnt/data/mongod",
-        "RemoteMongoSPath":
-            "/mnt/data/mongos",
         "FeatureFlags": [],
-        "MongoDParameters": ["--wiredTigerCacheSizeGB 18", ],
-        "MongoSParameters": [],
+        "MongoDParameters": [],
     }
 
-    return json.dumps(cluster_json, indent=2, separators=(', ', ': '))
+    return json.dumps(replicaset_json, indent=2, separators=(', ', ': '))
 
 
 def main_launch(args, ec2):
@@ -65,9 +56,6 @@ def main_launch(args, ec2):
 
     template = load_template(args.template)
     client_template = load_template(CLIENT_HOST_TEMPLATE)
-
-    ##############################################################################################
-    # DRIVER INSTANCES
 
     client_driver_instances = launch_instances(
         ec2,
@@ -77,39 +65,20 @@ def main_launch(args, ec2):
         count=1,
     )
 
-    ##############################################################################################
-    # SHARD INSTANCES
-
-    # Config instances
-    config_instances = launch_instances(
+    rs_instances = launch_instances(
         ec2,
         template,
-        tag_specs=make_instance_tag_specifications(args.clustertag, 'config'),
+        tag_specs=make_instance_tag_specifications(args.clustertag, 'rs'),
         user_data=make_cluster_host_configuration(args.clustertag, args.filesystem),
-        count=3,
+        count=args.nodes,
     )
 
-    # Shard(s) instances
-    shard_instances = []
-    for shard_id in ['shard0', 'shard1']:
-        shard_instances += launch_instances(
-            ec2,
-            template,
-            tag_specs=make_instance_tag_specifications(args.clustertag, shard_id),
-            user_data=make_cluster_host_configuration(args.clustertag, args.filesystem),
-            count=args.shard_repl_set_nodes,
-        )
+    wait_for_instances(ec2, client_driver_instances + rs_instances)
 
-    wait_for_instances(ec2, client_driver_instances + config_instances + shard_instances)
-
-    cluster_desc = describe_cluster(ec2, args.clustertag)
-    with open('cluster.json', 'w') as f:
-        f.write(cluster_desc)
-    print(cluster_desc)
-
-    logging.info(
-        f'To deploy binaries to cluster, now run ./remote_control_cluster.py cluster.json create  ...'
-    )
+    rs_desc = describe_replicaset(ec2, args.clustertag)
+    with open('replset.json', 'w') as f:
+        f.write(rs_desc)
+    print(rs_desc)
 
 
 def main_terminate(args, ec2):
@@ -126,8 +95,7 @@ def main_terminate(args, ec2):
 
 def main_describe(args, ec2):
     '''Implementation of the describe command'''
-    cluster_desc = describe_cluster(ec2, args.clustertag)
-    print(cluster_desc)
+    print(describe_replicaset(ec2, args.clustertag))
 
 
 if __name__ == "__main__":
@@ -136,21 +104,20 @@ if __name__ == "__main__":
 
     argsParser.add_argument(
         'clustertag', help=
-        ('String with which to tag all the instances which will be spawned for this cluster so they '
-         'can easily be identified. For example 5.0, 6.0 etc. There must not be any existing '
-         'instances with that tag.'), type=str)
+        ('String with which to tag all the instances which will be spawned for this replica set so '
+         'they can easily be identified. There must not be any existing instances with that tag.'),
+        type=str)
 
     subparsers = argsParser.add_subparsers(title='subcommands')
 
     ###############################################################################################
     # Arguments for the 'launch' command
     parser_launch = subparsers.add_parser(
-        'launch', help='Launches the EC2 hosts which will comprise the cluster.')
+        'launch', help='Launches the EC2 hosts which will comprise the replica set.')
     parser_launch.add_argument(
         '--template', required=True,
         help='Path to a JSON file with EC2 instance parameters (e.g. Atlas-M60.json).')
-    parser_launch.add_argument('--shard-repl-set-nodes',
-                               help='Number of nodes to use for the shard replica sets.', type=int,
+    parser_launch.add_argument('--nodes', help='Number of nodes in the replica set.', type=int,
                                default=3)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
@@ -159,13 +126,13 @@ if __name__ == "__main__":
     ###############################################################################################
     # Arguments for the 'terminate' command
     parser_terminate = subparsers.add_parser('terminate',
-                                             help='Terminates the EC2 hosts for a cluster.')
+                                             help='Terminates the EC2 hosts for a replica set.')
     parser_terminate.set_defaults(func=main_terminate)
 
     ###############################################################################################
     # Arguments for the 'describe' command
     parser_describe = subparsers.add_parser(
-        'describe', help='Describes all the hosts which comprise the cluster')
+        'describe', help='Describes all the hosts which comprise the replica set')
     parser_describe.set_defaults(func=main_describe)
 
     args = argsParser.parse_args()

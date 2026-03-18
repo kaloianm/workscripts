@@ -30,7 +30,7 @@ class RemoteSSHHost:
         #  The 'host' key must exist
         self.host = self.host_desc['host']
 
-        default_ssh_username = 'ubuntu'
+        default_ssh_username = 'ec2-user'
         default_ssh_args = '-o StrictHostKeyChecking=no'
 
         # Populate parameter defaults
