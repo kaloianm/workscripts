@@ -58,7 +58,7 @@ class RemoteSSHHost:
         """
 
         rsync_command = (
-            f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t '
+            f'rsync -e "ssh {self.host_desc["ssh_args"]}" --progress -r -t -L '
             f'{source_pattern} {self.host_desc["ssh_username"]}@{self.host}:{destination_path}')
         await async_start_shell_command(rsync_command, self.host)
 
