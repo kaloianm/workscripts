@@ -11,14 +11,8 @@ import os
 ANY_HOST_CONFIGURATION = '''#!/bin/bash
 set -e
 
-# Detect the default non-root user (ec2-user on Amazon Linux, ubuntu on Ubuntu, etc.)
-DEFAULT_USER=$(getent passwd ec2-user 2>/dev/null | cut -d: -f1 || \
-               getent passwd ubuntu 2>/dev/null | cut -d: -f1 || \
-               echo "nobody")
-DEFAULT_USER_HOME=$(getent passwd "$DEFAULT_USER" | cut -d: -f6)
-
 ###################################################################################################
-echo "Applying OS configuration for user $DEFAULT_USER (Home: $DEFAULT_USER_HOME)"
+echo "Applying OS configuration for user $USER (Home: $HOME)"
 ###################################################################################################
 
 sudo bash -c "echo '# BEGIN USER ULIMITS BLOCK' >> /etc/security/limits.conf"
@@ -33,6 +27,8 @@ sudo sysctl -p
 ###################################################################################################
 echo "Configuring required packages"
 ###################################################################################################
+
+sudo apt update -y
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
@@ -53,22 +49,22 @@ echo "Configuring shard host volumes for {clustertag}"
 ###################################################################################################
 
 echo "Waiting for volume to be attached ..."
-while [ ! -e "/dev/xvdb" ]; do sleep 1; done
+while [ ! -e "/dev/nvme0n1" ]; do sleep 1; done
 
-if [ ! -e "/dev/xvdb1" ]; then
+if [ ! -e "/dev/nvme0n1p1" ]; then
   echo "Partitioning data volume ..."
-  sudo parted -s /dev/xvdb mklabel gpt &&
-    sudo parted -s -a optimal /dev/xvdb mkpart primary 0% 100%
+  sudo parted -s /dev/nvme0n1 mklabel gpt &&
+    sudo parted -s -a optimal /dev/nvme0n1 mkpart primary 0% 100%
 
   echo "Making {filesystem} filesystem ..."
-  while [ ! -e "/dev/xvdb1" ]; do sleep 1; done
-  sudo mkfs -t {filesystem} /dev/xvdb1
+  while [ ! -e "/dev/nvme0n1p1" ]; do sleep 1; done
+  sudo mkfs -t {filesystem} /dev/nvme0n1p1
 fi
 
 echo "Mounting data volume ..."
 sudo mkdir /mnt/data
-sudo mount /dev/xvdb1 /mnt/data
-sudo chown -R $DEFAULT_USER:$DEFAULT_USER /mnt/data
+sudo mount /dev/nvme0n1p1 /mnt/data
+sudo chown -R ubuntu:ubuntu /mnt/data
 
 echo "Data volume mounted, persisting mount point so it survives reboots ..."
 if [ -z $(grep "/mnt/data" "/etc/fstab") ]; then echo $(cat "/proc/mounts" | grep "/mnt/data") >> /etc/fstab; fi

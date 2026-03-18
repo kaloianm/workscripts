@@ -11,6 +11,7 @@
 		],
 		"pylint.args": [
 			"\"--disable=logging-fstring-interpolation\""
-		]
+		],
+		"python.defaultInterpreterPath": "${workspaceFolder}/ctools/python3-venv/bin/python"
 	}
 }

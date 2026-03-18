@@ -26,14 +26,9 @@ class RemoteMongoHost(RemoteSSHHost):
 
         RemoteSSHHost.__init__(self, host_desc)
 
-        default_mongod_data_path = '~/mongod_data'
-        default_mongos_data_path = '~/mongos_data'
-
         # Populate parameter defaults
         if 'RemoteMongoDPath' not in self.host_desc:
-            self.host_desc['RemoteMongoDPath'] = default_mongod_data_path
-        if 'RemoteMongoSPath' not in self.host_desc:
-            self.host_desc['RemoteMongoSPath'] = default_mongos_data_path
+            self.host_desc['RemoteMongoDPath'] = '~/mongod_data'
 
     async def start_mongod_instance(self, port, repl_set_name, extra_args=None):
         '''
@@ -119,10 +114,12 @@ async def cleanup_mongo_directories(hosts, shard=None):
         if shard and host.host_desc['shard'] != shard:
             continue
 
-        tasks.append(
-            asyncio.create_task(
-                host.exec_remote_ssh_command((f'rm -rf {host.host_desc["RemoteMongoDPath"]} ;'
-                                              f'rm -rf {host.host_desc["RemoteMongoSPath"]}'))))
+        paths_to_rm = [p for p in [host.host_desc.get("RemoteMongoDPath"),
+                                    host.host_desc.get("RemoteMongoSPath")] if p]
+        if paths_to_rm:
+            tasks.append(
+                asyncio.create_task(
+                    host.exec_remote_ssh_command(f'rm -rf {" ".join(paths_to_rm)}')))
     await asyncio.gather(*tasks)
 
 
@@ -221,6 +218,8 @@ async def gather_logs(hosts, cluster_name, local_path, shard=None):
     for host in hosts:
         if shard and host.host_desc['shard'] != shard:
             continue
+        if not host.host_desc.get("RemoteMongoSPath"):
+            continue
 
         tasks.append(
             asyncio.create_task(
@@ -238,9 +237,10 @@ async def gather_logs(hosts, cluster_name, local_path, shard=None):
             await host.rsync_files_to_local(
                 f'{host.host_desc["RemoteMongoDPath"]}/{make_host_suffix(host, "mongod")}.tar.gz',
                 f'{local_path}/{cluster_name}/')
-            await host.rsync_files_to_local(
-                f'{host.host_desc["RemoteMongoSPath"]}/{make_host_suffix(host, "mongos")}.tar.gz',
-                f'{local_path}/{cluster_name}/')
+            if host.host_desc.get("RemoteMongoSPath"):
+                await host.rsync_files_to_local(
+                    f'{host.host_desc["RemoteMongoSPath"]}/{make_host_suffix(host, "mongos")}.tar.gz',
+                    f'{local_path}/{cluster_name}/')
 
     tasks = []
     for host in hosts:

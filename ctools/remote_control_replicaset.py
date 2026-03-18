@@ -83,7 +83,7 @@ async def main_create(args, rs):
 
     await stop_mongo_processes(rs.hosts, Signals.SIGKILL)
     await cleanup_mongo_directories(rs.hosts)
-    await install_prerequisite_packages(rs.hosts)
+    # await install_prerequisite_packages(rs.hosts)
     await deploy_binaries(rs.hosts, rs.config['MongoBinPath'])
     await start_mongod_as_replica_set(rs.hosts, 27017, rs.name, rs.mongod_parameters)
     await initiate_replica_set(rs.hosts, 27017, rs.name)

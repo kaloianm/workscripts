@@ -164,7 +164,7 @@ async def main_create(args, cluster):
 
     await stop_mongo_processes(cluster.available_hosts, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster.available_hosts)
-    await install_prerequisite_packages(cluster.available_hosts)
+    # await install_prerequisite_packages(cluster.available_hosts)
     await deploy_binaries(cluster.available_hosts, cluster.config['MongoBinPath'])
     await start_config_replica_set(cluster)
     await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')

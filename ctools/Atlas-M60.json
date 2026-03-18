@@ -1,5 +1,5 @@
 {
-  "ImageId": "ami-04aa82396fe417f2f",
+  "ImageId": "ami-028f4acf86df833a8",
   "SecurityGroupIds": ["sg-094dda33ff3d0bab9"],
   "InstanceType": "m8g.4xlarge",
   "KeyName": "kaloian.manassiev",
@@ -7,7 +7,7 @@
   "MaxCount": 1,
   "BlockDeviceMappings": [
     {
-      "DeviceName": "/dev/xvda",
+      "DeviceName": "/dev/sda1",
       "Ebs": {
         "VolumeType": "gp3",
         "VolumeSize": 100,
