@@ -4,7 +4,7 @@ help_string = '''
 Tool to launch a set of clean (in the sense without MongoDB on them) EC2 hosts which can be used for
 constructing a sharded MongoDB cluster.
 
-Since it interacts with AWS, a default region_name should be set in $HOME/.aws/config and the AWS
+Since it interacts with AWS, a default region_name should be set in ~/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
 
 Use --help for more information on the supported commands.

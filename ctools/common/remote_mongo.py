@@ -19,15 +19,15 @@ class RemoteMongoHost(RemoteSSHHost):
         Constructs a cluster host object from host description, which is a superset of the
         description required by 'RemoteSSHHost' above. The additional fields are:
           RemoteMongoDPath: Path on the host to serve as a root for the MongoD service's data and
-            logs. Defaulted to $HOME/mongod_data.
+            logs. Defaulted to ~/mongod_data.
           RemoteMongoSPath: Path on the host to serve as a root for the MongoS service's data and
-            logs. Defaulted to $HOME/mongos_data.
+            logs. Defaulted to ~/mongos_data.
         '''
 
         RemoteSSHHost.__init__(self, host_desc)
 
-        default_mongod_data_path = '$HOME/mongod_data'
-        default_mongos_data_path = '$HOME/mongos_data'
+        default_mongod_data_path = '~/mongod_data'
+        default_mongos_data_path = '~/mongos_data'
 
         # Populate parameter defaults
         if 'RemoteMongoDPath' not in self.host_desc:
@@ -47,7 +47,7 @@ class RemoteMongoHost(RemoteSSHHost):
 
         await self.exec_remote_ssh_command(
             (f'mkdir -p {self.host_desc["RemoteMongoDPath"]} && '
-             f'$HOME/binaries/mongod --replSet {repl_set_name} '
+             f'~/binaries/mongod --replSet {repl_set_name} '
              f'--dbpath {self.host_desc["RemoteMongoDPath"]} '
              f'--logpath {self.host_desc["RemoteMongoDPath"]}/mongod.log '
              f'--port {port} '
@@ -68,7 +68,7 @@ class RemoteMongoHost(RemoteSSHHost):
         config_host_list = ','.join(f'{h.host}:27019' for h in config_hosts)
         await self.exec_remote_ssh_command(
             (f'mkdir -p {self.host_desc["RemoteMongoSPath"]} && '
-             f'$HOME/binaries/mongos --configdb config/{config_host_list} '
+             f'~/binaries/mongos --configdb config/{config_host_list} '
              f'--logpath {self.host_desc["RemoteMongoSPath"]}/mongos.log '
              f'--port {port} '
              f'--bind_ip_all '
@@ -193,7 +193,7 @@ async def rsync_to_hosts(hosts, local_pattern, remote_path, shard=None):
 async def deploy_binaries(hosts, mongo_bin_path, shard=None):
     '''Deploys MongoDB binaries to the specified hosts'''
 
-    await rsync_to_hosts(hosts, f'{mongo_bin_path}/mongo*', '$HOME/binaries', shard)
+    await rsync_to_hosts(hosts, f'{mongo_bin_path}/mongo*', '~/binaries', shard)
 
 
 async def gather_logs(hosts, cluster_name, local_path, shard=None):

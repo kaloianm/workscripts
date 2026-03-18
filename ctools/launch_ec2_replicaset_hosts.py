@@ -3,7 +3,7 @@
 help_string = '''
 Tool to launch a set of clean EC2 hosts which can be used as a MongoDB replica set.
 
-Since it interacts with AWS, a default region_name should be set in $HOME/.aws/config and the AWS
+Since it interacts with AWS, a default region_name should be set in ~/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
 
 Use --help for more information on the supported commands.
