@@ -48,8 +48,8 @@ class RemoteSSHHost:
         """
 
         ssh_command = (
-            f'ssh {self.host_desc["ssh_args"]} {self.host_desc["ssh_username"]}@{self.host} '
-            f'"{command}"')
+            f"ssh {self.host_desc['ssh_args']} {self.host_desc['ssh_username']}@{self.host} "
+            f"'{command}'")
         await async_start_shell_command(ssh_command, self.host)
 
     async def rsync_files_to_remote(self, source_pattern, destination_path):
