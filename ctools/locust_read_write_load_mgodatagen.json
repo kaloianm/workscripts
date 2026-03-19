@@ -2,26 +2,41 @@
     {
         "database": "locust_read_write_load",
         "collection": "load",
-        "count": 1000000,
+        "count": 100000000,
         "content": {
             "shardKey": {
-                "type": "int"
+                "type": "autoincrement",
+                "autoType": "int",
+                "startInt": 0
             },
-            "longString": {
+            "idx0": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx1": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx2": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx3": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx4": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx5": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx6": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx7": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx8": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx9": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "payload": {
                 "type": "string",
-                "maxDistinctValue": 500,
-                "minLength": 10,
-                "maxLength": 20
+                "minLength": 1400,
+                "maxLength": 1400
             }
         },
         "indexes": [
-            {
-                "name": "shardKey",
-                "key": {
-                    "shardKey": 1
-                },
-                "unique": true
-            }
+            { "name": "shardKey", "key": { "shardKey": 1 }, "unique": true },
+            { "name": "idx0", "key": { "idx0": 1 } },
+            { "name": "idx1", "key": { "idx1": 1 } },
+            { "name": "idx2", "key": { "idx2": 1 } },
+            { "name": "idx3", "key": { "idx3": 1 } },
+            { "name": "idx4", "key": { "idx4": 1 } },
+            { "name": "idx5", "key": { "idx5": 1 } },
+            { "name": "idx6", "key": { "idx6": 1 } },
+            { "name": "idx7", "key": { "idx7": 1 } },
+            { "name": "idx8", "key": { "idx8": 1 } },
+            { "name": "idx9", "key": { "idx9": 1 } }
         ]
     }
 ]

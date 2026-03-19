@@ -5,7 +5,7 @@ Locust-based create/read/update workload, based on the test documents generated 
 `locust_read_write_load_mgodatagen.json` or the `generate_fragmented_sharded_collection.py` script.
 
 Example usage:
-  mgodatagen -f locust_read_write_load_mgodatagen.json --indexfirst --uri mongodb://
+  mgodatagen -f locust_read_write_load_mgodatagen.json --uri mongodb://
 
   locust_read_write_load.py --users 1000 --web-port 8090 mongodb://
 '''

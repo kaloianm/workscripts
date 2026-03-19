@@ -29,6 +29,12 @@ echo "Configuring required packages"
 ###################################################################################################
 
 sudo apt update -y
+sudo apt install -y build-essential
+
+NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+echo >> /home/ubuntu/.bashrc
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
