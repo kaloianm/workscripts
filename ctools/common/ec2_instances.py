@@ -12,7 +12,7 @@ ANY_HOST_CONFIGURATION = '''#!/bin/bash
 set -e
 
 ###################################################################################################
-echo "Applying OS configuration for user $USER (Home: $HOME)"
+echo "Applying OS configuration"
 ###################################################################################################
 
 sudo bash -c "echo '# BEGIN USER ULIMITS BLOCK' >> /etc/security/limits.conf"
@@ -29,11 +29,18 @@ echo "Configuring required packages"
 ###################################################################################################
 
 sudo apt update -y
-sudo apt install -y build-essential
+sudo apt install -y vim build-essential
 
-NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+sudo -u ubuntu \
+    NONINTERACTIVE=1 \
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 echo >> /home/ubuntu/.bashrc
 echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
+
+echo >> /home/ubuntu/.bash_profile
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bash_profile
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 '''
 

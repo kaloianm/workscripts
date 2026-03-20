@@ -6,6 +6,9 @@ Tool to launch a set of clean EC2 hosts which can be used as a MongoDB replica s
 Since it interacts with AWS, a default region_name should be set in ~/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
 
+To allow traffic from your current IP to the security group used by the instances, run:
+  aws ec2 authorize-security-group-ingress --group-id sg-094dda33ff3d0bab9 --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
+
 Use --help for more information on the supported commands.
 '''
 
@@ -76,9 +79,10 @@ def main_launch(args, ec2):
     wait_for_instances(ec2, client_driver_instances + rs_instances)
 
     rs_desc = describe_replicaset(ec2, args.clustertag)
-    with open('replset.json', 'w') as f:
+    with open(args.output, 'w') as f:
         f.write(rs_desc)
     print(rs_desc)
+    logging.info(f'Replica set configuration written to {args.output}')
 
 
 def main_terminate(args, ec2):
@@ -121,6 +125,8 @@ if __name__ == "__main__":
                                default=3)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
+    parser_launch.add_argument('--output', help='Output file for the replica set configuration.',
+                               type=str, default='replset.json')
     parser_launch.set_defaults(func=main_launch)
 
     ###############################################################################################

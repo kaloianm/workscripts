@@ -7,6 +7,9 @@ constructing a sharded MongoDB cluster.
 Since it interacts with AWS, a default region_name should be set in ~/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
 
+To allow traffic from your current IP to the security group used by the instances, run:
+  aws ec2 authorize-security-group-ingress --group-id sg-094dda33ff3d0bab9 --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
+
 Use --help for more information on the supported commands.
 '''
 
@@ -103,12 +106,14 @@ def main_launch(args, ec2):
     wait_for_instances(ec2, client_driver_instances + config_instances + shard_instances)
 
     cluster_desc = describe_cluster(ec2, args.clustertag)
-    with open('cluster.json', 'w') as f:
+    with open(args.output, 'w') as f:
         f.write(cluster_desc)
     print(cluster_desc)
 
     logging.info(
-        f'To deploy binaries to cluster, now run ./remote_control_cluster.py cluster.json create  ...'
+        f'Cluster configuration written to {args.output}')
+    logging.info(
+        f'To deploy binaries to cluster, now run ./remote_control_cluster.py {args.output} create  ...'
     )
 
 
@@ -154,6 +159,8 @@ if __name__ == "__main__":
                                default=3)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
+    parser_launch.add_argument('--output', help='Output file for the cluster configuration.',
+                               type=str, default='cluster.json')
     parser_launch.set_defaults(func=main_launch)
 
     ###############################################################################################
