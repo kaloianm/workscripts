@@ -70,6 +70,12 @@ class ExternalProcessManager:
         self._outputLogFile = open(os.path.join(self._config.root, 'reconstruct.log'), 'w',
                                    kOutputLogFileBufSize)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._outputLogFile.close()
+
     # Invokes mongorestore of the config database dump against the instance running on
     # 'instance_port'
     def mongorestore_config_db_to_port(self, instance_port):
@@ -404,31 +410,32 @@ async def main(args):
     config = ToolConfiguration(args)
     create_empty_work_directories(config)
 
-    external_process = ExternalProcessManager(config)
+    with ExternalProcessManager(config) as external_process:
+        # Read the cluster configuration from the preprocess instance and construct the new cluster
+        introspect = ClusterIntrospect(config, external_process)
+        introspect.restore()
 
-    # Read the cluster configuration from the preprocess instance and construct the new cluster
-    introspect = ClusterIntrospect(config, external_process)
-    introspect.restore()
+        logging.info(
+            f'Cluster contains {introspect.num_shards} shards and is running at FCV {introspect.FCV}'
+        )
 
-    logging.info(
-        f'Cluster contains {introspect.num_shards} shards and is running at FCV {introspect.FCV}')
+        if (config.numShards is not None and introspect.num_zones > 0
+                and config.numShards < introspect.num_shards):
+            raise ValueError(
+                'Cannot use `--numshards` with smaller number of shards than those in the '
+                'dump in the case when zones are defined')
 
-    if (config.numShards is not None and introspect.num_zones > 0
-            and config.numShards < introspect.num_shards):
-        raise ValueError('Cannot use `--numshards` with smaller number of shards than those in the '
-                         'dump in the case when zones are defined')
+        cluster = MlaunchCluster(config, introspect, external_process)
+        cluster.start_cluster()
+        cluster.restore_config_collections()
+        cluster.fixup_shard_ids()
+        cluster.fixup_routing_table()
+        cluster.create_per_shard_collections()
 
-    cluster = MlaunchCluster(config, introspect, external_process)
-    cluster.start_cluster()
-    cluster.restore_config_collections()
-    cluster.fixup_shard_ids()
-    cluster.fixup_routing_table()
-    cluster.create_per_shard_collections()
+        # Restart the cluster so it picks up the new configuration cleanly
+        cluster.restart()
 
-    # Restart the cluster so it picks up the new configuration cleanly
-    cluster.restart()
-
-    cluster.generate_data()
+        cluster.generate_data()
 
 
 if __name__ == "__main__":
