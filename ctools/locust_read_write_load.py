@@ -23,15 +23,17 @@ import logging
 from bson import Int64
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import randrange
+from random import choice, randrange
+from string import ascii_letters
 from time import perf_counter_ns
 
 connection_string = None
 collection = None
 
-# Shard key range (populated from mgodatagen config at init time)
+# Populated from mgodatagen config at init time
 MIN_SHARD_KEY = 0
 MAX_SHARD_KEY = 0
+SECONDARY_INDEX_FIELDS = []
 
 
 def nanos_to_millis(nanos):
@@ -62,9 +64,17 @@ def on_locust_init(environment, **kwargs):
     MIN_SHARD_KEY = start_int
     MAX_SHARD_KEY = start_int + count
 
+    # Extract secondary index fields (exclude the shardKey index)
+    global SECONDARY_INDEX_FIELDS
+    for idx in config.get('indexes', []):
+        field = list(idx['key'].keys())[0]
+        if field != 'shardKey':
+            SECONDARY_INDEX_FIELDS.append(field)
+
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
     logging.info(f'Shard key range: [{MIN_SHARD_KEY}, {MAX_SHARD_KEY})')
+    logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
     mongo_client = MongoClient(connection_string)
@@ -122,6 +132,27 @@ class MongoUser(User):
                 response_length=0,
                 exception=None,
             )
+
+    @task(20)
+    def read_by_secondary_index(self):
+        if not SECONDARY_INDEX_FIELDS:
+            return
+
+        field = choice(SECONDARY_INDEX_FIELDS)
+        random_key = ''.join(choice(ascii_letters) for _ in range(340))
+
+        start_time = perf_counter_ns()
+
+        collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+            filter={field: random_key})
+
+        self.environment.events.request.fire(
+            request_type='read_secondary_index',
+            name='read_secondary_index',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_length=0,
+            exception=None,
+        )
 
     @task(40)
     def update_by_shard_key(self):
