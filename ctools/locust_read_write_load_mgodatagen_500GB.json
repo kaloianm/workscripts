@@ -2,7 +2,7 @@
     {
         "database": "locust_read_write_load",
         "collection": "load",
-        "count": 100000000,
+        "count": 34000000,
         "content": {
             "shardKey": {
                 "type": "autoincrement",
@@ -21,8 +21,8 @@
             "idx9": { "type": "string", "minLength": 340, "maxLength": 340 },
             "payload": {
                 "type": "string",
-                "minLength": 1400,
-                "maxLength": 1400
+                "minLength": 7500,
+                "maxLength": 7500
             }
         },
         "indexes": [

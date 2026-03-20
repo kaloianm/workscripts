@@ -11,3 +11,14 @@ Click on the links below or run the respective tool with `--help` for more infor
 ### [manually_unshard_collection](https://github.com/kaloianm/workscripts/blob/master/ctools/manually_unshard_collection.py#L3)
 ### [reconstruct_cluster_from_config_dump](https://github.com/kaloianm/workscripts/blob/master/ctools/reconstruct_cluster_from_config_dump.py#L3)
 ### [remote_control_cluster](https://github.com/kaloianm/workscripts/blob/master/ctools/remote_control_cluster.py#L3)
+
+### Data generation configs (mgodatagen)
+
+Use the following commands to execute them:
+```
+mgodatagen -f locust_read_write_load_mgodatagen_500GB.json --uri mongodb://URL/?directConnection=false
+mgodatagen -f locust_read_write_load_mgodatagen_4TB.json --uri mongodb://URL/?directConnection=false
+```
+
+- **locust_read_write_load_mgodatagen_4TB.json** — Generates a ~4TB dataset (270M docs with 7.5KB payload and 10 secondary indexes of 340 bytes each). Approximate breakdown: ~3TB data + ~1TB indexes (10 x 100GB). Requires instances with 5TB+ data volume.
+- **locust_read_write_load_mgodatagen_500GB.json** — Generates a ~500GB dataset (34M docs, same document structure). Approximate breakdown: ~375GB data + ~125GB indexes. Suitable for M50 instances with 1TB data volume.

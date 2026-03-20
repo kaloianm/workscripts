@@ -1,7 +1,7 @@
 {
   "ImageId": "ami-028f4acf86df833a8",
   "SecurityGroupIds": ["sg-094dda33ff3d0bab9"],
-  "InstanceType": "m8g.4xlarge",
+  "InstanceType": "m8g.2xlarge",
   "KeyName": "kaloian.manassiev",
   "MinCount": 1,
   "MaxCount": 1,
