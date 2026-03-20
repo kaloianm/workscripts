@@ -41,7 +41,7 @@ class ShardedCollection:
 
         self.uuid = collection_entry['uuid']
         self.shard_key_pattern = collection_entry['key']
-        self.fcv = await self.cluster.FCV
+        self.fcv = await self.cluster.FCV()
 
     def chunks_query_filter(self):
         if self.fcv >= '5.0':

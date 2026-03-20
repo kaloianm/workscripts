@@ -95,25 +95,22 @@ class Cluster:
     class BalancerEnabledException(Exception):
         pass
 
-    @property
     async def configsvrConnectionString(self):
         serverStatus = await self.adminDb.command({'serverStatus': 1, 'sharding': 1})
         return serverStatus['sharding']['configsvrConnectionString']
 
-    @property
     async def FCV(self):
         fcvDocument = await self.adminDb['system.version'].find_one(
             {'_id': 'featureCompatibilityVersion'})
         return fcvDocument['version']
 
-    @property
     async def shardIds(self):
         return list(
             map(lambda x: x['_id'], await self.configDb.shards.find({}).sort('_id',
                                                                              1).to_list(None)))
 
     async def check_is_mongos(self, warn_only=False):
-        print('Server is running at FCV', await self.FCV)
+        print('Server is running at FCV', await self.FCV())
         try:
             ismaster = await self.adminDb.command('ismaster')
             if 'msg' not in ismaster or ismaster['msg'] != 'isdbgrid':
@@ -155,7 +152,7 @@ class Cluster:
     async def make_direct_config_server_connection(self):
         return await self.make_direct_shard_connection({
             '_id': 'config',
-            'host': await self.configsvrConnectionString
+            'host': await self.configsvrConnectionString()
         })
 
     async def on_each_shard(self, fn):

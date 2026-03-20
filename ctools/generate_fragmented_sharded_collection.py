@@ -59,10 +59,10 @@ async def main(args):
         uuid=uuid.uuid4(),
         shard_key={'shardKey': 1},
         unique=True,
-        fcv=await cluster.FCV,
+        fcv=await cluster.FCV(),
     )
 
-    shard_ids = await cluster.shardIds
+    shard_ids = await cluster.shardIds()
     for shard_to_skip in args.skip_shards:
         shard_ids.remove(shard_to_skip)
 
