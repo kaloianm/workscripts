@@ -79,7 +79,7 @@ class Cluster:
     generic utility.
     """
 
-    def __init__(self, uri, loop):
+    def __init__(self, uri):
         self.parsed_uri = uri_parser.parse_uri(uri)
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
 

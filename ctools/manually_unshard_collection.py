@@ -62,7 +62,7 @@ async def clear_collection_sharding(cluster, args):
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    cluster = Cluster(args.uri)
     await cluster.check_is_mongos()
 
     ns = {'db': args.namespace.split('.', 1)[0], 'coll': args.namespace.split('.', 1)[1]}
@@ -94,6 +94,4 @@ if __name__ == "__main__":
     args = argsParser.parse_args()
     logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main(args))
+    asyncio.run(main(args))

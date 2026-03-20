@@ -50,7 +50,7 @@ def chunk_size_desc(args):
 
 
 async def main(args):
-    cluster = Cluster(args.uri, asyncio.get_event_loop())
+    cluster = Cluster(args.uri)
     await cluster.check_is_mongos(warn_only=False)
 
     ns = {'db': args.ns.split('.', 1)[0], 'coll': args.ns.split('.', 1)[1]}
@@ -354,6 +354,4 @@ if __name__ == "__main__":
             f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc(args)}.'
         )
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main(args))
+    asyncio.run(main(args))
