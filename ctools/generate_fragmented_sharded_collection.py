@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
     if args.doc_size > min(args.chunk_size_min, args.chunk_size_max):
         raise CToolsException(
-            f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc()}.'
+            f'Specified document size {fmt_bytes(args.doc_size)} is too big. It needs to be smaller than the chunk size of {chunk_size_desc(args)}.'
         )
 
     loop = asyncio.new_event_loop()
