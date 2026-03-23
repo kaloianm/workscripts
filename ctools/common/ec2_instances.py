@@ -42,6 +42,8 @@ eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 echo >> /home/ubuntu/.bash_profile
 echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bash_profile
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
+
+brew update
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
