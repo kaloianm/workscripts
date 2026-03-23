@@ -29,7 +29,7 @@ echo "Configuring required packages"
 ###################################################################################################
 
 sudo apt update -y
-sudo apt install -y vim build-essential
+sudo apt install -y vim build-essential dstat
 
 sudo -u ubuntu \
     NONINTERACTIVE=1 \
@@ -44,6 +44,7 @@ echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubun
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 brew update
+brew install python3 mongosh
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
