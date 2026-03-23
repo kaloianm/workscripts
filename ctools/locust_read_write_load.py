@@ -89,7 +89,7 @@ class MongoUser(User):
     def on_start(self):
         self.select_shard_key()
 
-    @task(10)
+    @task(5)
     def select_shard_key(self):
         self.shard_key = Int64(randrange(MIN_SHARD_KEY, MAX_SHARD_KEY))
 
@@ -133,7 +133,7 @@ class MongoUser(User):
                 exception=None,
             )
 
-    @task(20)
+    @task(5)
     def read_by_secondary_index(self):
         if not SECONDARY_INDEX_FIELDS:
             return
@@ -154,7 +154,7 @@ class MongoUser(User):
             exception=None,
         )
 
-    @task(40)
+    @task(7)
     def update_by_shard_key(self):
         start_time = perf_counter_ns()
 
@@ -185,6 +185,28 @@ class MongoUser(User):
         self.environment.events.request.fire(
             request_type='update_by_shard_key',
             name='update_by_shard_key',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_length=0,
+            exception=None,
+        )
+
+    @task(3)
+    def insert_new_shard_key(self):
+        new_key = Int64(MAX_SHARD_KEY + randrange(0, MAX_SHARD_KEY))
+
+        start_time = perf_counter_ns()
+
+        collection.update_one(
+            filter={'shardKey': new_key},
+            update={'$inc': {
+                'updates': 1
+            }},
+            upsert=True,
+        )
+
+        self.environment.events.request.fire(
+            request_type='insert_new_shard_key',
+            name='insert_new_shard_key',
             response_time=nanos_to_millis(perf_counter_ns() - start_time),
             response_length=0,
             exception=None,
