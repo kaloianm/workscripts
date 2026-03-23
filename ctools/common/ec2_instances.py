@@ -1,5 +1,6 @@
 '''Common EC2 instance launching and management utilities.'''
 
+import copy
 import json
 import logging
 import os
@@ -43,8 +44,8 @@ echo >> /home/ubuntu/.bash_profile
 echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bash_profile
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
-brew update
-brew install python3 mongosh
+sudo -u ubuntu -i brew update
+sudo -u ubuntu -i brew install python3 mongosh
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
@@ -58,15 +59,8 @@ echo "Configuring driver host workscripts for {clustertag}"
 '''
 
 
-def make_cluster_host_configuration(clustertag, filesystem):
-    return ANY_HOST_CONFIGURATION + f'''
-###################################################################################################
-echo "Configuring shard host volumes for {clustertag}"
-###################################################################################################
-
-echo "Waiting for volume to be attached ..."
-while [ ! -e "/dev/nvme0n1" ]; do sleep 1; done
-
+def make_cluster_host_configuration(clustertag, filesystem, skip_format=False):
+    format_script = '' if skip_format else f'''
 if [ ! -e "/dev/nvme0n1p1" ]; then
   echo "Partitioning data volume ..."
   sudo parted -s /dev/nvme0n1 mklabel gpt &&
@@ -76,9 +70,18 @@ if [ ! -e "/dev/nvme0n1p1" ]; then
   while [ ! -e "/dev/nvme0n1p1" ]; do sleep 1; done
   sudo mkfs -t {filesystem} /dev/nvme0n1p1
 fi
+'''
 
+    return ANY_HOST_CONFIGURATION + f'''
+###################################################################################################
+echo "Configuring shard host volumes for {clustertag}"
+###################################################################################################
+
+echo "Waiting for volume to be attached ..."
+while [ ! -e "/dev/nvme0n1" ]; do sleep 1; done
+{format_script}
 echo "Mounting data volume ..."
-sudo mkdir /mnt/data
+sudo mkdir -p /mnt/data
 sudo mount /dev/nvme0n1p1 /mnt/data
 sudo chown -R ubuntu:ubuntu /mnt/data
 
@@ -181,3 +184,64 @@ def filter_instances_by_role(instances, role):
         'Key': 'mongorole',
         'Value': role,
     } in x['Tags'], instances))
+
+
+def remove_data_volume_from_template(template):
+    '''Returns a copy of the template with the /dev/xvdb block device mapping removed'''
+    modified = copy.deepcopy(template)
+    modified['BlockDeviceMappings'] = [
+        bdm for bdm in modified.get('BlockDeviceMappings', []) if bdm['DeviceName'] != '/dev/xvdb'
+    ]
+    return modified
+
+
+def copy_and_attach_volumes(ec2, source_volume_id, instances):
+    '''Copies an EBS volume for each instance and attaches it as /dev/xvdb'''
+
+    # Copy one volume per instance using the copy_volumes API
+    logging.info(f'Copying volume {source_volume_id} for {len(instances)} instance(s) ...')
+    copied_volume_ids = []
+    for _ in instances:
+        response = ec2.copy_volumes(
+            SourceVolumeId=source_volume_id, VolumeType='gp3', TagSpecifications=[{
+                'ResourceType':
+                    'volume',
+                'Tags': [{
+                    'Key': 'owner',
+                    'Value': 'kaloian.manassiev'
+                }, {
+                    'Key': 'source_volume',
+                    'Value': source_volume_id
+                }]
+            }])
+        volume_id = response['Volumes'][0]['VolumeId']
+        copied_volume_ids.append(volume_id)
+        logging.info(f'Volume copy {volume_id} initiated')
+
+    # Wait for all copies to become available
+    for volume_id in copied_volume_ids:
+        logging.info(f'Waiting for volume {volume_id} to become available ...')
+        ec2.get_waiter('volume_available').wait(VolumeIds=[volume_id], WaiterConfig={
+            'Delay': 15,
+            'MaxAttempts': 120
+        })
+
+    # Attach volumes to instances
+    volume_attachments = []
+    for volume_id, instance in zip(copied_volume_ids, instances):
+        instance_id = instance['InstanceId']
+        logging.info(f'Attaching volume {volume_id} to instance {instance_id} as /dev/xvdb ...')
+        ec2.attach_volume(VolumeId=volume_id, InstanceId=instance_id, Device='/dev/xvdb')
+        volume_attachments.append((volume_id, instance_id))
+
+    for volume_id, instance_id in volume_attachments:
+        ec2.get_waiter('volume_in_use').wait(VolumeIds=[volume_id])
+        ec2.modify_instance_attribute(
+            InstanceId=instance_id, BlockDeviceMappings=[{
+                'DeviceName': '/dev/xvdb',
+                'Ebs': {
+                    'DeleteOnTermination': True
+                }
+            }])
+
+    logging.info(f'All {len(volume_attachments)} volumes copied and attached successfully')

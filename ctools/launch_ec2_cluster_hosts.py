@@ -20,11 +20,12 @@ import logging
 import sys
 
 from common.common import yes_no
-from common.ec2_instances import (CLIENT_HOST_TEMPLATE, describe_all_instances,
-                                  filter_instances_by_role, launch_instances, load_template,
+from common.ec2_instances import (CLIENT_HOST_TEMPLATE, copy_and_attach_volumes,
+                                  describe_all_instances, filter_instances_by_role,
+                                  launch_instances, load_template,
                                   make_client_driver_host_configuration,
                                   make_cluster_host_configuration, make_instance_tag_specifications,
-                                  wait_for_instances)
+                                  remove_data_volume_from_template, wait_for_instances)
 from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
@@ -69,6 +70,13 @@ def main_launch(args, ec2):
     template = load_template(args.template)
     client_template = load_template(CLIENT_HOST_TEMPLATE)
 
+    use_volume_copy = getattr(args, 'use_volume_copy', None)
+
+    if use_volume_copy:
+        template = remove_data_volume_from_template(template)
+
+    skip_format = bool(use_volume_copy)
+
     ##############################################################################################
     # DRIVER INSTANCES
 
@@ -88,7 +96,8 @@ def main_launch(args, ec2):
         ec2,
         template,
         tag_specs=make_instance_tag_specifications(args.clustertag, 'config'),
-        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem),
+        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
+                                                  skip_format=skip_format),
         count=3,
     )
 
@@ -99,19 +108,23 @@ def main_launch(args, ec2):
             ec2,
             template,
             tag_specs=make_instance_tag_specifications(args.clustertag, shard_id),
-            user_data=make_cluster_host_configuration(args.clustertag, args.filesystem),
+            user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
+                                                      skip_format=skip_format),
             count=args.shard_repl_set_nodes,
         )
 
-    wait_for_instances(ec2, client_driver_instances + config_instances + shard_instances)
+    all_cluster_instances = config_instances + shard_instances
+    wait_for_instances(ec2, client_driver_instances + all_cluster_instances)
+
+    if use_volume_copy:
+        copy_and_attach_volumes(ec2, use_volume_copy, all_cluster_instances)
 
     cluster_desc = describe_cluster(ec2, args.clustertag)
     with open(args.output, 'w') as f:
         f.write(cluster_desc)
     print(cluster_desc)
 
-    logging.info(
-        f'Cluster configuration written to {args.output}')
+    logging.info(f'Cluster configuration written to {args.output}')
     logging.info(
         f'To deploy binaries to cluster, now run ./remote_control_cluster.py {args.output} create  ...'
     )
@@ -161,6 +174,10 @@ if __name__ == "__main__":
                                help='Filesystem to use for the data volume.', default='xfs')
     parser_launch.add_argument('--output', help='Output file for the cluster configuration.',
                                type=str, default='cluster.json')
+    parser_launch.add_argument(
+        '--use-volume-copy',
+        help='EBS volume ID to snapshot and attach as data volume to each node.', type=str,
+        default=None, metavar='vol-XXXX')
     parser_launch.set_defaults(func=main_launch)
 
     ###############################################################################################
