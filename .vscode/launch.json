@@ -1,0 +1,18 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: launch_ec2_replica_set_hosts.py",
+            "type": "debugpy",
+            "request": "launch",
+            "envFile": "${workspaceFolder}/ctools/.env",
+            "program": "${workspaceFolder}/ctools/launch_ec2_replicaset_hosts.py",
+            "cwd": "${workspaceFolder}/ctools",
+            "console": "integratedTerminal",
+            "args": "${command:pickArgs}"
+        }
+    ]
+}
