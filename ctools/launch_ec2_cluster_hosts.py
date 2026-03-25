@@ -26,7 +26,7 @@ from common.ec2_instances import (CLIENT_HOST_TEMPLATE, create_and_attach_volume
                                   filter_instances_by_role, launch_instances, load_template,
                                   make_client_driver_host_configuration,
                                   make_cluster_host_configuration, make_instance_tag_specifications,
-                                  wait_for_instances)
+                                  terminate_cluster_resources, wait_for_instances)
 from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
@@ -115,7 +115,7 @@ def main_launch(args, ec2):
     all_cluster_instances = config_instances + shard_instances
     wait_for_instances(ec2, client_driver_instances + all_cluster_instances)
 
-    create_and_attach_volumes(ec2, data_volumes, all_cluster_instances,
+    create_and_attach_volumes(ec2, data_volumes, all_cluster_instances, args.clustertag,
                               source_volume_id=use_volume_copy)
 
     cluster_desc = describe_cluster(ec2, args.clustertag)
@@ -134,14 +134,10 @@ def main_launch(args, ec2):
 
 def main_terminate(args, ec2):
     '''Implementation of the terminate command'''
-    cluster_instances = list(
-        map(lambda x: x['InstanceId'], describe_all_instances(ec2, args.clustertag)))
-
-    if (len(cluster_instances) == 0):
-        raise Exception(f'No hosts found with the cluster tag {args.clustertag}')
-
-    yes_no(f'About to terminate {len(cluster_instances)} instances')
-    ec2.terminate_instances(InstanceIds=cluster_instances)
+    yes_no(f'About to terminate all resources for cluster tag {args.clustertag}')
+    total = terminate_cluster_resources(ec2, args.clustertag)
+    if total == 0:
+        logging.warning(f'No resources found with cluster tag {args.clustertag}')
 
 
 def main_describe(args, ec2):

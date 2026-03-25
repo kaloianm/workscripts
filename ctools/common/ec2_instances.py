@@ -99,6 +99,9 @@ def make_instance_tag_specifications(clustertag, role):
         'ResourceType':
             'instance',
         'Tags': [{
+            'Key': 'mongo_ctools_cluster',
+            'Value': clustertag
+        }, {
             'Key': 'mongoversion',
             'Value': clustertag
         }, {
@@ -186,6 +189,43 @@ def filter_instances_by_role(instances, role):
     } in x['Tags'], instances))
 
 
+def terminate_cluster_resources(ec2, clustertag):
+    '''Terminates all instances and deletes all EBS volumes tagged with the given cluster tag'''
+
+    tag_filter = [{'Name': 'tag:mongo_ctools_cluster', 'Values': [clustertag]}]
+
+    # Find and terminate instances
+    instance_filter = tag_filter + [{
+        'Name': 'instance-state-name',
+        'Values': ['running', 'stopped']
+    }]
+    response = ec2.describe_instances(Filters=instance_filter)
+    instance_ids = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            instance_ids.append(instance['InstanceId'])
+
+    if instance_ids:
+        logging.info(f'Terminating {len(instance_ids)} instance(s): {instance_ids}')
+        ec2.terminate_instances(InstanceIds=instance_ids)
+
+        logging.info('Waiting for instances to terminate ...')
+        ec2.get_waiter('instance_terminated').wait(InstanceIds=instance_ids)
+
+    # Find and delete standalone EBS volumes (not attached to any instance)
+    volume_filter = tag_filter + [{'Name': 'status', 'Values': ['available']}]
+    volumes = ec2.describe_volumes(Filters=volume_filter)['Volumes']
+
+    for vol in volumes:
+        volume_id = vol['VolumeId']
+        logging.info(f'Deleting volume {volume_id} ...')
+        ec2.delete_volume(VolumeId=volume_id)
+
+    total = len(instance_ids) + len(volumes)
+    logging.info(f'Terminated {len(instance_ids)} instance(s) and deleted {len(volumes)} volume(s)')
+    return total
+
+
 def extract_data_volumes_from_template(template):
     '''Removes non-root block device mappings from the template and returns them separately.
 
@@ -207,12 +247,20 @@ def extract_data_volumes_from_template(template):
     return modified, data_volumes
 
 
-def create_and_attach_volumes(ec2, data_volumes, instances, source_volume_id=None):
+def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_volume_id=None):
     '''Creates (or copies) data volumes and attaches them to the given instances.
 
     For each entry in data_volumes and each instance, either creates a new volume from the
     EBS configuration in the template, or copies from source_volume_id if provided.
     '''
+
+    volume_tags = [{
+        'Key': 'owner',
+        'Value': 'kaloian.manassiev'
+    }, {
+        'Key': 'mongo_ctools_cluster',
+        'Value': clustertag
+    }]
 
     volume_attachments = []
 
@@ -226,37 +274,24 @@ def create_and_attach_volumes(ec2, data_volumes, instances, source_volume_id=Non
             instance_id = instance['InstanceId']
 
             if source_volume_id:
+                tags = volume_tags + [{'Key': 'source_volume', 'Value': source_volume_id}]
                 logging.info(f'Copying volume {source_volume_id} in {az} for {instance_id} ...')
                 response = ec2.copy_volumes(
                     SourceVolumeId=source_volume_id, VolumeType=ebs_config.get('VolumeType', 'gp3'),
                     TagSpecifications=[{
-                        'ResourceType':
-                            'volume',
-                        'Tags': [{
-                            'Key': 'owner',
-                            'Value': 'kaloian.manassiev'
-                        }, {
-                            'Key': 'source_volume',
-                            'Value': source_volume_id
-                        }]
+                        'ResourceType': 'volume',
+                        'Tags': tags
                     }])
                 volume_id = response['Volumes'][0]['VolumeId']
             else:
                 create_params = {
-                    'AvailabilityZone':
-                        az,
-                    'VolumeType':
-                        ebs_config.get('VolumeType', 'gp3'),
-                    'Size':
-                        ebs_config['VolumeSize'],
-                    'Encrypted':
-                        ebs_config.get('Encrypted', True),
+                    'AvailabilityZone': az,
+                    'VolumeType': ebs_config.get('VolumeType', 'gp3'),
+                    'Size': ebs_config['VolumeSize'],
+                    'Encrypted': ebs_config.get('Encrypted', True),
                     'TagSpecifications': [{
                         'ResourceType': 'volume',
-                        'Tags': [{
-                            'Key': 'owner',
-                            'Value': 'kaloian.manassiev'
-                        }]
+                        'Tags': volume_tags
                     }],
                 }
                 if 'Iops' in ebs_config:
