@@ -22,7 +22,7 @@ mgodatagen -f locust_read_write_load_mgodatagen_500GB.json --uri mongodb://URL/?
 mgodatagen -f locust_read_write_load_mgodatagen_4TB.json --uri mongodb://URL/?directConnection=false
 ```
 
-- **locust_read_write_load_mgodatagen_10GB.json** — Generates a ~10GB dataset (680K docs with 7.5KB payload and 10 secondary indexes of 340 bytes each). Approximate breakdown: ~7.5GB data + ~2.5GB indexes. Good for quick local testing.
-- **locust_read_write_load_mgodatagen_50GB.json** — Generates a ~50GB dataset (3.4M docs, same document structure). Approximate breakdown: ~37GB data + ~12GB indexes.
-- **locust_read_write_load_mgodatagen_500GB.json** — Generates a ~500GB dataset (34M docs, same document structure). Approximate breakdown: ~375GB data + ~125GB indexes. Suitable for M50 instances with 1TB data volume.
-- **locust_read_write_load_mgodatagen_4TB.json** — Generates a ~4TB dataset (270M docs, same document structure). Approximate breakdown: ~3TB data + ~1TB indexes (10 x 100GB). Requires instances with 5TB+ data volume.
+- **locust_read_write_load_mgodatagen_10GB.json** — Generates a ~10GB dataset (1.36M docs with 3.6KB payload and 10 secondary indexes of 180 bytes each). Approximate breakdown: ~7.5GB data + ~2.5GB indexes. Good for quick local testing.
+- **locust_read_write_load_mgodatagen_50GB.json** — Generates a ~50GB dataset (6.8M docs, same document structure). Approximate breakdown: ~37GB data + ~12GB indexes.
+- **locust_read_write_load_mgodatagen_500GB.json** — Generates a ~500GB dataset (68M docs, same document structure). Approximate breakdown: ~375GB data + ~125GB indexes. Suitable for M50 instances with 1TB data volume.
+- **locust_read_write_load_mgodatagen_4TB.json** — Generates a ~4TB dataset (540M docs, same document structure). Approximate breakdown: ~3TB data + ~1TB indexes (10 x 100GB). Requires instances with 5TB+ data volume.

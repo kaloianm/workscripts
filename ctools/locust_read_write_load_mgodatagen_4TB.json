@@ -2,27 +2,27 @@
     {
         "database": "locust_read_write_load",
         "collection": "load",
-        "count": 270000000,
+        "count": 540000000,
         "content": {
             "shardKey": {
                 "type": "autoincrement",
                 "autoType": "int",
                 "startInt": 0
             },
-            "idx0": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx1": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx2": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx3": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx4": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx5": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx6": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx7": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx8": { "type": "string", "minLength": 340, "maxLength": 340 },
-            "idx9": { "type": "string", "minLength": 340, "maxLength": 340 },
+            "idx0": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx1": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx2": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx3": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx4": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx5": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx6": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx7": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx8": { "type": "string", "minLength": 180, "maxLength": 180 },
+            "idx9": { "type": "string", "minLength": 180, "maxLength": 180 },
             "payload": {
                 "type": "string",
-                "minLength": 7500,
-                "maxLength": 7500
+                "minLength": 3600,
+                "maxLength": 3600
             }
         },
         "indexes": [

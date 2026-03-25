@@ -61,14 +61,14 @@ echo "Configuring driver host workscripts for {clustertag}"
 
 def make_cluster_host_configuration(clustertag, filesystem, skip_format=False):
     format_script = '' if skip_format else f'''
-if [ ! -e "/dev/nvme0n1p1" ]; then
+if [ ! -e "/dev/nvme1n1p1" ]; then
   echo "Partitioning data volume ..."
-  sudo parted -s /dev/nvme0n1 mklabel gpt &&
-    sudo parted -s -a optimal /dev/nvme0n1 mkpart primary 0% 100%
+  sudo parted -s /dev/nvme1n1 mklabel gpt &&
+    sudo parted -s -a optimal /dev/nvme1n1 mkpart primary 0% 100%
 
   echo "Making {filesystem} filesystem ..."
-  while [ ! -e "/dev/nvme0n1p1" ]; do sleep 1; done
-  sudo mkfs -t {filesystem} /dev/nvme0n1p1
+  while [ ! -e "/dev/nvme1n1p1" ]; do sleep 1; done
+  sudo mkfs -t {filesystem} /dev/nvme1n1p1
 fi
 '''
 
@@ -78,11 +78,11 @@ echo "Configuring shard host volumes for {clustertag}"
 ###################################################################################################
 
 echo "Waiting for volume to be attached ..."
-while [ ! -e "/dev/nvme0n1" ]; do sleep 1; done
+while [ ! -e "/dev/nvme1n1" ]; do sleep 1; done
 {format_script}
 echo "Mounting data volume ..."
 sudo mkdir -p /mnt/data
-sudo mount /dev/nvme0n1p1 /mnt/data
+sudo mount /dev/nvme1n1p1 /mnt/data
 sudo chown -R ubuntu:ubuntu /mnt/data
 
 echo "Data volume mounted, persisting mount point so it survives reboots ..."
@@ -186,62 +186,117 @@ def filter_instances_by_role(instances, role):
     } in x['Tags'], instances))
 
 
-def remove_data_volume_from_template(template):
-    '''Returns a copy of the template with the /dev/xvdb block device mapping removed'''
+def extract_data_volumes_from_template(template):
+    '''Removes non-root block device mappings from the template and returns them separately.
+
+    Returns a tuple of (modified_template, data_volumes) where data_volumes is a list of
+    dicts with 'DeviceName' and 'Ebs' keys extracted from the template.
+    '''
     modified = copy.deepcopy(template)
+    root_device = '/dev/sda1'
+    data_volumes = []
+
+    for bdm in modified.get('BlockDeviceMappings', []):
+        if bdm['DeviceName'] != root_device:
+            data_volumes.append(bdm)
+
     modified['BlockDeviceMappings'] = [
-        bdm for bdm in modified.get('BlockDeviceMappings', []) if bdm['DeviceName'] != '/dev/xvdb'
+        bdm for bdm in modified.get('BlockDeviceMappings', []) if bdm['DeviceName'] == root_device
     ]
-    return modified
+
+    return modified, data_volumes
 
 
-def copy_and_attach_volumes(ec2, source_volume_id, instances):
-    '''Copies an EBS volume for each instance and attaches it as /dev/xvdb'''
+def create_and_attach_volumes(ec2, data_volumes, instances, source_volume_id=None):
+    '''Creates (or copies) data volumes and attaches them to the given instances.
 
-    # Copy one volume per instance using the copy_volumes API
-    logging.info(f'Copying volume {source_volume_id} for {len(instances)} instance(s) ...')
-    copied_volume_ids = []
-    for _ in instances:
-        response = ec2.copy_volumes(
-            SourceVolumeId=source_volume_id, VolumeType='gp3', TagSpecifications=[{
-                'ResourceType':
-                    'volume',
-                'Tags': [{
-                    'Key': 'owner',
-                    'Value': 'kaloian.manassiev'
-                }, {
-                    'Key': 'source_volume',
-                    'Value': source_volume_id
-                }]
-            }])
-        volume_id = response['Volumes'][0]['VolumeId']
-        copied_volume_ids.append(volume_id)
-        logging.info(f'Volume copy {volume_id} initiated')
+    For each entry in data_volumes and each instance, either creates a new volume from the
+    EBS configuration in the template, or copies from source_volume_id if provided.
+    '''
 
-    # Wait for all copies to become available
-    for volume_id in copied_volume_ids:
-        logging.info(f'Waiting for volume {volume_id} to become available ...')
-        ec2.get_waiter('volume_available').wait(VolumeIds=[volume_id], WaiterConfig={
-            'Delay': 15,
-            'MaxAttempts': 120
-        })
-
-    # Attach volumes to instances
     volume_attachments = []
-    for volume_id, instance in zip(copied_volume_ids, instances):
-        instance_id = instance['InstanceId']
-        logging.info(f'Attaching volume {volume_id} to instance {instance_id} as /dev/xvdb ...')
-        ec2.attach_volume(VolumeId=volume_id, InstanceId=instance_id, Device='/dev/xvdb')
-        volume_attachments.append((volume_id, instance_id))
 
-    for volume_id, instance_id in volume_attachments:
+    for vol_def in data_volumes:
+        device_name = vol_def['DeviceName']
+        ebs_config = vol_def['Ebs']
+
+        created_volume_ids = []
+        for instance in instances:
+            az = instance['Placement']['AvailabilityZone']
+            instance_id = instance['InstanceId']
+
+            if source_volume_id:
+                logging.info(f'Copying volume {source_volume_id} in {az} for {instance_id} ...')
+                response = ec2.copy_volumes(
+                    SourceVolumeId=source_volume_id, VolumeType=ebs_config.get('VolumeType', 'gp3'),
+                    TagSpecifications=[{
+                        'ResourceType':
+                            'volume',
+                        'Tags': [{
+                            'Key': 'owner',
+                            'Value': 'kaloian.manassiev'
+                        }, {
+                            'Key': 'source_volume',
+                            'Value': source_volume_id
+                        }]
+                    }])
+                volume_id = response['Volumes'][0]['VolumeId']
+            else:
+                create_params = {
+                    'AvailabilityZone':
+                        az,
+                    'VolumeType':
+                        ebs_config.get('VolumeType', 'gp3'),
+                    'Size':
+                        ebs_config['VolumeSize'],
+                    'Encrypted':
+                        ebs_config.get('Encrypted', True),
+                    'TagSpecifications': [{
+                        'ResourceType': 'volume',
+                        'Tags': [{
+                            'Key': 'owner',
+                            'Value': 'kaloian.manassiev'
+                        }]
+                    }],
+                }
+                if 'Iops' in ebs_config:
+                    create_params['Iops'] = ebs_config['Iops']
+                if 'Throughput' in ebs_config:
+                    create_params['Throughput'] = ebs_config['Throughput']
+
+                logging.info(
+                    f'Creating {ebs_config["VolumeSize"]}GB {ebs_config.get("VolumeType", "gp3")} '
+                    f'volume in {az} for {instance_id} ...')
+                volume = ec2.create_volume(**create_params)
+                volume_id = volume['VolumeId']
+
+            created_volume_ids.append((volume_id, instance))
+            logging.info(f'Volume {volume_id} initiated')
+
+        # Wait for all volumes to become available
+        for volume_id, _ in created_volume_ids:
+            logging.info(f'Waiting for volume {volume_id} to become available ...')
+            ec2.get_waiter('volume_available').wait(VolumeIds=[volume_id], WaiterConfig={
+                'Delay': 15,
+                'MaxAttempts': 120
+            })
+
+        # Attach volumes to instances
+        for volume_id, instance in created_volume_ids:
+            instance_id = instance['InstanceId']
+            logging.info(f'Attaching volume {volume_id} to {instance_id} as {device_name} ...')
+            ec2.attach_volume(VolumeId=volume_id, InstanceId=instance_id, Device=device_name)
+            volume_attachments.append((volume_id, instance_id, device_name))
+
+    # Wait for all attachments and set DeleteOnTermination
+    for volume_id, instance_id, device_name in volume_attachments:
         ec2.get_waiter('volume_in_use').wait(VolumeIds=[volume_id])
         ec2.modify_instance_attribute(
             InstanceId=instance_id, BlockDeviceMappings=[{
-                'DeviceName': '/dev/xvdb',
+                'DeviceName': device_name,
                 'Ebs': {
                     'DeleteOnTermination': True
                 }
             }])
 
-    logging.info(f'All {len(volume_attachments)} volumes copied and attached successfully')
+    logging.info(f'All {len(volume_attachments)} volume(s) created and attached successfully')

@@ -20,12 +20,12 @@ import logging
 import sys
 
 from common.common import yes_no
-from common.ec2_instances import (CLIENT_HOST_TEMPLATE, copy_and_attach_volumes,
-                                  describe_all_instances, filter_instances_by_role,
-                                  launch_instances, load_template,
+from common.ec2_instances import (CLIENT_HOST_TEMPLATE, create_and_attach_volumes,
+                                  describe_all_instances, extract_data_volumes_from_template,
+                                  filter_instances_by_role, launch_instances, load_template,
                                   make_client_driver_host_configuration,
                                   make_cluster_host_configuration, make_instance_tag_specifications,
-                                  remove_data_volume_from_template, wait_for_instances)
+                                  wait_for_instances)
 from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
@@ -71,9 +71,7 @@ def main_launch(args, ec2):
     client_template = load_template(CLIENT_HOST_TEMPLATE)
 
     use_volume_copy = getattr(args, 'use_volume_copy', None)
-
-    if use_volume_copy:
-        template = remove_data_volume_from_template(template)
+    template, data_volumes = extract_data_volumes_from_template(template)
 
     skip_format = bool(use_volume_copy)
 
@@ -116,8 +114,9 @@ def main_launch(args, ec2):
     all_cluster_instances = config_instances + shard_instances
     wait_for_instances(ec2, client_driver_instances + all_cluster_instances)
 
-    if use_volume_copy:
-        copy_and_attach_volumes(ec2, use_volume_copy, all_cluster_instances)
+    if data_volumes:
+        create_and_attach_volumes(ec2, data_volumes, all_cluster_instances,
+                                  source_volume_id=use_volume_copy)
 
     cluster_desc = describe_cluster(ec2, args.clustertag)
     with open(args.output, 'w') as f:
