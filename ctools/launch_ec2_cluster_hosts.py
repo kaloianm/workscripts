@@ -17,6 +17,7 @@ import argparse
 import boto3
 import json
 import logging
+import os
 import sys
 
 from common.common import yes_no
@@ -114,18 +115,20 @@ def main_launch(args, ec2):
     all_cluster_instances = config_instances + shard_instances
     wait_for_instances(ec2, client_driver_instances + all_cluster_instances)
 
-    if data_volumes:
-        create_and_attach_volumes(ec2, data_volumes, all_cluster_instances,
-                                  source_volume_id=use_volume_copy)
+    create_and_attach_volumes(ec2, data_volumes, all_cluster_instances,
+                              source_volume_id=use_volume_copy)
 
     cluster_desc = describe_cluster(ec2, args.clustertag)
-    with open(args.output, 'w') as f:
+    output_dir = args.clustertag
+    output_file = os.path.join(output_dir, 'deployment_description.json')
+    os.makedirs(output_dir, exist_ok=True)
+    with open(output_file, 'w') as f:
         f.write(cluster_desc)
     print(cluster_desc)
 
-    logging.info(f'Cluster configuration written to {args.output}')
+    logging.info(f'Cluster configuration written to {output_file}')
     logging.info(
-        f'To deploy binaries to cluster, now run ./remote_control_cluster.py {args.output} create  ...'
+        f'To deploy binaries to cluster, now run ./remote_control_cluster.py {args.clustertag} create  ...'
     )
 
 
@@ -171,8 +174,6 @@ if __name__ == "__main__":
                                default=3)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
-    parser_launch.add_argument('--output', help='Output file for the cluster configuration.',
-                               type=str, default='cluster.json')
     parser_launch.add_argument(
         '--use-volume-copy',
         help='EBS volume ID to snapshot and attach as data volume to each node.', type=str,

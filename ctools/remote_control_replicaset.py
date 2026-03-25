@@ -9,10 +9,10 @@ The intended usage is:
 
 1. Use the `launch_ec2_replicaset_hosts.py Tag launch` script in order to spawn a set of hosts in
    EC2 on which the MongoDB processes will run.
-2. This script will produce a replica set description replset.json file which contains the specific
-   hosts and will serve as an input for the `remote_control_replicaset.py` utilities.
-3. Update the 'MongoBinPath' parameter in replset.json and run the
-   `remote_control_replicaset.py create replset.json` command in order to launch the processes.
+2. This script will create a directory named after the cluster tag containing a
+   deployment_description.json file with the host configuration.
+3. Update the 'MongoBinPath' parameter in the deployment_description.json and run the
+   `remote_control_replicaset.py Tag create` command in order to launch the processes.
 
 Use --help for more information on the supported commands.
 '''
@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 
 from common.common import yes_no
@@ -138,10 +139,9 @@ if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
-    argsParser.add_argument(
-        'replsetconfigfile',
-        help='JSON-formatted text file which contains the configuration of the replica set',
-        type=str)
+    argsParser.add_argument('clustertag',
+                            help='Cluster tag directory containing deployment_description.json',
+                            type=str)
     subparsers = argsParser.add_subparsers(title='subcommands')
 
     ###############################################################################################
@@ -161,6 +161,7 @@ if __name__ == "__main__":
         'start', help='Starts all the processes of an already created replica set')
     parser_start.set_defaults(func=main_start)
 
+    ###############################################################################################
     # Arguments for the 'stop' command
     parser_stop = subparsers.add_parser(
         'stop',
@@ -205,7 +206,8 @@ if __name__ == "__main__":
     args = argsParser.parse_args()
     logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
-    with open(args.replsetconfigfile) as f:
+    config_file = os.path.join(args.clustertag, 'deployment_description.json')
+    with open(config_file) as f:
         rs_config = json.load(f)
 
     logging.info(f'Configuration: {json.dumps(rs_config, indent=2)}')

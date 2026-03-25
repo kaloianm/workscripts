@@ -9,10 +9,10 @@ The intended usage is:
 
 1. Use the `launch_ec2_cluster_hosts.py Cluster launch` script in order to spawn a set of hosts in
    EC2 on which the MongoDB processes will run.
-2. This script will produce a cluster description cluster.json file which contains the specific
-   hosts and will serve as an input for the `remote_control_cluster.py` utilities.
-3. Update the 'MongoBinPath' parameter in cluster.json and run the
-   `remote_control_cluster.py create cluster.json` command in order to launch the processes.
+2. This script will create a directory named after the cluster tag containing a
+   deployment_description.json file with the host configuration.
+3. Update the 'MongoBinPath' parameter in the deployment_description.json and run the
+   `remote_control_cluster.py Tag create` command in order to launch the processes.
 
 Use --help for more information on the supported commands.
 '''
@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import motor.motor_asyncio
+import os
 import sys
 
 from common.common import yes_no
@@ -249,9 +250,9 @@ if __name__ == "__main__":
     argsParser = argparse.ArgumentParser(description=help_string)
     logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 
-    argsParser.add_argument(
-        'clusterconfigfile',
-        help='JSON-formatted text file which contains the configuration of the cluster', type=str)
+    argsParser.add_argument('clustertag',
+                            help='Cluster tag directory containing deployment_description.json',
+                            type=str)
     subparsers = argsParser.add_subparsers(title='subcommands')
 
     ###############################################################################################
@@ -273,6 +274,7 @@ if __name__ == "__main__":
                               help='Limit the command to just one shard')
     parser_start.set_defaults(func=main_start)
 
+    ###############################################################################################
     # Arguments for the 'stop' command
     parser_stop = subparsers.add_parser(
         'stop',
@@ -327,7 +329,8 @@ if __name__ == "__main__":
     args = argsParser.parse_args()
     logging.info(f"CTools version {CTOOLS_VERSION} starting with arguments: '{args}'")
 
-    with open(args.clusterconfigfile) as f:
+    config_file = os.path.join(args.clustertag, 'deployment_description.json')
+    with open(config_file) as f:
         cluster_config = json.load(f)
 
     logging.info(f'Configuration: {json.dumps(cluster_config, indent=2)}')

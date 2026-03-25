@@ -16,6 +16,7 @@ import argparse
 import boto3
 import json
 import logging
+import os
 import sys
 
 from common.common import yes_no
@@ -86,10 +87,13 @@ def main_launch(args, ec2):
     create_and_attach_volumes(ec2, data_volumes, rs_instances, source_volume_id=use_volume_copy)
 
     rs_desc = describe_replicaset(ec2, args.clustertag)
-    with open(args.output, 'w') as f:
+    output_dir = args.clustertag
+    output_file = os.path.join(output_dir, 'deployment_description.json')
+    os.makedirs(output_dir, exist_ok=True)
+    with open(output_file, 'w') as f:
         f.write(rs_desc)
     print(rs_desc)
-    logging.info(f'Replica set configuration written to {args.output}')
+    logging.info(f'Replica set configuration written to {output_file}')
 
 
 def main_terminate(args, ec2):
@@ -132,8 +136,6 @@ if __name__ == "__main__":
                                default=3)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
-    parser_launch.add_argument('--output', help='Output file for the replica set configuration.',
-                               type=str, default='replset.json')
     parser_launch.add_argument(
         '--use-volume-copy',
         help='EBS volume ID to snapshot and attach as data volume to each node.', type=str,
