@@ -191,6 +191,36 @@ async def main_create(args, cluster):
     logging.info(await cluster.get_description())
 
 
+async def main_init(args, cluster):
+    '''Implements the init command'''
+
+    await deploy_binaries(cluster.available_hosts, cluster.config['MongoBinPath'])
+    await start_config_replica_set(cluster)
+    await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')
+    await start_shard_replica_set(cluster, cluster.shard1_hosts, 'shard1')
+
+    await initiate_replica_set(cluster.config_hosts, 27019, 'config')
+    await initiate_replica_set(cluster.shard0_hosts, 27018, 'shard0')
+    await initiate_replica_set(cluster.shard1_hosts, 27018, 'shard1')
+
+    # MongoS instances
+    await start_mongos_processes(cluster)
+
+    logging.info(f'Connecting to {cluster.connection_string}')
+
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(cluster.connection_string)
+    logging.info(await mongo_client.admin.command({
+        'addShard': f'shard0/{cluster.shard0_hosts[0].host}:27018',
+        'name': 'shard0',
+    }))
+    logging.info(await mongo_client.admin.command({
+        'addShard': f'shard1/{cluster.shard1_hosts[0].host}:27018',
+        'name': 'shard1',
+    }))
+
+    logging.info(await cluster.get_description())
+
+
 async def main_describe(args, cluster):
     logging.info(await cluster.get_description())
 
@@ -258,6 +288,13 @@ if __name__ == "__main__":
     parser_create = subparsers.add_parser('create',
                                           help='Creates (or overwrites) a brand new cluster')
     parser_create.set_defaults(func=main_create)
+
+    ###############################################################################################
+    # Arguments for the 'init' command
+    parser_init = subparsers.add_parser(
+        'init',
+        help='Deploys binaries, starts processes, and initiates the cluster without cleanup')
+    parser_init.set_defaults(func=main_init)
 
     ###############################################################################################
     # Arguments for the 'describe' command

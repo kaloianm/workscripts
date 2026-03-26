@@ -52,9 +52,9 @@ def describe_cluster(ec2, clustertag):
                 map(lambda x: x["PublicDnsName"], filter_instances_by_role(all_instances,
                                                                            'driver'))),
         "MongoBinPath":
-            "<Substitute with the local binaries path>",
+            "/home/ubuntu/workspace/mongo/bazel-bin/install-devcore/bin",
         "RemoteMongoDPath":
-            "/mnt/data/mongod",
+            "/mnt/data/rs",
         "RemoteMongoSPath":
             "/mnt/data/mongos",
         "FeatureFlags": [],

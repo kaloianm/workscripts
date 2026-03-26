@@ -90,6 +90,16 @@ async def main_create(args, rs):
     logging.info(await rs.get_description())
 
 
+async def main_init(args, rs):
+    '''Implements the init command'''
+
+    await deploy_binaries(rs.hosts, rs.config['MongoBinPath'])
+    await start_mongod_as_replica_set(rs.hosts, 27017, rs.name, rs.mongod_parameters)
+    await initiate_replica_set(rs.hosts, 27017, rs.name)
+
+    logging.info(await rs.get_description())
+
+
 async def main_describe(args, rs):
     logging.info(await rs.get_description())
 
@@ -147,6 +157,13 @@ if __name__ == "__main__":
     parser_create = subparsers.add_parser('create',
                                           help='Creates (or overwrites) a brand new replica set')
     parser_create.set_defaults(func=main_create)
+
+    ###############################################################################################
+    # Arguments for the 'init' command
+    parser_init = subparsers.add_parser(
+        'init',
+        help='Deploys binaries, starts processes, and initiates a replica set without cleanup')
+    parser_init.set_defaults(func=main_init)
 
     ###############################################################################################
     # Arguments for the 'describe' command
