@@ -10,7 +10,7 @@
 #   mgodatagen -f locust_read_write_load_mgodatagen_50GB.json --uri mongodb://localhost/?directConnection=false
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
-#   locust -f locust_read_write_load.py --processes 4 --users 2000 --spawn-rate 100 --autostart --web-port 8090 --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
+#   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 100 --autostart --web-port 8090 --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
 #
 
 import json

@@ -1,0 +1,15 @@
+{
+  "Name": "FastBulkDelete", 
+  "Hosts": [
+    "ec2-98-83-212-11.compute-1.amazonaws.com"
+  ], 
+  "DriverHosts": [
+    "ec2-3-236-149-254.compute-1.amazonaws.com"
+  ], 
+  "MongoBinPath": "/home/ubuntu/workspace/mongo/bazel-bin/install-devcore/bin", 
+  "RemoteMongoDPath": "/mnt/data/rs", 
+  "FeatureFlags": [], 
+  "MongoDParameters": [
+    "--wiredTigerCacheSizeGB 18"
+  ]
+}
