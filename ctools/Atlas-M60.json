@@ -29,6 +29,9 @@
       }
     }
   ],
+  "Placement": {
+    "AvailabilityZone": "us-east-1a"
+  },
   "EbsOptimized": true,
   "Monitoring": {
     "Enabled": true
