@@ -27,8 +27,7 @@ import sys
 
 from common.common import yes_no
 from common.remote_mongo import (cleanup_mongo_directories, deploy_binaries, gather_logs,
-                                 install_prerequisite_packages, initiate_replica_set,
-                                 make_remote_mongo_host, rsync_to_hosts,
+                                 initiate_replica_set, make_remote_mongo_host, rsync_to_hosts,
                                  start_mongod_as_replica_set, stop_mongo_processes)
 from common.version import CTOOLS_VERSION
 from signal import Signals
@@ -165,7 +164,6 @@ async def main_create(args, cluster):
 
     await stop_mongo_processes(cluster.available_hosts, Signals.SIGKILL)
     await cleanup_mongo_directories(cluster.available_hosts)
-    # await install_prerequisite_packages(cluster.available_hosts)
     await deploy_binaries(cluster.available_hosts, cluster.config['MongoBinPath'])
     await start_config_replica_set(cluster)
     await start_shard_replica_set(cluster, cluster.shard0_hosts, 'shard0')

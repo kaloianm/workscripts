@@ -26,8 +26,7 @@ import sys
 
 from common.common import yes_no
 from common.remote_mongo import (cleanup_mongo_directories, deploy_binaries, gather_logs,
-                                 install_prerequisite_packages, initiate_replica_set,
-                                 make_remote_mongo_host, rsync_to_hosts,
+                                 initiate_replica_set, make_remote_mongo_host, rsync_to_hosts,
                                  start_mongod_as_replica_set, stop_mongo_processes)
 from common.version import CTOOLS_VERSION
 from signal import Signals
@@ -84,7 +83,6 @@ async def main_create(args, rs):
 
     await stop_mongo_processes(rs.hosts, Signals.SIGKILL)
     await cleanup_mongo_directories(rs.hosts)
-    # await install_prerequisite_packages(rs.hosts)
     await deploy_binaries(rs.hosts, rs.config['MongoBinPath'])
     await start_mongod_as_replica_set(rs.hosts, 27017, rs.name, rs.mongod_parameters)
     await initiate_replica_set(rs.hosts, 27017, rs.name)

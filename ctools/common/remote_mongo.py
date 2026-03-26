@@ -114,25 +114,15 @@ async def cleanup_mongo_directories(hosts, shard=None):
         if shard and host.host_desc['shard'] != shard:
             continue
 
-        paths_to_rm = [p for p in [host.host_desc.get("RemoteMongoDPath"),
-                                    host.host_desc.get("RemoteMongoSPath")] if p]
+        paths_to_rm = [
+            p for p in
+            [host.host_desc.get("RemoteMongoDPath"),
+             host.host_desc.get("RemoteMongoSPath")] if p
+        ]
         if paths_to_rm:
             tasks.append(
                 asyncio.create_task(
                     host.exec_remote_ssh_command(f'rm -rf {" ".join(paths_to_rm)}')))
-    await asyncio.gather(*tasks)
-
-
-async def install_prerequisite_packages(hosts):
-    '''Install (using apt) all the prerequisite libraries that the mongodb binaries require'''
-
-    logging.info('Installing prerequisite packages')
-    tasks = []
-    for host in hosts:
-        tasks.append(
-            asyncio.create_task(
-                host.exec_remote_ssh_command(
-                    'sudo apt -y update && sudo apt -y install libsnmp-dev')))
     await asyncio.gather(*tasks)
 
 
