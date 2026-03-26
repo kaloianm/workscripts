@@ -30,7 +30,7 @@ echo "Configuring required packages"
 ###################################################################################################
 
 sudo apt update -y
-sudo apt install -y vim build-essential dstat
+sudo apt install -y vim build-essential dstat sysstat
 
 sudo -u ubuntu \
     NONINTERACTIVE=1 \
@@ -46,6 +46,8 @@ eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 sudo -u ubuntu -i brew update
 sudo -u ubuntu -i brew install python3 mongosh
+
+git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
