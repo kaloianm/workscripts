@@ -34,20 +34,20 @@ sudo apt install -y vim build-essential dstat sysstat
 
 sudo -u ubuntu \
     NONINTERACTIVE=1 \
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-echo >> /home/ubuntu/.bashrc
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bashrc
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
+sudo -u ubuntu bash -c 'echo >> /home/ubuntu/.bashrc'
+sudo -u ubuntu bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> /home/ubuntu/.bashrc'
 
-echo >> /home/ubuntu/.bash_profile
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /home/ubuntu/.bash_profile
+sudo -u ubuntu bash -c 'echo >> /home/ubuntu/.bash_profile'
+sudo -u ubuntu bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> /home/ubuntu/.bash_profile'
+
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 sudo -u ubuntu -i brew update
 sudo -u ubuntu -i brew install python3 mongosh
 
-git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
+sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
