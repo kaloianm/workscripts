@@ -16,8 +16,10 @@
 # overhead during the bulk load phase.
 #
 # Example usage:
-#   python3 locust_read_write_load_mgodatagen_shuffle.py --shuffle-factor 8 -f locust_read_write_load_mgodatagen_50GB.json --uri "mongodb://URL/?directConnection=false"
-#
+#   python3 locust_read_write_load_mgodatagen_shuffle.py \
+#       -f locust_read_write_load_mgodatagen_50GB.json \
+#       --uri "mongodb://HOST/?directConnection=false" \
+#       --shuffle-factor 8 -- --batchSize 10000
 #
 
 import argparse
@@ -47,10 +49,10 @@ def parse_args():
               'shardKey segments whose insertion order is shuffled.  Higher values '
               'increase interleaving at the cost of more mgodatagen invocations.  '
               'K=1 is equivalent to plain mgodatagen with no shuffling.'))
-    p.add_argument('--seed', type=int, default=None,
-                   help='Random seed for reproducible batch ordering (default: random)')
     p.add_argument('--dry-run', action='store_true',
                    help='Print the batch plan without running mgodatagen')
+    p.add_argument('passthrough', nargs=argparse.REMAINDER, metavar='-- <mgodatagen args>',
+                   help='Extra arguments forwarded verbatim to every mgodatagen invocation')
     return p.parse_args()
 
 
@@ -91,15 +93,17 @@ def main():
         cur += n
 
     # Shuffle the insertion order.
-    rng = random.Random(args.seed)
-    rng.shuffle(batches)
+    random.shuffle(batches)
+
+    # Strip the '--' separator that argparse includes in REMAINDER.
+    passthrough = args.passthrough[
+        1:] if args.passthrough and args.passthrough[0] == '--' else args.passthrough
 
     w = len(str(k))  # width for batch index formatting
     logging.info('Config     : %s', args.config_file)
     logging.info('Namespace  : %s.%s', coll['database'], coll['collection'])
     logging.info('Total docs : %s   shardKey range [%d, %d)', f'{total:,}', start, start + total)
     logging.info('Batches    : %d of ~%s docs each', k, f'{batch_size:,}')
-    logging.info('Seed       : %s', args.seed if args.seed is not None else 'random')
     logging.info('')
     logging.info('Insertion order:')
     for i, (s, n) in enumerate(batches):
@@ -131,7 +135,7 @@ def main():
             json.dump(batch_config, tf, indent=2)
             tf.close()
 
-            cmd = ['mgodatagen', '-f', tf.name, '--uri', args.uri]
+            cmd = ['mgodatagen', '-f', tf.name, '--uri', args.uri] + passthrough
             if i > 0:
                 cmd.append('--append')
 
