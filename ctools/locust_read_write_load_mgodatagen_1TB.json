@@ -2,7 +2,7 @@
     {
         "database": "locust_read_write_load",
         "collection": "load",
-        "count": 800000000,
+        "count": 200000000,
         "content": {
             "shardKey": {
                 "type": "autoincrement",
