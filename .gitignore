@@ -4,3 +4,5 @@ python3-venv
 
 *.cluster
 .env
+
+locust_results_*.csv
