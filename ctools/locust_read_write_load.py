@@ -10,11 +10,13 @@
 #   mgodatagen -f locust_read_write_load_mgodatagen_50GB.json --uri mongodb://localhost/?directConnection=false
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
-#   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 100 --autostart --web-port 8090 --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
+#   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 100 --autostart --web-port 8090 --csv=locust_results --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
 #
 
 import json
 import logging
+
+import locust.stats
 
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
@@ -22,13 +24,15 @@ from random import choice
 from string import ascii_letters
 from time import perf_counter_ns
 
+# Capture P50 and P99
+locust.stats.PERCENTILES_TO_CHART = [0.5, 0.99]
+
 connection_string = None
 collection = None
 
 # Populated from mgodatagen config at init time
 SECONDARY_INDEX_FIELDS = []
-
-SHARD_KEY_LENGTH = 16
+SHARD_KEY_LENGTH = 0
 
 
 def random_shard_key():
@@ -57,6 +61,9 @@ def on_locust_init(environment, **kwargs):
     ns_db = config['database']
     ns_coll = config['collection']
 
+    global SHARD_KEY_LENGTH
+    SHARD_KEY_LENGTH = config['content']['shardKey']['maxLength']
+
     # Extract secondary index fields (exclude the shardKey index)
     global SECONDARY_INDEX_FIELDS
     for idx in config.get('indexes', []):
@@ -66,6 +73,7 @@ def on_locust_init(environment, **kwargs):
 
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
+    logging.info(f'Shard key length: {SHARD_KEY_LENGTH}')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
