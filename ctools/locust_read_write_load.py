@@ -16,10 +16,9 @@
 import json
 import logging
 
-from bson import Int64
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import choice, randrange
+from random import choice
 from string import ascii_letters
 from time import perf_counter_ns
 
@@ -27,9 +26,13 @@ connection_string = None
 collection = None
 
 # Populated from mgodatagen config at init time
-MIN_SHARD_KEY = 0
-MAX_SHARD_KEY = 0
 SECONDARY_INDEX_FIELDS = []
+
+SHARD_KEY_LENGTH = 16
+
+
+def random_shard_key():
+    return ''.join(choice(ascii_letters) for _ in range(SHARD_KEY_LENGTH))
 
 
 def nanos_to_millis(nanos):
@@ -53,12 +56,6 @@ def on_locust_init(environment, **kwargs):
 
     ns_db = config['database']
     ns_coll = config['collection']
-    count = config['count']
-    start_int = config['content']['shardKey'].get('startInt', 0)
-
-    global MIN_SHARD_KEY, MAX_SHARD_KEY
-    MIN_SHARD_KEY = start_int
-    MAX_SHARD_KEY = start_int + count
 
     # Extract secondary index fields (exclude the shardKey index)
     global SECONDARY_INDEX_FIELDS
@@ -69,7 +66,6 @@ def on_locust_init(environment, **kwargs):
 
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
-    logging.info(f'Shard key range: [{MIN_SHARD_KEY}, {MAX_SHARD_KEY})')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
@@ -87,47 +83,36 @@ class MongoUser(User):
 
     @task(5)
     def select_shard_key(self):
-        self.shard_key = Int64(randrange(MIN_SHARD_KEY, MAX_SHARD_KEY))
+        # Probe a random point in the key space and find the first document at
+        # or after it.  This exercises the shardKey index without requiring an
+        # exact match and produces a uniformly distributed random document
+        # selection regardless of the actual key distribution in the collection.
+        probe = random_shard_key()
 
         start_time = perf_counter_ns()
 
         shard_key_doc = collection.with_options(
             read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
-                filter={
-                    'shardKey': self.shard_key,
-                }, )
+                filter={'shardKey': {
+                    '$gte': probe
+                }}, sort=[('shardKey', 1)])
 
         if shard_key_doc is None:
-            start_time_insert = perf_counter_ns()
+            # Probe landed beyond the last key; wrap around to the first document.
+            shard_key_doc = collection.with_options(
+                read_preference=ReadPreference.SECONDARY_PREFERRED).find_one({},
+                                                                             sort=[('shardKey', 1)])
 
-            upsert_result = collection.update_one(
-                filter={
-                    'shardKey': self.shard_key,
-                },
-                update={
-                    '$inc': {
-                        'updates': 1,
-                    },
-                },
-                upsert=True,
-            )
-            assert upsert_result.upserted_id is not None or upsert_result.modified_count == 1, f"Upsert for {self.shard_key} didn't result in any documents being upserted"
+        if shard_key_doc is not None:
+            self.shard_key = shard_key_doc['shardKey']
 
-            self.environment.events.request.fire(
-                request_type='insert_shard_key',
-                name='insert_shard_key',
-                response_time=nanos_to_millis(perf_counter_ns() - start_time_insert),
-                response_length=0,
-                exception=None,
-            )
-        else:
-            self.environment.events.request.fire(
-                request_type='find_shard_key',
-                name='find_shard_key',
-                response_time=nanos_to_millis(perf_counter_ns() - start_time),
-                response_length=0,
-                exception=None,
-            )
+        self.environment.events.request.fire(
+            request_type='find_shard_key',
+            name='find_shard_key',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_length=0,
+            exception=None,
+        )
 
     @task(5)
     def read_by_secondary_index(self):
@@ -188,7 +173,7 @@ class MongoUser(User):
 
     @task(3)
     def insert_new_shard_key(self):
-        new_key = Int64(MAX_SHARD_KEY + randrange(0, MAX_SHARD_KEY))
+        new_key = random_shard_key()
 
         start_time = perf_counter_ns()
 

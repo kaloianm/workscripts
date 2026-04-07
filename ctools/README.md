@@ -23,44 +23,13 @@ mgodatagen -f locust_read_write_load_mgodatagen_1TB.json --uri mongodb://URL/?di
 mgodatagen -f locust_read_write_load_mgodatagen_4TB.json --uri mongodb://URL/?directConnection=false
 ```
 
-After generation, optionally run the shuffle script (see below) to break the shardKey/RecordId correlation before benchmarking.
-
-All configs share the same document structure: a 2,700-byte non-indexed `payload` field, ten 120-byte indexed string fields (`idx0`–`idx9`), plus a unique-indexed `shardKey` integer and `_id`. This yields approximately **4KB per document** (~4,060 bytes raw). The storage split is roughly **77% data / 23% indexes** (see [Document size breakdown](#document-size-breakdown) below).
+All configs share the same document structure: a 2,700-byte non-indexed `payload` field, ten 120-byte indexed string fields (`idx0`–`idx9`), a 16-byte random string `shardKey` (non-unique index), and `_id`. This yields approximately **4KB per document** (~4,077 bytes raw). The storage split is roughly **77% data / 23% indexes** (see [Document size breakdown](#document-size-breakdown) below).
 
 - **locust_read_write_load_mgodatagen_10GB.json** — Generates a ~10GB dataset (2M docs). Approximate breakdown: ~8GB data + ~2.4GB indexes. Good for quick local testing.
 - **locust_read_write_load_mgodatagen_50GB.json** — Generates a ~50GB dataset (10M docs). Approximate breakdown: ~40GB data + ~12GB indexes.
 - **locust_read_write_load_mgodatagen_500GB.json** — Generates a ~500GB dataset (100M docs). Approximate breakdown: ~406GB data + ~120GB indexes. Suitable for M50 instances with 1TB data volume.
 - **locust_read_write_load_mgodatagen_1TB.json** — Generates a ~1TB dataset (200M docs). Approximate breakdown: ~812GB data + ~240GB indexes. Requires instances with 1.5TB+ data volume.
 - **locust_read_write_load_mgodatagen_4TB.json** — Generates a ~4TB dataset (800M docs). Approximate breakdown: ~3.25TB data + ~960GB indexes. Requires instances with 5TB+ data volume.
-
-#### Shuffling shardKey insertion order
-
-`mgodatagen`'s `autoincrement` generator inserts documents with `shardKey = 0, 1, 2, …`, so `shardKey k` always lands at WiredTiger RecordId `k+1`. This makes the shardKey B-tree index perfectly co-sorted with collection storage, causing range-based operations (bulk deletes, range scans) to be unrealistically cache-friendly.
-
-[`locust_read_write_load_mgodatagen_shuffle.py`](locust_read_write_load_mgodatagen_shuffle.py) is a drop-in wrapper around `mgodatagen` that splits the shardKey range into `--shuffle-factor` equal batches and runs them in a randomised order. Each batch uses `mgodatagen --append` so the collection is built incrementally. The result is a layout where adjacent shardKey values map to non-adjacent RecordIds.
-
-```
-# 8 batches (default) — good general-purpose setting
-python locust_read_write_load_mgodatagen_shuffle.py \
-    -f locust_read_write_load_mgodatagen_50GB.json \
-    --uri "mongodb://URL/?directConnection=false"
-
-# 16 batches — finer interleaving for range-deletion benchmarks
-python locust_read_write_load_mgodatagen_shuffle.py \
-    -f locust_read_write_load_mgodatagen_500GB.json \
-    --uri "mongodb://URL/?directConnection=false" \
-    --shuffle-factor 16
-
-```
-
-**`--shuffle-factor` guidance:**
-
-| Value | Effect |
-|---|---|
-| 1 | No shuffling — equivalent to plain `mgodatagen`. |
-| 4 | 4 segments in random order; coarse interleaving. |
-| 8 (default) | Good balance of interleaving and mgodatagen invocations. |
-| 16+ | Fine-grained interleaving; recommended for range-deletion benchmarks. |
 
 #### Document size breakdown
 
@@ -69,11 +38,11 @@ Every document has the following layout (all string fields contain random ASCII 
 | Field | Type | Size | Indexed? |
 |---|---|---|---|
 | `_id` | ObjectId | 12 bytes | Yes (always) |
-| `shardKey` | int32 | 4 bytes | Yes (unique) |
+| `shardKey` | string | **16 bytes** | Yes (non-unique) |
 | `idx0`–`idx9` | string × 10 | 120 bytes each → **1,200 bytes total** | Yes (10 secondary indexes) |
 | `payload` | string | **2,700 bytes** | No |
 | BSON framing / field names | — | ~144 bytes | — |
-| **Total** | | **~4,060 bytes ≈ 4KB** | |
+| **Total** | | **~4,077 bytes ≈ 4KB** | |
 
 **Per-document storage contribution:**
 - Non-indexed data (`payload` + overhead): ~2,844 bytes ≈ **70% of the document**
@@ -81,5 +50,5 @@ Every document has the following layout (all string fields contain random ASCII 
 
 **Collection vs. index storage ratio:**  
 Each of the 10 secondary indexes stores a copy of its 120-byte key per document, so index storage ≈ `10 × 120 × N` bytes. For a collection of N documents:
-- Collection (data): `N × 4,060 bytes` ≈ **77%** of total on-disk footprint
+- Collection (data): `N × 4,077 bytes` ≈ **77%** of total on-disk footprint
 - Indexes (all 10 secondary + shardKey): `N × 1,200 bytes` ≈ **23%** of total on-disk footprint

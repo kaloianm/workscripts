@@ -4,11 +4,7 @@
         "collection": "load",
         "count": 2000000,
         "content": {
-            "shardKey": {
-                "type": "autoincrement",
-                "autoType": "int",
-                "startInt": 0
-            },
+            "shardKey": { "type": "string", "minLength": 16, "maxLength": 16 },
             "idx0": { "type": "string", "minLength": 120, "maxLength": 120 },
             "idx1": { "type": "string", "minLength": 120, "maxLength": 120 },
             "idx2": { "type": "string", "minLength": 120, "maxLength": 120 },
@@ -26,7 +22,7 @@
             }
         },
         "indexes": [
-            { "name": "shardKey", "key": { "shardKey": 1 }, "unique": true },
+            { "name": "shardKey", "key": { "shardKey": 1 } },
             { "name": "idx0", "key": { "idx0": 1 } },
             { "name": "idx1", "key": { "idx1": 1 } },
             { "name": "idx2", "key": { "idx2": 1 } },
