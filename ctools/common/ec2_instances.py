@@ -48,6 +48,8 @@ sudo -u ubuntu -i brew update
 sudo -u ubuntu -i brew install python3 mongosh
 
 sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
+
+curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
