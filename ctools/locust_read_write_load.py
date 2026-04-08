@@ -18,9 +18,10 @@ import logging
 
 import locust.stats
 
+from flask import jsonify, render_template_string, request as flask_request
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import choice
+from random import choice, uniform
 from string import ascii_letters
 from time import perf_counter_ns
 
@@ -31,8 +32,31 @@ connection_string = None
 collection = None
 
 # Populated from mgodatagen config at init time
+AVG_DOC_BYTES = 0
 SECONDARY_INDEX_FIELDS = []
 SHARD_KEY_LENGTH = 0
+COLLECTION_COUNT = 0
+
+
+def compute_avg_doc_bytes(content):
+    """Estimate average BSON document size from a mgodatagen content spec."""
+    # BSON document: 4-byte size prefix + fields + 1-byte null terminator
+    total = 5
+    # _id is always present as ObjectId (12 bytes): type + "_id" + null + value
+    total += 1 + 3 + 1 + 12
+    for field_name, field_spec in content.items():
+        field_type = field_spec.get('type', '')
+        # Each element: type byte + field name + null terminator
+        header = 1 + len(field_name) + 1
+        if field_type == 'string':
+            avg_len = (field_spec.get('minLength', 0) + field_spec.get('maxLength', 0)) / 2
+            # BSON string: 4-byte length int32 + content bytes + null terminator
+            total += header + 4 + avg_len + 1
+        elif field_type in ('int', 'autoincrement'):
+            total += header + 4
+        elif field_type in ('long', 'double'):
+            total += header + 8
+    return round(total)
 
 
 def random_shard_key():
@@ -64,6 +88,12 @@ def on_locust_init(environment, **kwargs):
     global SHARD_KEY_LENGTH
     SHARD_KEY_LENGTH = config['content']['shardKey']['maxLength']
 
+    global COLLECTION_COUNT
+    COLLECTION_COUNT = config['count']
+
+    global AVG_DOC_BYTES
+    AVG_DOC_BYTES = compute_avg_doc_bytes(config['content'])
+
     # Extract secondary index fields (exclude the shardKey index)
     global SECONDARY_INDEX_FIELDS
     for idx in config.get('indexes', []):
@@ -74,11 +104,16 @@ def on_locust_init(environment, **kwargs):
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
     logging.info(f'Shard key length: {SHARD_KEY_LENGTH}')
+    logging.info(f'Avg document size: {AVG_DOC_BYTES} bytes')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
     mongo_client = MongoClient(connection_string)
     collection = mongo_client[ns_db].get_collection(ns_coll, read_preference=ReadPreference.PRIMARY)
+
+    if environment.web_ui:
+        _register_custom_actions(environment.web_ui.app,
+                                 environment)  # http://host:8089/custom_actions
 
 
 class MongoUser(User):
@@ -200,3 +235,117 @@ class MongoUser(User):
             response_length=0,
             exception=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Custom actions web UI (accessible at http://host:8089/custom_actions)
+# ---------------------------------------------------------------------------
+
+_CUSTOM_ACTIONS_HTML = '''<!doctype html>
+<html>
+<head><title>Custom Actions</title></head>
+<body>
+<h2>Custom Actions</h2>
+
+<h3>deleteMany_10_pct</h3>
+<p>
+  Computes a shardKey range covering 10% of the collection, starting at a random
+  offset between 10% and 30% from the beginning, using covered index scans.
+  Returns a <code>db.runCommand</code> you can paste into mongosh.
+</p>
+<button onclick="runAction('/custom_actions/deleteMany_10_pct', 'out_deleteMany_10_pct')">Compute deleteMany_10_pct command</button>
+<pre id="out_deleteMany_10_pct" style="margin-top:1em"></pre>
+
+<h3>fastBulkDelete_10_pct</h3>
+<p>
+  Same range computation as <code>deleteMany_10_pct</code> but generates a
+  <code>fastBulkDelete</code> command using <code>filterIndexName</code>,
+  <code>lowerBound</code>, and <code>upperBound</code>.
+</p>
+<button onclick="runAction('/custom_actions/fastBulkDelete_10_pct', 'out_fastBulkDelete_10_pct')">Compute fastBulkDelete_10_pct command</button>
+<pre id="out_fastBulkDelete_10_pct" style="margin-top:1em"></pre>
+
+<script>
+function runAction(url, outId) {
+    document.getElementById(outId).textContent = "Computing...";
+    fetch(url, {method: "POST"})
+        .then(r => r.json())
+        .then(d => document.getElementById(outId).textContent = d.command)
+        .catch(e => document.getElementById(outId).textContent = "Error: " + e);
+}
+</script>
+</body>
+</html>'''
+
+
+def _register_custom_actions(app, environment):
+
+    @app.route('/custom_actions', methods=['GET'])
+    def custom_actions():
+        return render_template_string(_CUSTOM_ACTIONS_HTML)
+
+    # ---------------------------------------------------------------------------
+    # Shared range computation for the 10%-deletion actions
+    # ---------------------------------------------------------------------------
+
+    def _compute_delete_range():
+        # Random starting offset: between 10% and 30% from the beginning of the
+        # index, so the deletion range doesn't always start at the minimum key.
+        skip_docs = round(COLLECTION_COUNT * uniform(0.10, 0.30))
+
+        # Number of documents to delete: 10% of the configured collection size.
+        # Expressed via AVG_DOC_BYTES to make the relationship to data volume explicit,
+        # even though the avg size cancels out algebraically.
+        docs_to_delete = round(COLLECTION_COUNT * AVG_DOC_BYTES * 0.10 / AVG_DOC_BYTES)
+
+        # Covered index scans: projection excludes _id so only the shardKey index is
+        # read, with no access to the underlying documents.
+        index_only = {'shardKey': 1, '_id': 0}
+        start_key = next(
+            collection.find({}, index_only,
+                            sort=[('shardKey', 1)]).skip(skip_docs).limit(1))['shardKey']
+        cutoff_key = next(
+            collection.find({}, index_only, sort=[
+                ('shardKey', 1)
+            ]).skip(skip_docs + docs_to_delete).limit(1))['shardKey']
+
+        return docs_to_delete, start_key, cutoff_key
+
+    # ---------------------------------------------------------------------------
+    # deleteMany - 10% of the data
+    # ---------------------------------------------------------------------------
+
+    @app.route('/custom_actions/deleteMany_10_pct', methods=['POST'])
+    def deleteMany_10_pct():
+        try:
+            planned, start_key, cutoff_key = _compute_delete_range()
+            db_name = collection.database.name
+            coll_name = collection.name
+            command = (
+                f'db.getSiblingDB("{db_name}").runCommand({{'
+                f' delete: "{coll_name}",'
+                f' deletes: [{{ q: {{ shardKey: {{ $gte: "{start_key}", $lt: "{cutoff_key}" }} }}, limit: 0 }}]'
+                f' }})')
+            return jsonify({'planned': planned, 'command': command})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # ---------------------------------------------------------------------------
+    # fastBulkDelete - 10% of the data
+    # ---------------------------------------------------------------------------
+
+    @app.route('/custom_actions/fastBulkDelete_10_pct', methods=['POST'])
+    def fastBulkDelete_10_pct():
+        try:
+            planned, start_key, cutoff_key = _compute_delete_range()
+            db_name = collection.database.name
+            coll_name = collection.name
+            command = (f'db.getSiblingDB("{db_name}").runCommand({{'
+                       f' fastBulkDelete: "{coll_name}",'
+                       f' filterIndexName: "shardKey",'
+                       f' lowerBound: {{ shardKey: "{start_key}" }},'
+                       f' upperBound: {{ shardKey: "{cutoff_key}" }}'
+                       f' }})')
+            return jsonify({'planned': planned, 'command': command})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
