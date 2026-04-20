@@ -124,7 +124,7 @@ class MongoUser(User):
     def on_start(self):
         self.select_shard_key()
 
-    @task(5)
+    @task(10)
     def select_shard_key(self):
         # Probe a random point in the key space and find the first document at
         # or after it.  This exercises the shardKey index without requiring an
@@ -150,8 +150,8 @@ class MongoUser(User):
             self.shard_key = shard_key_doc['shardKey']
 
         self.environment.events.request.fire(
-            request_type='find_shard_key',
-            name='find_shard_key',
+            request_type='select_shard_key',
+            name='select_shard_key',
             response_time=nanos_to_millis(perf_counter_ns() - start_time),
             response_length=0,
             exception=None,
@@ -171,8 +171,8 @@ class MongoUser(User):
             filter={field: random_key})
 
         self.environment.events.request.fire(
-            request_type='read_secondary_index',
-            name='read_secondary_index',
+            request_type='read_by_secondary_index',
+            name='read_by_secondary_index',
             response_time=nanos_to_millis(perf_counter_ns() - start_time),
             response_length=0,
             exception=None,
