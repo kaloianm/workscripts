@@ -163,7 +163,7 @@ class MongoUser(User):
             return
 
         field = choice(SECONDARY_INDEX_FIELDS)
-        random_key = ''.join(choice(ascii_letters) for _ in range(340))
+        random_key = ''.join(choice(ascii_letters) for _ in range(120))
 
         start_time = perf_counter_ns()
 
