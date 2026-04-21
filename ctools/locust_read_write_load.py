@@ -136,20 +136,19 @@ class MongoUser(User):
 
         start_time = perf_counter_ns()
 
-        shard_key_doc = collection.with_options(
-            read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
-                filter={'shardKey': {
-                    '$gte': probe
-                }}, sort=[('shardKey', 1)])
+        doc = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+            filter={'shardKey': {
+                '$gte': probe
+            }}, sort=[('shardKey', 1)])
 
-        if shard_key_doc is None:
+        if doc is None:
             # Probe landed beyond the last key; wrap around to the first document.
-            shard_key_doc = collection.with_options(
+            doc = collection.with_options(
                 read_preference=ReadPreference.SECONDARY_PREFERRED).find_one({},
                                                                              sort=[('shardKey', 1)])
 
-        if shard_key_doc is not None:
-            self.shard_key = shard_key_doc['shardKey']
+        if doc is not None:
+            self.shard_key = doc['shardKey']
 
         self.environment.events.request.fire(
             request_type='select_shard_key',
@@ -196,21 +195,31 @@ class MongoUser(User):
         )
 
     @task(15)
-    def read_by_secondary_index(self):
+    def select_shard_key_by_secondary_index(self):
         if not SECONDARY_INDEX_FIELDS:
             return
 
         field = choice(SECONDARY_INDEX_FIELDS)
-        random_key = ''.join(choice(ascii_letters) for _ in range(120))
+        probe = ''.join(choice(ascii_letters) for _ in range(120))
 
         start_time = perf_counter_ns()
 
-        collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
-            filter={field: random_key})
+        doc = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+            filter={field: {
+                '$gte': probe
+            }}, sort=[(field, 1)])
+
+        if doc is None:
+            # Probe landed beyond the last key; wrap around to the first document.
+            collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+                {}, sort=[(field, 1)])
+
+        if doc is not None:
+            self.shard_key = doc['shardKey']
 
         self.environment.events.request.fire(
-            request_type='read_by_secondary_index',
-            name='read_by_secondary_index',
+            request_type='select_shard_key_by_secondary_index',
+            name='select_shard_key_by_secondary_index',
             response_time=nanos_to_millis(perf_counter_ns() - start_time),
             response_length=0,
             exception=None,
