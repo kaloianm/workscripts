@@ -154,8 +154,9 @@ if __name__ == "__main__":
 
     ###############################################################################################
     # Arguments for the 'create' command
-    parser_create = subparsers.add_parser('create',
-                                          help='Creates (or overwrites) a brand new replica set')
+    parser_create = subparsers.add_parser(
+        'create', help=
+        'Deploys binaries, starts processes, and creates (or overwrites) a brand new replica set')
     parser_create.set_defaults(func=main_create)
 
     ###############################################################################################
