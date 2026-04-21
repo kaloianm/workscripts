@@ -7,7 +7,7 @@
 #
 # Example usage:
 #   # First, populate the collection:
-#   mgodatagen -f locust_read_write_load_mgodatagen_50GB.json --uri mongodb://localhost/?directConnection=false
+#   mgodatagen -f locust_read_write_load_mgodatagen_50GB.json --uri mongodb://localhost
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
 #   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 100 --autostart --web-port 8090 --csv=locust_results --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
@@ -117,19 +117,21 @@ def on_locust_init(environment, **kwargs):
 
 
 class MongoUser(User):
-    '''This user will generate a constant load of 1 request per second.'''
+    '''
+    This user will generate a constant load of 1 request per second.
+    '''
 
     wait_time = constant_pacing(1)
 
     def on_start(self):
         self.select_shard_key()
 
-    @task(10)
+    @task(50)
     def select_shard_key(self):
-        # Probe a random point in the key space and find the first document at
-        # or after it.  This exercises the shardKey index without requiring an
-        # exact match and produces a uniformly distributed random document
-        # selection regardless of the actual key distribution in the collection.
+        # Probe a random point in the key space and find the first document at or after it.  This
+        # exercises the shardKey index without requiring an exact match and produces a uniformly
+        # distributed random document selection regardless of the actual key distribution in the
+        # collection.
         probe = random_shard_key()
 
         start_time = perf_counter_ns()
@@ -157,28 +159,7 @@ class MongoUser(User):
             exception=None,
         )
 
-    @task(5)
-    def read_by_secondary_index(self):
-        if not SECONDARY_INDEX_FIELDS:
-            return
-
-        field = choice(SECONDARY_INDEX_FIELDS)
-        random_key = ''.join(choice(ascii_letters) for _ in range(120))
-
-        start_time = perf_counter_ns()
-
-        collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
-            filter={field: random_key})
-
-        self.environment.events.request.fire(
-            request_type='read_by_secondary_index',
-            name='read_by_secondary_index',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
-            response_length=0,
-            exception=None,
-        )
-
-    @task(7)
+    @task(25)
     def update_by_shard_key(self):
         start_time = perf_counter_ns()
 
@@ -214,7 +195,28 @@ class MongoUser(User):
             exception=None,
         )
 
-    @task(3)
+    @task(15)
+    def read_by_secondary_index(self):
+        if not SECONDARY_INDEX_FIELDS:
+            return
+
+        field = choice(SECONDARY_INDEX_FIELDS)
+        random_key = ''.join(choice(ascii_letters) for _ in range(120))
+
+        start_time = perf_counter_ns()
+
+        collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+            filter={field: random_key})
+
+        self.environment.events.request.fire(
+            request_type='read_by_secondary_index',
+            name='read_by_secondary_index',
+            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_length=0,
+            exception=None,
+        )
+
+    @task(10)
     def insert_new_shard_key(self):
         new_key = random_shard_key()
 
