@@ -7,10 +7,10 @@
 #
 # Example usage:
 #   # First, populate the collection:
-#   mgodatagen -f locust_read_write_load_mgodatagen_50GB.json --uri mongodb://localhost
+#   mgodatagen -f locust_read_write_load_mgodatagen_100GB.json --uri mongodb://localhost
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
-#   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 100 --autostart --web-port 8090 --csv=locust_results --mgodatagen-config locust_read_write_load_mgodatagen_50GB.json --host mongodb://localhost/?directConnection=false
+#   locust -f locust_read_write_load.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --mgodatagen-config locust_read_write_load_mgodatagen_100GB.json --host mongodb://localhost
 #
 
 import json
@@ -112,8 +112,8 @@ def on_locust_init(environment, **kwargs):
     collection = mongo_client[ns_db].get_collection(ns_coll, read_preference=ReadPreference.PRIMARY)
 
     if environment.web_ui:
-        _register_custom_actions(environment.web_ui.app,
-                                 environment)  # http://host:8089/custom_actions
+        # http://host:8089/custom_actions
+        _register_custom_actions(environment.web_ui.app, environment)
 
 
 class MongoUser(User):
