@@ -22,7 +22,6 @@ from flask import jsonify, render_template_string, request as flask_request
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
 from random import choice, uniform
-from string import ascii_letters
 from time import perf_counter_ns
 
 # Capture P50 and P95
@@ -35,6 +34,7 @@ collection = None
 AVG_DOC_BYTES = 0
 SECONDARY_INDEX_FIELDS = []
 SHARD_KEY_LENGTH = 0
+SECONDARY_KEY_LENGTH = 120
 COLLECTION_COUNT = 0
 
 
@@ -59,8 +59,12 @@ def compute_avg_doc_bytes(content):
     return round(total)
 
 
+# Obtained from https://github.com/feliixx/mgodatagen#string
+MGODATAGEN_STRING_CHARSET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_'
+
+
 def random_shard_key():
-    return ''.join(choice(ascii_letters) for _ in range(SHARD_KEY_LENGTH))
+    return ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SHARD_KEY_LENGTH))
 
 
 def nanos_to_millis(nanos):
@@ -200,7 +204,7 @@ class MongoUser(User):
             return
 
         field = choice(SECONDARY_INDEX_FIELDS)
-        probe = ''.join(choice(ascii_letters) for _ in range(120))
+        probe = ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SECONDARY_KEY_LENGTH))
 
         start_time = perf_counter_ns()
 
