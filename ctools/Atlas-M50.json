@@ -20,7 +20,7 @@
       "DeviceName": "/dev/xvdb",
       "Ebs": {
         "VolumeType": "gp3",
-        "VolumeSize": 1024,
+        "VolumeSize": 1536,
         "Iops": 3072,
         "Throughput": 125,
         "Encrypted": true,
