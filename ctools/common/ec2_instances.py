@@ -1,4 +1,6 @@
-'''Common EC2 instance launching and management utilities.'''
+'''
+Common EC2 instance launching and management utilities.
+'''
 
 import copy
 import json
@@ -7,6 +9,9 @@ import os
 
 #
 # Host configuration scripts. Their output will show up in /var/log/cloud-init-output.log.
+#
+# To start MongoD in standalone mode (for testing) use:
+#   ./mongod --dbpath /mnt/data/mongod --logpath /mnt/data/mongod/mongod.log --port 27017 --bind_ip_all --fork
 #
 
 ANY_HOST_CONFIGURATION = '''#!/bin/bash

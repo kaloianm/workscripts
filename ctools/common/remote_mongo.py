@@ -1,4 +1,6 @@
-'''Common MongoDB remote host management and cluster operations.'''
+'''
+Common MongoDB remote host management and cluster operations.
+'''
 
 import asyncio
 import copy
@@ -6,7 +8,6 @@ import logging
 import motor.motor_asyncio
 
 from common.remote_common import RemoteSSHHost
-from signal import Signals
 
 
 class RemoteMongoHost(RemoteSSHHost):

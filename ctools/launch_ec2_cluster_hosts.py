@@ -54,7 +54,7 @@ def describe_cluster(ec2, clustertag):
         "MongoBinPath":
             "/home/ubuntu/workspace/mongo/bazel-bin/install-devcore/bin",
         "RemoteMongoDPath":
-            "/mnt/data/rs",
+            "/mnt/data/mongod",
         "RemoteMongoSPath":
             "/mnt/data/mongos",
         "FeatureFlags": [],
