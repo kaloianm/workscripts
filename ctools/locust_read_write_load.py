@@ -25,8 +25,8 @@ from random import choice, uniform
 from string import ascii_letters
 from time import perf_counter_ns
 
-# Capture P50 and P99
-locust.stats.PERCENTILES_TO_CHART = [0.5, 0.99]
+# Capture P50 and P95
+locust.stats.PERCENTILES_TO_CHART = [0.5, 0.95]
 
 connection_string = None
 collection = None
@@ -139,13 +139,19 @@ class MongoUser(User):
         doc = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
             filter={'shardKey': {
                 '$gte': probe
-            }}, sort=[('shardKey', 1)])
+            }},
+            sort=[('shardKey', 1)],
+        )
 
         if doc is None:
             # Probe landed beyond the last key; wrap around to the first document.
             doc = collection.with_options(
-                read_preference=ReadPreference.SECONDARY_PREFERRED).find_one({},
-                                                                             sort=[('shardKey', 1)])
+                read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
+                    {},
+                    sort=[('shardKey', 1)],
+                )
+
+        elapsed = perf_counter_ns() - start_time
 
         if doc is not None:
             self.shard_key = doc['shardKey']
@@ -153,43 +159,37 @@ class MongoUser(User):
         self.environment.events.request.fire(
             request_type='select_shard_key',
             name='select_shard_key',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_time=nanos_to_millis(elapsed),
             response_length=0,
             exception=None,
         )
 
     @task(25)
     def update_by_shard_key(self):
+        if not self.shard_key:
+            self.select_shard_key()
+            return
+
         start_time = perf_counter_ns()
 
         update_result = collection.update_one(
-            filter={
-                'shardKey': self.shard_key,
-            },
-            update={
-                '$inc': {
-                    'updates': 1,
-                },
-            },
+            filter={'shardKey': self.shard_key},
+            update={'$inc': {
+                'updates': 1
+            }},
             upsert=False,
         )
 
         if update_result.modified_count == 0:
-            # Document was deleted externally; pick a new shard key and report as miss
-            self.environment.events.request.fire(
-                request_type='update_by_shard_key',
-                name='update_by_shard_key',
-                response_time=nanos_to_millis(perf_counter_ns() - start_time),
-                response_length=0,
-                exception=KeyError(f'Document for shardKey {self.shard_key} not found'),
-            )
             self.select_shard_key()
             return
+
+        elapsed = perf_counter_ns() - start_time
 
         self.environment.events.request.fire(
             request_type='update_by_shard_key',
             name='update_by_shard_key',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_time=nanos_to_millis(elapsed),
             response_length=0,
             exception=None,
         )
@@ -207,12 +207,18 @@ class MongoUser(User):
         doc = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
             filter={field: {
                 '$gte': probe
-            }}, sort=[(field, 1)])
+            }},
+            sort=[(field, 1)],
+        )
 
         if doc is None:
             # Probe landed beyond the last key; wrap around to the first document.
             collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find_one(
-                {}, sort=[(field, 1)])
+                {},
+                sort=[(field, 1)],
+            )
+
+        elapsed = perf_counter_ns() - start_time
 
         if doc is not None:
             self.shard_key = doc['shardKey']
@@ -220,7 +226,7 @@ class MongoUser(User):
         self.environment.events.request.fire(
             request_type='select_shard_key_by_secondary_index',
             name='select_shard_key_by_secondary_index',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_time=nanos_to_millis(elapsed),
             response_length=0,
             exception=None,
         )
@@ -233,16 +239,23 @@ class MongoUser(User):
 
         collection.update_one(
             filter={'shardKey': new_key},
-            update={'$inc': {
-                'updates': 1
-            }},
+            update={
+                '$set': {
+                    'inserted': True
+                },
+                '$inc': {
+                    'updates': 1
+                }
+            },
             upsert=True,
         )
+
+        elapsed = perf_counter_ns() - start_time
 
         self.environment.events.request.fire(
             request_type='insert_new_shard_key',
             name='insert_new_shard_key',
-            response_time=nanos_to_millis(perf_counter_ns() - start_time),
+            response_time=nanos_to_millis(elapsed),
             response_length=0,
             exception=None,
         )
@@ -313,12 +326,18 @@ def _register_custom_actions(app, environment):
         # read, with no access to the underlying documents.
         index_only = {'shardKey': 1, '_id': 0}
         start_key = next(
-            collection.find({}, index_only,
-                            sort=[('shardKey', 1)]).skip(skip_docs).limit(1))['shardKey']
+            collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find(
+                {},
+                index_only,
+                sort=[('shardKey', 1)],
+            ).skip(skip_docs).limit(1))['shardKey']
+
         cutoff_key = next(
-            collection.find({}, index_only, sort=[
-                ('shardKey', 1)
-            ]).skip(skip_docs + docs_to_delete).limit(1))['shardKey']
+            collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED).find(
+                {},
+                index_only,
+                sort=[('shardKey', 1)],
+            ).skip(skip_docs + docs_to_delete).limit(1))['shardKey']
 
         return docs_to_delete, start_key, cutoff_key
 
