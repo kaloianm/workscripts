@@ -27,6 +27,10 @@ from time import perf_counter_ns
 # Capture P50 and P95
 locust.stats.PERCENTILES_TO_CHART = [0.5, 0.95]
 
+# Make the request name column much narrower for the terminal/headless mode
+locust.stats.STATS_TYPE_WIDTH = 5
+locust.stats.STATS_NAME_WIDTH = 50
+
 connection_string = None
 collection = None
 
@@ -170,7 +174,7 @@ class MongoUser(User):
             self.shard_key = doc['shardKey']
 
         self.environment.events.request.fire(
-            request_type='select_shard_key',
+            request_type='read',
             name='select_shard_key',
             response_time=nanos_to_millis(elapsed),
             response_length=0,
@@ -200,7 +204,7 @@ class MongoUser(User):
         elapsed = perf_counter_ns() - start_time
 
         self.environment.events.request.fire(
-            request_type='update_by_shard_key',
+            request_type='write',
             name='update_by_shard_key',
             response_time=nanos_to_millis(elapsed),
             response_length=0,
@@ -237,7 +241,7 @@ class MongoUser(User):
             self.shard_key = doc['shardKey']
 
         self.environment.events.request.fire(
-            request_type='select_shard_key_by_secondary_index',
+            request_type='read',
             name='select_shard_key_by_secondary_index',
             response_time=nanos_to_millis(elapsed),
             response_length=0,
@@ -266,7 +270,7 @@ class MongoUser(User):
         elapsed = perf_counter_ns() - start_time
 
         self.environment.events.request.fire(
-            request_type='insert_new_shard_key',
+            request_type='write',
             name='insert_new_shard_key',
             response_time=nanos_to_millis(elapsed),
             response_length=0,
