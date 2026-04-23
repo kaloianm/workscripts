@@ -16,11 +16,16 @@
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
 #   curl -sX POST http://localhost:8090/custom_actions/fastBulkDelete_10_pct | jq -r .command
 #
+#   # Add ?execute=true to actually run the command in the background (one instance at a time):
+#   curl -sX POST "http://localhost:8090/custom_actions/deleteMany_10_pct?execute=true"
+#   curl -sX POST "http://localhost:8090/custom_actions/fastBulkDelete_10_pct?execute=true"
+#
 #   curl -L -o report.html "http://localhost:8090/stats/report?download=1&theme=dark"
 #
 
 import json
 import logging
+import threading
 
 import locust.stats
 
@@ -332,6 +337,22 @@ function runAction(url, outId) {
 
 
 def _register_custom_actions(app, environment):
+    # Shared single lock — only one delete action (of either kind) may run at a time
+    action_lock = threading.Lock()
+    action_lock_holder = [None]  # mutable cell so inner functions can read/write it
+
+    def _make_action_logger(name, filename):
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        handler = logging.FileHandler(filename)
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        logger.addHandler(handler)
+        return logger
+
+    delete_many_log = _make_action_logger('delete_many', 'locust_results_delete_many.log')
+    fast_bulk_delete_log = _make_action_logger('fast_bulk_delete',
+                                               'locust_results_fast_bulk_delete.log')
 
     @app.route('/custom_actions', methods=['GET'])
     def custom_actions():
@@ -374,8 +395,28 @@ def _register_custom_actions(app, environment):
     # deleteMany - 10% of the data
     # ---------------------------------------------------------------------------
 
-    @app.route('/custom_actions/deleteMany_10_pct', methods=['POST'])
-    def deleteMany_10_pct():
+    def _run_delete_many(coll_name, start_key, cutoff_key, command):
+        delete_many_log.info(f'START command={command}')
+        try:
+            result = collection.database.command(
+                'delete', coll_name, deletes=[{
+                    'q': {
+                        'shardKey': {
+                            '$gte': start_key,
+                            '$lt': cutoff_key
+                        }
+                    },
+                    'limit': 0
+                }])
+            delete_many_log.info(f'RESULT {result}')
+        except Exception as exc:
+            delete_many_log.error(f'FAILED {exc}')
+        finally:
+            delete_many_log.info('END')
+            action_lock_holder[0] = None
+            action_lock.release()
+
+    def _deleteMany_10_pct(execute):
         try:
             planned, start_key, cutoff_key = _compute_delete_range()
             db_name = collection.database.name
@@ -385,16 +426,45 @@ def _register_custom_actions(app, environment):
                 f' delete: "{coll_name}",'
                 f' deletes: [{{ q: {{ shardKey: {{ $gte: "{start_key}", $lt: "{cutoff_key}" }} }}, limit: 0 }}]'
                 f' }})')
+            if execute:
+                if not action_lock.acquire(blocking=False):
+                    return jsonify({'error': f'{action_lock_holder[0]} is already running'}), 409
+                action_lock_holder[0] = 'deleteMany_10_pct'
+                threading.Thread(
+                    target=_run_delete_many,
+                    args=(coll_name, start_key, cutoff_key, command),
+                    daemon=True,
+                ).start()
+                return jsonify({'status': 'started', 'planned': planned, 'command': command})
             return jsonify({'planned': planned, 'command': command})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/custom_actions/deleteMany_10_pct', methods=['POST'])
+    def deleteMany_10_pct():
+        return _deleteMany_10_pct(
+            flask_request.args.get('execute', '').lower() in ('true', '1', 'yes'))
 
     # ---------------------------------------------------------------------------
     # fastBulkDelete - 10% of the data
     # ---------------------------------------------------------------------------
 
-    @app.route('/custom_actions/fastBulkDelete_10_pct', methods=['POST'])
-    def fastBulkDelete_10_pct():
+    def _run_fast_bulk_delete(coll_name, start_key, cutoff_key, command):
+        fast_bulk_delete_log.info(f'START command={command}')
+        try:
+            result = collection.database.command('fastBulkDelete', coll_name,
+                                                 filterIndexName='shardKey',
+                                                 lowerBound={'shardKey': start_key},
+                                                 upperBound={'shardKey': cutoff_key})
+            fast_bulk_delete_log.info(f'RESULT {result}')
+        except Exception as exc:
+            fast_bulk_delete_log.error(f'FAILED {exc}')
+        finally:
+            fast_bulk_delete_log.info('END')
+            action_lock_holder[0] = None
+            action_lock.release()
+
+    def _fastBulkDelete_10_pct(execute):
         try:
             planned, start_key, cutoff_key = _compute_delete_range()
             db_name = collection.database.name
@@ -405,6 +475,21 @@ def _register_custom_actions(app, environment):
                        f' lowerBound: {{ shardKey: "{start_key}" }},'
                        f' upperBound: {{ shardKey: "{cutoff_key}" }}'
                        f' }})')
+            if execute:
+                if not action_lock.acquire(blocking=False):
+                    return jsonify({'error': f'{action_lock_holder[0]} is already running'}), 409
+                action_lock_holder[0] = 'fastBulkDelete_10_pct'
+                threading.Thread(
+                    target=_run_fast_bulk_delete,
+                    args=(coll_name, start_key, cutoff_key, command),
+                    daemon=True,
+                ).start()
+                return jsonify({'status': 'started', 'planned': planned, 'command': command})
             return jsonify({'planned': planned, 'command': command})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/custom_actions/fastBulkDelete_10_pct', methods=['POST'])
+    def fastBulkDelete_10_pct():
+        return _fastBulkDelete_10_pct(
+            flask_request.args.get('execute', '').lower() in ('true', '1', 'yes'))
