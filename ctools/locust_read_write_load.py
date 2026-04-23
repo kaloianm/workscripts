@@ -34,12 +34,16 @@ collection = None
 AVG_DOC_BYTES = 0
 SECONDARY_INDEX_FIELDS = []
 SHARD_KEY_LENGTH = 0
-SECONDARY_KEY_LENGTH = 120
 COLLECTION_COUNT = 0
+
+# Hardcoded, not populated from mgodatagen config
+SECONDARY_KEY_LENGTH = 120
 
 
 def compute_avg_doc_bytes(content):
-    """Estimate average BSON document size from a mgodatagen content spec."""
+    '''
+    Estimate average BSON document size from a mgodatagen content spec.
+    '''
     # BSON document: 4-byte size prefix + fields + 1-byte null terminator
     total = 5
     # _id is always present as ObjectId (12 bytes): type + "_id" + null + value
@@ -65,6 +69,10 @@ MGODATAGEN_STRING_CHARSET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY
 
 def random_shard_key():
     return ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SHARD_KEY_LENGTH))
+
+
+def random_secondary_key():
+    return ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SECONDARY_KEY_LENGTH))
 
 
 def nanos_to_millis(nanos):
@@ -108,6 +116,7 @@ def on_locust_init(environment, **kwargs):
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
     logging.info(f'Shard key length: {SHARD_KEY_LENGTH}')
+    logging.info(f'Secondary key length: {SECONDARY_KEY_LENGTH}')
     logging.info(f'Avg document size: {AVG_DOC_BYTES} bytes')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
@@ -204,7 +213,7 @@ class MongoUser(User):
             return
 
         field = choice(SECONDARY_INDEX_FIELDS)
-        probe = ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SECONDARY_KEY_LENGTH))
+        probe = random_secondary_key()
 
         start_time = perf_counter_ns()
 
