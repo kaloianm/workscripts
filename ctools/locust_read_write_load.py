@@ -220,7 +220,7 @@ class MongoUser(User):
             exception=None,
         )
 
-    @task(15)
+    @task(20)
     def select_shard_key_by_secondary_index(self):
         if not SECONDARY_INDEX_FIELDS:
             return
@@ -257,7 +257,7 @@ class MongoUser(User):
             exception=None,
         )
 
-    @task(10)
+    @task(5)
     def insert_new_shard_key(self):
         new_key = random_shard_key()
 
