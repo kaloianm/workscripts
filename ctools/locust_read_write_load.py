@@ -97,10 +97,16 @@ def nanos_to_millis(nanos):
     return round(nanos / 1000000.0, 2)
 
 
+_AUTO_EXECUTE_CHOICES = ('deleteMany_10_pct', 'fastBulkDelete_10_pct')
+_AUTO_EXECUTE_DELAY_SECS = 300
+
+
 @events.init_command_line_parser.add_listener
 def on_locust_init_command_line_parser(parser):
     parser.add_argument('--mgodatagen-config', help='Path to the mgodatagen JSON config file',
                         metavar='config', type=str, required=True)
+    parser.add_argument('--auto-execute', choices=_AUTO_EXECUTE_CHOICES, default=None,
+                        help='Automatically execute the specified action after 5 minutes')
 
 
 @events.init.add_listener
@@ -493,3 +499,53 @@ def _register_custom_actions(app, environment):
     def fastBulkDelete_10_pct():
         return _fastBulkDelete_10_pct(
             flask_request.args.get('execute', '').lower() in ('true', '1', 'yes'))
+
+    # ---------------------------------------------------------------------------
+    # Auto-execute: fire one action after a fixed delay if --auto-execute is set
+    # ---------------------------------------------------------------------------
+
+    def _auto_execute_action():
+        action_name = environment.parsed_options.auto_execute
+        logging.info(f'auto-execute: launching {action_name}')
+        try:
+            _, start_key, cutoff_key = _compute_delete_range()
+        except Exception as exc:
+            logging.error(f'auto-execute {action_name}: range computation failed: {exc}')
+            return
+
+        if not action_lock.acquire(blocking=False):
+            logging.warning(
+                f'auto-execute {action_name}: skipped, {action_lock_holder[0]} is already running')
+            return
+        action_lock_holder[0] = action_name
+
+        db_name = collection.database.name
+        coll_name = collection.name
+        if action_name == 'deleteMany_10_pct':
+            command = (
+                f'db.getSiblingDB("{db_name}").runCommand({{'
+                f' delete: "{coll_name}",'
+                f' deletes: [{{ q: {{ shardKey: {{ $gte: "{start_key}", $lt: "{cutoff_key}" }} }}, limit: 0 }}]'
+                f' }})')
+            threading.Thread(
+                target=_run_delete_many,
+                args=(coll_name, start_key, cutoff_key, command),
+                daemon=True,
+            ).start()
+        else:
+            command = (f'db.getSiblingDB("{db_name}").runCommand({{'
+                       f' fastBulkDelete: "{coll_name}",'
+                       f' filterIndexName: "shardKey",'
+                       f' lowerBound: {{ shardKey: "{start_key}" }},'
+                       f' upperBound: {{ shardKey: "{cutoff_key}" }}'
+                       f' }})')
+            threading.Thread(
+                target=_run_fast_bulk_delete,
+                args=(coll_name, start_key, cutoff_key, command),
+                daemon=True,
+            ).start()
+
+    if environment.parsed_options.auto_execute:
+        logging.info(f'Scheduling auto-execute of {environment.parsed_options.auto_execute} '
+                     f'in {_AUTO_EXECUTE_DELAY_SECS}s')
+        threading.Timer(_AUTO_EXECUTE_DELAY_SECS, _auto_execute_action).start()
