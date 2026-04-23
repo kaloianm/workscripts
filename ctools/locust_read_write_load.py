@@ -259,7 +259,10 @@ class MongoUser(User):
 
     @task(5)
     def insert_new_shard_key(self):
-        new_key = random_shard_key()
+        # Prefix with '!' (0x21) or '~' (0x7E), which sort respectively before and after every
+        # character in MGODATAGEN_STRING_CHARSET ('-' 0x2D to 'z' 0x7A), so inserts always land
+        # outside the normal key range and never fall inside a shard key range being deleted.
+        new_key = choice(('!', '~')) + random_shard_key()
 
         start_time = perf_counter_ns()
 
