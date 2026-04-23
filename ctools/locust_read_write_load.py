@@ -425,7 +425,7 @@ def _register_custom_actions(app, environment):
             if on_complete:
                 on_complete()
 
-    def _deleteMany_10_pct(execute):
+    def _deleteMany_10_pct(execute, on_complete=None):
         try:
             planned, start_key, cutoff_key = _compute_delete_range()
             db_name = collection.database.name
@@ -437,22 +437,26 @@ def _register_custom_actions(app, environment):
                 f' }})')
             if execute:
                 if not action_lock.acquire(blocking=False):
-                    return jsonify({'error': f'{action_lock_holder[0]} is already running'}), 409
+                    return {'error': f'{action_lock_holder[0]} is already running'}, 409
                 action_lock_holder[0] = 'deleteMany_10_pct'
                 threading.Thread(
                     target=_run_delete_many,
                     args=(coll_name, start_key, cutoff_key, command),
+                    kwargs={
+                        'on_complete': on_complete
+                    },
                     daemon=True,
                 ).start()
-                return jsonify({'status': 'started', 'planned': planned, 'command': command})
-            return jsonify({'planned': planned, 'command': command})
+                return {'status': 'started', 'planned': planned, 'command': command}, 200
+            return {'planned': planned, 'command': command}, 200
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return {'error': str(e)}, 500
 
     @app.route('/custom_actions/deleteMany_10_pct', methods=['POST'])
     def deleteMany_10_pct():
-        return _deleteMany_10_pct(
+        data, status = _deleteMany_10_pct(
             flask_request.args.get('execute', '').lower() in ('true', '1', 'yes'))
+        return jsonify(data), status
 
     # ---------------------------------------------------------------------------
     # fastBulkDelete - 10% of the data
@@ -475,7 +479,7 @@ def _register_custom_actions(app, environment):
             if on_complete:
                 on_complete()
 
-    def _fastBulkDelete_10_pct(execute):
+    def _fastBulkDelete_10_pct(execute, on_complete=None):
         try:
             planned, start_key, cutoff_key = _compute_delete_range()
             db_name = collection.database.name
@@ -488,22 +492,26 @@ def _register_custom_actions(app, environment):
                        f' }})')
             if execute:
                 if not action_lock.acquire(blocking=False):
-                    return jsonify({'error': f'{action_lock_holder[0]} is already running'}), 409
+                    return {'error': f'{action_lock_holder[0]} is already running'}, 409
                 action_lock_holder[0] = 'fastBulkDelete_10_pct'
                 threading.Thread(
                     target=_run_fast_bulk_delete,
                     args=(coll_name, start_key, cutoff_key, command),
+                    kwargs={
+                        'on_complete': on_complete
+                    },
                     daemon=True,
                 ).start()
-                return jsonify({'status': 'started', 'planned': planned, 'command': command})
-            return jsonify({'planned': planned, 'command': command})
+                return {'status': 'started', 'planned': planned, 'command': command}, 200
+            return {'planned': planned, 'command': command}, 200
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return {'error': str(e)}, 500
 
     @app.route('/custom_actions/fastBulkDelete_10_pct', methods=['POST'])
     def fastBulkDelete_10_pct():
-        return _fastBulkDelete_10_pct(
+        data, status = _fastBulkDelete_10_pct(
             flask_request.args.get('execute', '').lower() in ('true', '1', 'yes'))
+        return jsonify(data), status
 
     # ---------------------------------------------------------------------------
     # Auto-execute: fire one action after a fixed delay if --auto-execute is set
@@ -512,53 +520,18 @@ def _register_custom_actions(app, environment):
     def _auto_execute_action():
         action_name = environment.parsed_options.auto_execute
         logging.info(f'auto-execute: launching {action_name}')
-        try:
-            _, start_key, cutoff_key = _compute_delete_range()
-        except Exception as exc:
-            logging.error(f'auto-execute {action_name}: range computation failed: {exc}')
-            return
-
-        if not action_lock.acquire(blocking=False):
-            logging.warning(
-                f'auto-execute {action_name}: skipped, {action_lock_holder[0]} is already running')
-            return
-        action_lock_holder[0] = action_name
 
         def _on_complete():
             logging.info(f'auto-execute: quitting in {_AUTO_EXECUTE_QUIT_DELAY_SECS}s')
             threading.Timer(_AUTO_EXECUTE_QUIT_DELAY_SECS, environment.runner.quit).start()
 
-        db_name = collection.database.name
-        coll_name = collection.name
         if action_name == 'deleteMany_10_pct':
-            command = (
-                f'db.getSiblingDB("{db_name}").runCommand({{'
-                f' delete: "{coll_name}",'
-                f' deletes: [{{ q: {{ shardKey: {{ $gte: "{start_key}", $lt: "{cutoff_key}" }} }}, limit: 0 }}]'
-                f' }})')
-            threading.Thread(
-                target=_run_delete_many,
-                args=(coll_name, start_key, cutoff_key, command),
-                kwargs={
-                    'on_complete': _on_complete
-                },
-                daemon=True,
-            ).start()
-        else:
-            command = (f'db.getSiblingDB("{db_name}").runCommand({{'
-                       f' fastBulkDelete: "{coll_name}",'
-                       f' filterIndexName: "shardKey",'
-                       f' lowerBound: {{ shardKey: "{start_key}" }},'
-                       f' upperBound: {{ shardKey: "{cutoff_key}" }}'
-                       f' }})')
-            threading.Thread(
-                target=_run_fast_bulk_delete,
-                args=(coll_name, start_key, cutoff_key, command),
-                kwargs={
-                    'on_complete': _on_complete
-                },
-                daemon=True,
-            ).start()
+            data, status = _deleteMany_10_pct(execute=True, on_complete=_on_complete)
+        elif action_name == 'fastBulkDelete_10_pct':
+            data, status = _fastBulkDelete_10_pct(execute=True, on_complete=_on_complete)
+
+        if status != 200:
+            logging.error(f'auto-execute {action_name}: failed to start: {data.get("error")}')
 
     if environment.parsed_options.auto_execute:
         logging.info(f'Scheduling auto-execute of {environment.parsed_options.auto_execute} '
