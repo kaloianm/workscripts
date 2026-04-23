@@ -275,7 +275,13 @@ def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_v
 
     for vol_def in data_volumes:
         device_name = vol_def['DeviceName']
-        ebs_config = vol_def['Ebs']
+
+        # Volume specification shared between the create and copy paths. VolumeSize in the
+        # BlockDeviceMapping template is called `Size` in create_volume/copy_volumes;
+        # DeleteOnTermination is only valid inside BlockDeviceMappings and is applied later via
+        # modify_instance_attribute.
+        ebs_spec = {k: v for k, v in vol_def['Ebs'].items() if k != 'DeleteOnTermination'}
+        ebs_spec['Size'] = ebs_spec.pop('VolumeSize')
 
         created_volume_ids = []
         for instance in instances:
@@ -283,39 +289,37 @@ def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_v
             instance_id = instance['InstanceId']
 
             if source_volume_id:
-                tags = volume_tags + [{'Key': 'source_volume', 'Value': source_volume_id}]
-                logging.info(f'Copying volume {source_volume_id} in {az} for {instance_id} ...')
+                # copy_volumes inherits encryption from the source and rejects Encrypted/KmsKeyId
+                ebs_spec_copy_volumes = {
+                    k: v
+                    for k, v in ebs_spec.items() if k not in ('Encrypted', 'KmsKeyId')
+                }
+                logging.info(
+                    f'Copying {ebs_spec["Size"]}GB {ebs_spec["VolumeType"]} volume from {source_volume_id} ...'
+                )
                 response = ec2.copy_volumes(
-                    SourceVolumeId=source_volume_id, VolumeType=ebs_config.get('VolumeType', 'gp3'),
+                    SourceVolumeId=source_volume_id,
+                    **ebs_spec_copy_volumes,
                     TagSpecifications=[{
-                        'ResourceType': 'volume',
-                        'Tags': tags
-                    }])
-                volume_id = response['Volumes'][0]['VolumeId']
-            else:
-                create_params = {
-                    'AvailabilityZone': az,
-                    'VolumeType': ebs_config.get('VolumeType', 'gp3'),
-                    'Size': ebs_config['VolumeSize'],
-                    'Encrypted': ebs_config.get('Encrypted', True),
-                    'TagSpecifications': [{
                         'ResourceType': 'volume',
                         'Tags': volume_tags
                     }],
-                }
-                if 'Iops' in ebs_config:
-                    create_params['Iops'] = ebs_config['Iops']
-                if 'Throughput' in ebs_config:
-                    create_params['Throughput'] = ebs_config['Throughput']
-
-                logging.info(
-                    f'Creating {ebs_config["VolumeSize"]}GB {ebs_config.get("VolumeType", "gp3")} '
-                    f'volume in {az} for {instance_id} ...')
-                volume = ec2.create_volume(**create_params)
+                )
+                volume_id = response['Volumes'][0]['VolumeId']
+            else:
+                logging.info(f'Creating {ebs_spec["Size"]}GB {ebs_spec["VolumeType"]} volume ...')
+                volume = ec2.create_volume(
+                    AvailabilityZone=az,
+                    **ebs_spec,
+                    TagSpecifications=[{
+                        'ResourceType': 'volume',
+                        'Tags': volume_tags
+                    }],
+                )
                 volume_id = volume['VolumeId']
 
             created_volume_ids.append((volume_id, instance))
-            logging.info(f'Volume {volume_id} initiated')
+            logging.info(f'Volume {volume_id} created')
 
         # Wait for all volumes to become available
         for volume_id, _ in created_volume_ids:
