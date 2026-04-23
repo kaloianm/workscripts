@@ -99,6 +99,7 @@ def nanos_to_millis(nanos):
 
 _AUTO_EXECUTE_CHOICES = ('deleteMany_10_pct', 'fastBulkDelete_10_pct')
 _AUTO_EXECUTE_DELAY_SECS = 300
+_AUTO_EXECUTE_QUIT_DELAY_SECS = 60
 
 
 @events.init_command_line_parser.add_listener
@@ -401,7 +402,7 @@ def _register_custom_actions(app, environment):
     # deleteMany - 10% of the data
     # ---------------------------------------------------------------------------
 
-    def _run_delete_many(coll_name, start_key, cutoff_key, command):
+    def _run_delete_many(coll_name, start_key, cutoff_key, command, on_complete=None):
         delete_many_log.info(f'START command={command}')
         try:
             result = collection.database.command(
@@ -421,6 +422,8 @@ def _register_custom_actions(app, environment):
             delete_many_log.info('END')
             action_lock_holder[0] = None
             action_lock.release()
+            if on_complete:
+                on_complete()
 
     def _deleteMany_10_pct(execute):
         try:
@@ -455,7 +458,7 @@ def _register_custom_actions(app, environment):
     # fastBulkDelete - 10% of the data
     # ---------------------------------------------------------------------------
 
-    def _run_fast_bulk_delete(coll_name, start_key, cutoff_key, command):
+    def _run_fast_bulk_delete(coll_name, start_key, cutoff_key, command, on_complete=None):
         fast_bulk_delete_log.info(f'START command={command}')
         try:
             result = collection.database.command('fastBulkDelete', coll_name,
@@ -469,6 +472,8 @@ def _register_custom_actions(app, environment):
             fast_bulk_delete_log.info('END')
             action_lock_holder[0] = None
             action_lock.release()
+            if on_complete:
+                on_complete()
 
     def _fastBulkDelete_10_pct(execute):
         try:
@@ -519,6 +524,10 @@ def _register_custom_actions(app, environment):
             return
         action_lock_holder[0] = action_name
 
+        def _on_complete():
+            logging.info(f'auto-execute: quitting in {_AUTO_EXECUTE_QUIT_DELAY_SECS}s')
+            threading.Timer(_AUTO_EXECUTE_QUIT_DELAY_SECS, environment.runner.quit).start()
+
         db_name = collection.database.name
         coll_name = collection.name
         if action_name == 'deleteMany_10_pct':
@@ -530,6 +539,9 @@ def _register_custom_actions(app, environment):
             threading.Thread(
                 target=_run_delete_many,
                 args=(coll_name, start_key, cutoff_key, command),
+                kwargs={
+                    'on_complete': _on_complete
+                },
                 daemon=True,
             ).start()
         else:
@@ -542,6 +554,9 @@ def _register_custom_actions(app, environment):
             threading.Thread(
                 target=_run_fast_bulk_delete,
                 args=(coll_name, start_key, cutoff_key, command),
+                kwargs={
+                    'on_complete': _on_complete
+                },
                 daemon=True,
             ).start()
 
