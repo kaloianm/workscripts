@@ -536,4 +536,10 @@ def _register_custom_actions(app, environment):
     if environment.parsed_options.auto_execute:
         logging.info(f'Scheduling auto-execute of {environment.parsed_options.auto_execute} '
                      f'in {_AUTO_EXECUTE_DELAY_SECS}s')
-        threading.Timer(_AUTO_EXECUTE_DELAY_SECS, _auto_execute_action).start()
+        _auto_execute_timer = threading.Timer(_AUTO_EXECUTE_DELAY_SECS, _auto_execute_action)
+        _auto_execute_timer.daemon = True
+        _auto_execute_timer.start()
+
+        @events.quitting.add_listener
+        def on_quitting(**_):
+            _auto_execute_timer.cancel()
