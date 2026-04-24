@@ -63,13 +63,17 @@ async def async_start_shell_command(command, logging_prefix):
         await command_shell_process.wait()
 
         await temp_file.seek(0)
+        output_lines = []
         async for line in temp_file:
             stripped_line = line.decode('ascii').replace('\n', '')
             logging.info(f'[{logging_prefix}]: {stripped_line}')
+            output_lines.append(stripped_line)
 
         if command_shell_process.returncode != 0:
+            tail = '\n'.join(output_lines[-20:])
             raise CToolsException(
-                f'[{logging_prefix}]: Command failed with code {command_shell_process.returncode}')
+                f'[{logging_prefix}]: Command failed with code {command_shell_process.returncode}.'
+                f' Command: {command}\nOutput (last 20 lines):\n{tail}')
 
 
 class Cluster:
