@@ -184,7 +184,7 @@ async def deploy_binaries(hosts, mongo_bin_path, shard=None):
     await rsync_to_hosts(hosts, f'{mongo_bin_path}/mongo*', '~/binaries', shard)
 
 
-async def gather_logs(hosts, cluster_name, local_path, shard=None):
+async def gather_logs(hosts, local_path, shard=None):
     '''Compresses and rsyncs logs from the hosts to a local directory'''
 
     def make_host_suffix(host, process_name):
@@ -227,11 +227,11 @@ async def gather_logs(hosts, cluster_name, local_path, shard=None):
         async with sem_max_concurrent_rsync:
             await host.rsync_files_to_local(
                 f'{host.host_desc["RemoteMongoDPath"]}/{make_host_suffix(host, "mongod")}.tar.gz',
-                f'{local_path}/{cluster_name}/')
+                f'{local_path}/logs/')
             if host.host_desc.get("RemoteMongoSPath"):
                 await host.rsync_files_to_local(
                     f'{host.host_desc["RemoteMongoSPath"]}/{make_host_suffix(host, "mongos")}.tar.gz',
-                    f'{local_path}/{cluster_name}/')
+                    f'{local_path}/logs/')
 
     tasks = []
     for host in hosts:

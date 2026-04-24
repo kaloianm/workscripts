@@ -140,7 +140,7 @@ async def main_deploy_binaries(args, rs):
 async def main_gather_logs(args, rs):
     '''Implements the gather-logs command'''
 
-    await gather_logs(rs.hosts, rs.name, args.local_path)
+    await gather_logs(rs.hosts, args.clustertag)
 
 
 if __name__ == "__main__":
@@ -214,7 +214,6 @@ if __name__ == "__main__":
     parser_gather_logs = subparsers.add_parser(
         'gather-logs',
         help='Compresses and rsyncs the set of logs from the replica set to a local directory')
-    parser_gather_logs.add_argument('local_path', help='The local to which to rsync')
     parser_gather_logs.set_defaults(func=main_gather_logs)
 
     ###############################################################################################
