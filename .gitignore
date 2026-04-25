@@ -7,4 +7,4 @@ python3-venv
 
 locust_results_*.csv
 locust_results_*.log
-locust_report.html
+locust_report*.html
