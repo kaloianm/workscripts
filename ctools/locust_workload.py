@@ -11,8 +11,8 @@
 #   mgodatagen -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
-#   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
-#   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
+#   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
+#   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
 #
 #   # Curl commands
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
@@ -23,7 +23,7 @@
 #   curl -sX POST "http://localhost:8090/custom_actions/fastBulkDelete_10_pct?execute=true"
 #
 #   # Download a visual (html) report from a running instance
-#   curl -L -o locust_report.html "http://localhost:8090/stats/report?download=1&theme=dark"
+#   curl -L -o locust_results_report.html "http://localhost:8090/stats/report?download=1&theme=dark"
 #
 
 import json
