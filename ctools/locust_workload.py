@@ -22,6 +22,7 @@
 #   curl -sX POST "http://localhost:8090/custom_actions/deleteMany_10_pct?execute=true"
 #   curl -sX POST "http://localhost:8090/custom_actions/fastBulkDelete_10_pct?execute=true"
 #
+#   # Download a visual (html) report from a running instance
 #   curl -L -o locust_report.html "http://localhost:8090/stats/report?download=1&theme=dark"
 #
 
@@ -37,11 +38,14 @@ from pymongo import MongoClient, ReadPreference
 from random import choice, randint, uniform
 from time import perf_counter_ns
 
-# Capture P50, P95 and P99 in the UI graph
-locust.stats.PERCENTILES_TO_CHART = [0.5, 0.95, 0.99]
+# Percentiles to capture in the UI response times graph
+locust.stats.PERCENTILES_TO_CHART = [0.5, 0.90, 0.99]
 
-# Capture P50, P95 and P99 in the console output
-locust.stats.PERCENTILES_TO_REPORT = [0.50, 0.95, 0.99]
+# Percentiles to capture in the UI statistics tab
+locust.stats.PERCENTILES_TO_STATISTICS = [0.90, 0.99]
+
+# Percentiles to capture in the statistics history (.csv files)
+locust.stats.PERCENTILES_TO_REPORT = [0.50, 0.75, 0.90, 0.99, 0.999]
 
 # Make the request name column much narrower for the terminal/headless mode
 locust.stats.STATS_TYPE_WIDTH = 1
