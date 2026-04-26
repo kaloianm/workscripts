@@ -8,9 +8,11 @@
 # Example usage:
 #   # First, populate the collection:
 #   mgodatagen -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
+#   mgodatagen -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
 #   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
+#   locust -f locust_workload.py --processes 4 --users 1000 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
 #
 #   # Curl commands
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
@@ -32,7 +34,7 @@ import locust.stats
 from flask import jsonify, render_template_string, request as flask_request
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import choice, uniform
+from random import choice, randint, uniform
 from time import perf_counter_ns
 
 # Capture P50, P95 and P99 in the UI graph
@@ -51,7 +53,10 @@ collection = None
 # Populated from mgodatagen config at init time
 AVG_DOC_BYTES = 0
 SECONDARY_INDEX_FIELDS = []
+SHARD_KEY_IS_STRING = True
 SHARD_KEY_LENGTH = 0
+SHARD_KEY_RANGE_START = 0
+SHARD_KEY_RANGE_END = 0
 COLLECTION_COUNT = 0
 
 # Hardcoded, not populated from mgodatagen config
@@ -74,10 +79,11 @@ def compute_avg_doc_bytes(content):
             avg_len = (field_spec.get('minLength', 0) + field_spec.get('maxLength', 0)) / 2
             # BSON string: 4-byte length int32 + content bytes + null terminator
             total += header + 4 + avg_len + 1
-        elif field_type in ('int', 'autoincrement'):
-            total += header + 4
-        elif field_type in ('long', 'double'):
+        elif field_type == 'autoincrement':
+            # BSON int64: 8-byte little-endian signed integer
             total += header + 8
+        else:
+            raise ValueError(f'Unsupported field type for {field_name}: {field_spec}')
     return round(total)
 
 
@@ -86,7 +92,10 @@ MGODATAGEN_STRING_CHARSET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY
 
 
 def random_shard_key():
-    return ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SHARD_KEY_LENGTH))
+    if SHARD_KEY_IS_STRING:
+        return ''.join(choice(MGODATAGEN_STRING_CHARSET) for _ in range(SHARD_KEY_LENGTH))
+    else:
+        return randint(SHARD_KEY_RANGE_START, SHARD_KEY_RANGE_END - 1)
 
 
 def random_secondary_key():
@@ -122,11 +131,21 @@ def on_locust_init(environment, **kwargs):
     ns_db = config['database']
     ns_coll = config['collection']
 
-    global SHARD_KEY_LENGTH
-    SHARD_KEY_LENGTH = config['content']['shardKey']['maxLength']
-
     global COLLECTION_COUNT
     COLLECTION_COUNT = config['count']
+
+    global SHARD_KEY_IS_STRING, SHARD_KEY_LENGTH, SHARD_KEY_RANGE_START, SHARD_KEY_RANGE_END
+    shard_key_spec = config['content']['shardKey']
+    shard_key_type = shard_key_spec['type']
+    if shard_key_type == 'string':
+        SHARD_KEY_IS_STRING = True
+        SHARD_KEY_LENGTH = shard_key_spec['maxLength']
+    elif shard_key_type == 'autoincrement' and shard_key_spec.get('autoType') == 'long':
+        SHARD_KEY_IS_STRING = False
+        SHARD_KEY_RANGE_START = shard_key_spec.get('startLong', 0)
+        SHARD_KEY_RANGE_END = SHARD_KEY_RANGE_START + COLLECTION_COUNT
+    else:
+        raise ValueError(f'Unsupported shardKey type: {shard_key_spec}')
 
     global AVG_DOC_BYTES
     AVG_DOC_BYTES = compute_avg_doc_bytes(config['content'])
@@ -140,7 +159,11 @@ def on_locust_init(environment, **kwargs):
 
     logging.info(f'MongoDB host: {connection_string}')
     logging.info(f'Namespace: {ns_db}.{ns_coll}')
-    logging.info(f'Shard key length: {SHARD_KEY_LENGTH}')
+    if SHARD_KEY_IS_STRING:
+        logging.info(f'Shard key type: string (length {SHARD_KEY_LENGTH})')
+    else:
+        logging.info(f'Shard key type: autoincrement '
+                     f'(range [{SHARD_KEY_RANGE_START}, {SHARD_KEY_RANGE_END}))')
     logging.info(f'Secondary key length: {SECONDARY_KEY_LENGTH}')
     logging.info(f'Avg document size: {AVG_DOC_BYTES} bytes')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
@@ -162,6 +185,7 @@ class MongoUser(User):
     wait_time = constant_pacing(1)
 
     def on_start(self):
+        self.shard_key = None
         self.select_shard_key()
 
     @task(50)
@@ -204,7 +228,7 @@ class MongoUser(User):
 
     @task(25)
     def update_by_shard_key(self):
-        if not self.shard_key:
+        if self.shard_key is None:
             self.select_shard_key()
             return
 
@@ -271,10 +295,14 @@ class MongoUser(User):
 
     @task(5)
     def insert_new_shard_key(self):
-        # Prefix with '!' (0x21) or '~' (0x7E), which sort respectively before and after every
-        # character in MGODATAGEN_STRING_CHARSET ('-' 0x2D to 'z' 0x7A), so inserts always land
-        # outside the normal key range and never fall inside a shard key range being deleted.
-        new_key = choice(('!', '~')) + random_shard_key()
+        # Place the new key outside the normal key range so inserts never fall inside a shard key
+        # range being deleted.
+        if SHARD_KEY_IS_STRING:
+            # '!' (0x21) and '~' (0x7E) sort respectively before and after every character in
+            # MGODATAGEN_STRING_CHARSET ('-' 0x2D to 'z' 0x7A).
+            new_key = choice(('!', '~')) + random_shard_key()
+        else:
+            new_key = choice((-10**15, +10**15)) + random_shard_key()
 
         start_time = perf_counter_ns()
 
@@ -433,7 +461,7 @@ def _register_custom_actions(app, environment):
             command = (
                 f'db.getSiblingDB("{db_name}").runCommand({{'
                 f' delete: "{coll_name}",'
-                f' deletes: [{{ q: {{ shardKey: {{ $gte: "{start_key}", $lt: "{cutoff_key}" }} }}, limit: 0 }}]'
+                f' deletes: [{{ q: {{ shardKey: {{ $gte: {json.dumps(start_key)}, $lt: {json.dumps(cutoff_key)} }} }}, limit: 0 }}]'
                 f' }})')
             if execute:
                 if not action_lock.acquire(blocking=False):
@@ -487,8 +515,8 @@ def _register_custom_actions(app, environment):
             command = (f'db.getSiblingDB("{db_name}").runCommand({{'
                        f' fastBulkDelete: "{coll_name}",'
                        f' filterIndexName: "shardKey",'
-                       f' lowerBound: {{ shardKey: "{start_key}" }},'
-                       f' upperBound: {{ shardKey: "{cutoff_key}" }}'
+                       f' lowerBound: {{ shardKey: {json.dumps(start_key)} }},'
+                       f' upperBound: {{ shardKey: {json.dumps(cutoff_key)} }}'
                        f' }})')
             if execute:
                 if not action_lock.acquire(blocking=False):
