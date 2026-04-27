@@ -6,8 +6,13 @@ Tool to launch a set of clean EC2 hosts which can be used as a MongoDB replica s
 Since it interacts with AWS, a default region_name should be set in ~/.aws/config and the AWS
 parameters should be specified either in the same config file or as environment variables.
 
+To monitor the progress of the host initialization scripts, follow /var/log/cloud-init-output.log.
+
 To allow traffic from your current IP to the security group used by the instances, run:
   aws ec2 authorize-security-group-ingress --group-id sg-094dda33ff3d0bab9 --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
+
+To start MongoD in standalone mode (for example for faster bulk loading) use:
+  ./mongod --dbpath /mnt/data/mongod --logpath /mnt/data/mongod/mongod.log --wiredTigerCacheSizeGB 18 --port 27017 --bind_ip_all --fork
 
 Use --help for more information on the supported commands.
 '''
