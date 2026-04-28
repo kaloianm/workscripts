@@ -51,6 +51,9 @@ sudo -u ubuntu -i brew install python3 mongosh
 
 sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
 
+sudo -u ubuntu -i python3 -m venv workscripts/python3-venv
+sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/ctools/requirements.txt
+
 curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
 '''
 
