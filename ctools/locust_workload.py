@@ -179,7 +179,7 @@ def on_locust_init(environment, **kwargs):
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
-    mongo_client = MongoClient(connection_string, connectTimeoutMS=30000)
+    mongo_client = MongoClient(connection_string, connectTimeoutMS=30000, maxPoolSize=50)
     collection = mongo_client[ns_db].get_collection(ns_coll, read_preference=ReadPreference.PRIMARY)
 
     if environment.web_ui:
