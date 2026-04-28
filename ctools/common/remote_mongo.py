@@ -184,7 +184,7 @@ async def deploy_binaries(hosts, mongo_bin_path, shard=None):
     await rsync_to_hosts(hosts, f'{mongo_bin_path}/mongo*', '~/binaries', shard)
 
 
-async def gather_logs(hosts, local_path, shard=None, driver_hosts=None):
+async def gather_logs(hosts, driver_hosts, local_path, shard=None):
     '''Compresses and rsyncs logs from the hosts to a local directory'''
 
     def make_host_suffix(host, process_name):

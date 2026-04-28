@@ -271,8 +271,8 @@ async def main_deploy_binaries(args, cluster):
 async def main_gather_logs(args, cluster):
     '''Implements the gather-logs command'''
 
-    await gather_logs(cluster.available_hosts, args.local_path, args.shard,
-                      cluster.config.get('DriverHosts', []))
+    await gather_logs(cluster.available_hosts, cluster.config.get('DriverHosts', []),
+                      args.local_path, args.shard)
 
 
 if __name__ == "__main__":
