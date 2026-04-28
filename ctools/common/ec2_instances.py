@@ -32,7 +32,7 @@ echo "Configuring required packages"
 ###################################################################################################
 
 sudo apt update -y
-sudo apt install -y vim build-essential dstat sysstat
+sudo apt install -y vim build-essential dstat sysstat lvm2
 
 sudo -u ubuntu \
     NONINTERACTIVE=1 \
@@ -69,16 +69,28 @@ echo "Configuring driver host workscripts for {clustertag}"
 
 
 def make_cluster_host_configuration(clustertag, filesystem, skip_format=False):
-    format_script = '' if skip_format else f'''
-if [ ! -e "/dev/nvme1n1p1" ]; then
-  echo "Partitioning data volume ..."
-  sudo parted -s /dev/nvme1n1 mklabel gpt &&
-    sudo parted -s -a optimal /dev/nvme1n1 mkpart primary 0% 100%
+    data_device = '/dev/datavg/data'
+    if skip_format:
+        setup_script = f'''
+echo "Activating existing LVM volume group on /dev/nvme1n1 ..."
+sudo vgchange -ay datavg
+while [ ! -e "{data_device}" ]; do sleep 1; done
+'''
+    else:
+        # Thin pool consumes 95% of the VG, leaving headroom for LVM metadata growth.
+        # The thin LV's virtual size equals the pool's data size: snapshot copy-on-write
+        # writes share this same pool, so the underlying EBS volume must be sized to fit
+        # both the dataset and the divergence between origin and snapshot during experiments.
+        setup_script = f'''
+echo "Setting up LVM thin pool on /dev/nvme1n1 ..."
+sudo pvcreate /dev/nvme1n1
+sudo vgcreate datavg /dev/nvme1n1
+sudo lvcreate --type thin-pool --chunksize 64K -l 95%FREE -n datapool datavg
+POOL_SIZE_B=$(sudo lvs --noheadings --nosuffix --units b -o lv_size datavg/datapool | tr -d ' ')
+sudo lvcreate -V "${{POOL_SIZE_B}}B" --thin -n data datavg/datapool
 
-  echo "Making {filesystem} filesystem ..."
-  while [ ! -e "/dev/nvme1n1p1" ]; do sleep 1; done
-  sudo mkfs -t {filesystem} /dev/nvme1n1p1
-fi
+echo "Making {filesystem} filesystem on {data_device} ..."
+sudo mkfs -t {filesystem} {data_device}
 '''
 
     return ANY_HOST_CONFIGURATION + f'''
@@ -88,14 +100,23 @@ echo "Configuring shard host volumes for {clustertag}"
 
 echo "Waiting for volume to be attached ..."
 while [ ! -e "/dev/nvme1n1" ]; do sleep 1; done
-{format_script}
+{setup_script}
 echo "Mounting data volume ..."
 sudo mkdir -p /mnt/data
-sudo mount /dev/nvme1n1p1 /mnt/data
+sudo mount {data_device} /mnt/data
 sudo chown -R ubuntu:ubuntu /mnt/data
 
 echo "Data volume mounted, persisting mount point so it survives reboots ..."
 if [ -z $(grep "/mnt/data" "/etc/fstab") ]; then echo $(cat "/proc/mounts" | grep "/mnt/data") >> /etc/fstab; fi
+
+# Snapshot the clean state after loading data:
+#   sudo lvcreate -s -kn --name data_clean datavg/data
+# Roll back to the clean state (near-instant):
+#   sudo umount /mnt/data
+#   sudo lvremove -f datavg/data
+#   sudo lvcreate -s -kn --name data datavg/data_clean
+#   sudo mount /dev/datavg/data /mnt/data
+# Monitor pool fill with: sudo lvs -o+data_percent,metadata_percent datavg/datapool
 
 echo "Completed configuration for {clustertag} !"
 '''
