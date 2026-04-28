@@ -85,7 +85,7 @@ while [ ! -e "{data_device}" ]; do sleep 1; done
 echo "Setting up LVM thin pool on /dev/nvme1n1 ..."
 sudo pvcreate /dev/nvme1n1
 sudo vgcreate datavg /dev/nvme1n1
-sudo lvcreate --type thin-pool --chunksize 64K -l 95%FREE -n datapool datavg
+sudo lvcreate --type thin-pool --chunksize 128K -l 95%FREE -n datapool datavg
 POOL_SIZE_B=$(sudo lvs --noheadings --nosuffix --units b -o lv_size datavg/datapool | tr -d ' ')
 sudo lvcreate -V "${{POOL_SIZE_B}}B" --thin -n data datavg/datapool
 
@@ -104,7 +104,7 @@ while [ ! -e "/dev/nvme1n1" ]; do sleep 1; done
 echo "Mounting data volume ..."
 sudo mkdir -p /mnt/data
 sudo mount {data_device} /mnt/data
-sudo chown -R ubuntu:ubuntu /mnt/data
+sudo chmod 1777 /mnt/data
 
 echo "Data volume mounted, persisting mount point so it survives reboots ..."
 if [ -z $(grep "/mnt/data" "/etc/fstab") ]; then echo $(cat "/proc/mounts" | grep "/mnt/data") >> /etc/fstab; fi
