@@ -116,6 +116,11 @@ if [ -z $(grep "/mnt/data" "/etc/fstab") ]; then echo $(cat "/proc/mounts" | gre
 #   sudo lvremove -f datavg/data
 #   sudo lvcreate -s -kn --name data datavg/data_clean
 #   sudo mount /dev/datavg/data /mnt/data
+# Drop the snapshot and revert to the clean state as the primary volume:
+#   sudo umount /mnt/data
+#   sudo lvremove -f datavg/data
+#   sudo lvrename datavg/data_clean datavg/data
+#   sudo mount /dev/datavg/data /mnt/data
 # Monitor pool fill with: sudo lvs -o+data_percent,metadata_percent datavg/datapool
 
 echo "Completed configuration for {clustertag} !"
