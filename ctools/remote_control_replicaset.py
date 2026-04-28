@@ -140,7 +140,7 @@ async def main_deploy_binaries(args, rs):
 async def main_gather_logs(args, rs):
     '''Implements the gather-logs command'''
 
-    await gather_logs(rs.hosts, args.clustertag)
+    await gather_logs(rs.hosts, args.clustertag, driver_hosts=rs.config.get('DriverHosts', []))
 
 
 if __name__ == "__main__":
