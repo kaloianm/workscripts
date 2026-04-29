@@ -22,6 +22,11 @@
 #   curl -sX POST "http://localhost:8090/custom_actions/deleteMany_10_pct?execute=true"
 #   curl -sX POST "http://localhost:8090/custom_actions/fastBulkDelete_10_pct?execute=true"
 #
+#   # warm_up is read-only and runs immediately in the background (no execute flag).
+#   curl -sX POST http://localhost:8090/custom_actions/warm_up
+#
+#   # Pass --warm-up at startup to automatically scan all secondary indexes once locust initializes.
+#
 #   # Download a visual (html) report from a running instance
 #   curl -L -o locust_results_report.html "http://localhost:8090/stats/report?download=1&theme=dark"
 #
@@ -126,6 +131,12 @@ def on_locust_init_command_line_parser(parser):
         choices=('deleteMany_10_pct', 'fastBulkDelete_10_pct'),
         default=None,
         help='Automatically execute the specified action after 15 minutes',
+    )
+    parser.add_argument(
+        '--warm-up',
+        action='store_true',
+        default=False,
+        help='At startup, scan every secondary index to bring it into the WiredTiger cache',
     )
 
 
@@ -368,12 +379,20 @@ _CUSTOM_ACTIONS_HTML = '''<!doctype html>
 <button onclick="runAction('/custom_actions/fastBulkDelete_10_pct', 'out_fastBulkDelete_10_pct')">Compute fastBulkDelete_10_pct command</button>
 <pre id="out_fastBulkDelete_10_pct" style="margin-top:1em"></pre>
 
+<h3>warm_up</h3>
+<p>
+  Performs a covered index scan over every secondary index in the background,
+  forcing each one into the WiredTiger cache (one instance at a time).
+</p>
+<button onclick="runAction('/custom_actions/warm_up', 'out_warm_up')">Start warm_up</button>
+<pre id="out_warm_up" style="margin-top:1em"></pre>
+
 <script>
 function runAction(url, outId) {
     document.getElementById(outId).textContent = "Computing...";
     fetch(url, {method: "POST"})
         .then(r => r.json())
-        .then(d => document.getElementById(outId).textContent = d.command)
+        .then(d => document.getElementById(outId).textContent = d.command || JSON.stringify(d, null, 2))
         .catch(e => document.getElementById(outId).textContent = "Error: " + e);
 }
 </script>
@@ -398,6 +417,7 @@ def _register_custom_actions(app, environment):
     delete_many_log = _make_action_logger('delete_many', 'locust_results_delete_many.log')
     fast_bulk_delete_log = _make_action_logger('fast_bulk_delete',
                                                'locust_results_fast_bulk_delete.log')
+    warm_up_log = _make_action_logger('warm_up', 'locust_results_warm_up.log')
 
     @app.route('/custom_actions', methods=['GET'])
     def custom_actions():
@@ -552,6 +572,48 @@ def _register_custom_actions(app, environment):
         return jsonify(data), status
 
     # ---------------------------------------------------------------------------
+    # warm_up - covered index scan over every secondary index
+    # ---------------------------------------------------------------------------
+
+    def _run_warm_up(on_complete=None):
+        warm_up_log.info(f'START fields={SECONDARY_INDEX_FIELDS}')
+        try:
+            coll = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED)
+            for field in SECONDARY_INDEX_FIELDS:
+                start = perf_counter_ns()
+                # Hint forces a full scan of this index; count_documents executes a
+                # server-side $count over the matched index entries (covered).
+                count = coll.count_documents({}, hint=[(field, 1)])
+                elapsed_s = (perf_counter_ns() - start) / 1e9
+                warm_up_log.info(f'index={field} count={count} elapsed={elapsed_s:.1f}s')
+        except Exception as exc:
+            warm_up_log.error(f'FAILED {exc}')
+        finally:
+            warm_up_log.info('END')
+            action_lock_holder[0] = None
+            action_lock.release()
+            if on_complete:
+                on_complete()
+
+    def _warm_up(on_complete=None):
+        if not action_lock.acquire(blocking=False):
+            return {'error': f'{action_lock_holder[0]} is already running'}, 409
+        action_lock_holder[0] = 'warm_up'
+        threading.Thread(
+            target=_run_warm_up,
+            kwargs={
+                'on_complete': on_complete
+            },
+            daemon=True,
+        ).start()
+        return {'status': 'started', 'fields': SECONDARY_INDEX_FIELDS}, 200
+
+    @app.route('/custom_actions/warm_up', methods=['POST'])
+    def warm_up():
+        data, status = _warm_up()
+        return jsonify(data), status
+
+    # ---------------------------------------------------------------------------
     # Auto-execute: fire one action after a fixed delay if --auto-execute is set
     # ---------------------------------------------------------------------------
 
@@ -581,3 +643,10 @@ def _register_custom_actions(app, environment):
         @events.quitting.add_listener
         def on_quitting(**_):
             _auto_execute_timer.cancel()
+
+    if environment.parsed_options.warm_up:
+        logging.info(f'Starting background warm-up scan of secondary indexes: '
+                     f'{SECONDARY_INDEX_FIELDS}')
+        data, status = _warm_up()
+        if status != 200:
+            logging.error(f'warm-up failed to start: {data.get("error")}')
