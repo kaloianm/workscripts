@@ -86,8 +86,9 @@ echo "Setting up LVM thin pool on /dev/nvme1n1 ..."
 sudo pvcreate /dev/nvme1n1
 sudo vgcreate datavg /dev/nvme1n1
 sudo lvcreate --type thin-pool --chunksize 128K -l 95%FREE -n datapool datavg
-POOL_SIZE_B=$(sudo lvs --noheadings --nosuffix --units b -o lv_size datavg/datapool | tr -d ' ')
-sudo lvcreate -V "${{POOL_SIZE_B}}B" --thin -n data datavg/datapool
+POOL_SIZE_BYTES=$(sudo lvs --noheadings --nosuffix --units b -o lv_size datavg/datapool | tr -d ' ')
+echo "Creating thin volume of ${{POOL_SIZE_BYTES}} bytes ..."
+sudo lvcreate -V "${{POOL_SIZE_BYTES}}B" --thin -n data datavg/datapool
 
 echo "Making {filesystem} filesystem on {data_device} ..."
 sudo mkfs -t {filesystem} {data_device}
