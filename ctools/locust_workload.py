@@ -116,7 +116,7 @@ def nanos_to_millis(nanos):
 
 
 # Warm-up window after startup before the auto-execute action fires, to let the workload reach steady state.
-_AUTO_EXECUTE_DELAY_SECS = 900
+_AUTO_EXECUTE_DELAY_SECS = 1800
 # Cool-down after the auto-execute action completes before the runner quits, so final stats can flush.
 _AUTO_EXECUTE_QUIT_DELAY_SECS = 60
 
@@ -130,7 +130,8 @@ def on_locust_init_command_line_parser(parser):
         '--auto-execute',
         choices=('deleteMany_10_pct', 'fastBulkDelete_10_pct'),
         default=None,
-        help='Automatically execute the specified action after 15 minutes',
+        help=
+        f'Automatically execute the specified action after {_AUTO_EXECUTE_DELAY_SECS // 60} minutes',
     )
     parser.add_argument(
         '--warm-up',
