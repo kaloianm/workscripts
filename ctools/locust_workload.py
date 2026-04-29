@@ -14,6 +14,9 @@
 #   locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
 #   locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
 #
+#   # Unattended run on the driver host
+#   nohup locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_500GB.json --auto-execute [deleteMany_10_pct, fastBulkDelete_10_pct] --host mongodb:// > locust_results_nohup.log 2>&1 &
+#
 #   # Curl commands
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
 #   curl -sX POST http://localhost:8090/custom_actions/fastBulkDelete_10_pct | jq -r .command
