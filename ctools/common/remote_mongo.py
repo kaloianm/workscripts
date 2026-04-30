@@ -196,12 +196,15 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
         if shard and host.host_desc['shard'] != shard:
             continue
 
+        archive = make_host_suffix(host, "mongod")
+        mongod_path = host.host_desc["RemoteMongoDPath"]
         tasks.append(
             asyncio.create_task(
-                host.exec_remote_ssh_command(
-                    (f'tar zcvf ~/{make_host_suffix(host, "mongod")}.tar.gz '
-                     f'{host.host_desc["RemoteMongoDPath"]}/mongod.log* '
-                     f'{host.host_desc["RemoteMongoDPath"]}/diagnostic.data'))))
+                host.exec_remote_ssh_command((f'cd {mongod_path} && '
+                                              f'tar zcvf ~/{archive}.tar.gz '
+                                              f'--transform "s,^,{archive}/," '
+                                              f'mongod.log* '
+                                              f'diagnostic.data'))))
     await asyncio.gather(*tasks)
 
     # Compress MongoS logs and FTDC
@@ -212,22 +215,28 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
         if not host.host_desc.get("RemoteMongoSPath"):
             continue
 
+        archive = make_host_suffix(host, "mongos")
+        mongos_path = host.host_desc["RemoteMongoSPath"]
         tasks.append(
             asyncio.create_task(
-                host.exec_remote_ssh_command(
-                    (f'tar zcvf ~/{make_host_suffix(host, "mongos")}.tar.gz '
-                     f'{host.host_desc["RemoteMongoSPath"]}/mongos.log* '
-                     f'{host.host_desc["RemoteMongoSPath"]}/mongos.diagnostic.data'))))
+                host.exec_remote_ssh_command((f'cd {mongos_path} && '
+                                              f'tar zcvf ~/{archive}.tar.gz '
+                                              f'--transform "s,^,{archive}/," '
+                                              f'mongos.log* '
+                                              f'mongos.diagnostic.data'))))
     await asyncio.gather(*tasks)
 
     # Compress locust results on driver hosts
     driver_remote_hosts = [RemoteSSHHost(h) for h in (driver_hosts or [])]
     tasks = []
     for host in driver_remote_hosts:
+        archive = f'locust-{host.host}'
         tasks.append(
             asyncio.create_task(
-                host.exec_remote_ssh_command(f'tar zcvf ~/locust-{host.host}.tar.gz '
-                                             f'~/workscripts/ctools/locust_results_*')))
+                host.exec_remote_ssh_command((f'cd ~/workscripts/ctools && '
+                                              f'tar zcvf ~/{archive}.tar.gz '
+                                              f'--transform "s,^,{archive}/," '
+                                              f'locust_results_*'))))
     await asyncio.gather(*tasks)
 
     # Rsync files locally (do not rsync more than 3 at a time)
