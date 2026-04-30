@@ -47,7 +47,7 @@ sudo -u ubuntu bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew sh
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 sudo -u ubuntu -i brew update
-sudo -u ubuntu -i brew install python3 mongosh
+sudo -u ubuntu -i brew install python3 mongosh htop
 
 sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
 
