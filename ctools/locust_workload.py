@@ -7,8 +7,8 @@
 #
 # Example usage:
 #   # First, populate the collection:
-#   mgodatagen -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
-#   mgodatagen -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
+#   mgodatagen -s 1777546439 -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
+#   mgodatagen -s 1777546439 -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
 #
 #   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
 #   locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
