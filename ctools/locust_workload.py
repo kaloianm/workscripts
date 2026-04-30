@@ -43,7 +43,7 @@ import locust.stats
 from flask import jsonify, render_template_string, request as flask_request
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import choice, randint, uniform
+from random import choice, randint, seed, uniform
 from time import perf_counter_ns
 
 # Percentiles to capture in the UI response times graph
@@ -146,6 +146,10 @@ def on_locust_init_command_line_parser(parser):
 
 @events.init.add_listener
 def on_locust_init(environment, **kwargs):
+    # Re-seed from os.urandom so each forked worker has an independent random stream;
+    # otherwise all workers would generate identical probe sequences right after fork.
+    seed()
+
     global connection_string
     connection_string = 'mongodb://localhost' if environment.host is None else environment.host
 
