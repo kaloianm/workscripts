@@ -10,12 +10,16 @@
 #   mgodatagen -s 1777546439 -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
 #   mgodatagen -s 1777546439 -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
 #
-#   # Then, run the workload (uses Locust's built-in --processes for multi-worker support):
-#   locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
-#   locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 25 --autostart --web-port 8090 --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
+#   # Then, run the workload:
+#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
+#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
 #
-#   # Unattended run on the driver host
-#   nohup locust -f locust_workload.py --processes 4 --users 500 --spawn-rate 10 --autostart --web-port 8090 --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_500GB.json --auto-execute [deleteMany_10_pct, fastBulkDelete_10_pct] --host mongodb:// > locust_results_nohup.log 2>&1 &
+#   # Unattended run on AWS hosts
+#   ./launch_ec2_replicaset_hosts.py <Run Name> launch
+#   ./remote_control_replicaset.py <Run Name> deploy-binaries
+#   ./remote_control_replicaset.py <Run Name> init
+#
+#   nohup locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_500GB.json --auto-execute [deleteMany_10_pct, fastBulkDelete_10_pct] --host mongodb:// > locust_results_nohup.log 2>&1 &
 #
 #   # Curl commands
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
@@ -43,7 +47,7 @@ import locust.stats
 from flask import jsonify, render_template_string, request as flask_request
 from locust import User, constant_pacing, events, task
 from pymongo import MongoClient, ReadPreference
-from random import choice, randint, seed, uniform
+from random import choice, randint, uniform
 from time import perf_counter_ns
 
 # Percentiles to capture in the UI response times graph
@@ -126,6 +130,10 @@ _AUTO_EXECUTE_QUIT_DELAY_SECS = 60
 
 @events.init_command_line_parser.add_listener
 def on_locust_init_command_line_parser(parser):
+    # Locust arguments
+    parser.set_defaults(web_port=8090, num_users=750, spawn_rate=10, autostart=True)
+
+    # Custom arguments
     parser.add_argument('--mgodatagen-config', help='Path to the mgodatagen JSON config file',
                         metavar='config', type=str, required=True)
     # The choices must match the /custom_actions/* routes below
@@ -146,10 +154,6 @@ def on_locust_init_command_line_parser(parser):
 
 @events.init.add_listener
 def on_locust_init(environment, **kwargs):
-    # Re-seed from os.urandom so each forked worker has an independent random stream;
-    # otherwise all workers would generate identical probe sequences right after fork.
-    seed()
-
     global connection_string
     connection_string = 'mongodb://localhost' if environment.host is None else environment.host
 
