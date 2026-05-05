@@ -29,11 +29,7 @@
     }
   ],
   "Placement": {
-    "AvailabilityZone": "us-east-1a"
-  },
-  "EbsOptimized": true,
-  "Monitoring": {
-    "Enabled": true
+    "AvailabilityZone": "us-east-1f"
   },
   "TagSpecifications": [
     {
