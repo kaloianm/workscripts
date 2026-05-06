@@ -291,6 +291,9 @@ def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_v
     '''
 
     volume_tags = [{
+        'Key': 'Name',
+        'Value': clustertag
+    }, {
         'Key': 'owner',
         'Value': 'kaloian.manassiev'
     }, {
