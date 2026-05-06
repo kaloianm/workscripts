@@ -123,9 +123,9 @@ def nanos_to_millis(nanos):
 
 
 # Warm-up window after startup before the auto-execute action fires, to let the workload reach steady state.
-_AUTO_EXECUTE_DELAY_SECS = 1800
+_AUTO_EXECUTE_DELAY_SECS = 3600
 # Cool-down after the auto-execute action completes before the runner quits, so final stats can flush.
-_AUTO_EXECUTE_QUIT_DELAY_SECS = 60
+_AUTO_EXECUTE_QUIT_DELAY_SECS = 3600
 
 
 @events.init_command_line_parser.add_listener
