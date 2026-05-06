@@ -131,7 +131,7 @@ _AUTO_EXECUTE_QUIT_DELAY_SECS = 3600
 @events.init_command_line_parser.add_listener
 def on_locust_init_command_line_parser(parser):
     # Locust arguments
-    parser.set_defaults(web_port=8090, num_users=750, spawn_rate=10, autostart=True)
+    parser.set_defaults(web_port=8090, num_users=1000, spawn_rate=10, autostart=True)
 
     # Custom arguments
     parser.add_argument('--mgodatagen-config', help='Path to the mgodatagen JSON config file',
@@ -202,7 +202,7 @@ def on_locust_init(environment, **kwargs):
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
 
     global collection
-    mongo_client = MongoClient(connection_string, connectTimeoutMS=30000, maxPoolSize=90)
+    mongo_client = MongoClient(connection_string, connectTimeoutMS=30000, maxPoolSize=150)
     collection = mongo_client[ns_db].get_collection(ns_coll, read_preference=ReadPreference.PRIMARY)
 
     if environment.web_ui:
