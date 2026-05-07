@@ -1,7 +1,6 @@
 {
   "ImageId": "ami-028f4acf86df833a8",
   "InstanceType": "m8g.4xlarge",
-  "KeyName": "kaloian.manassiev",
   "MinCount": 1,
   "MaxCount": 1,
   "BlockDeviceMappings": [
@@ -31,26 +30,6 @@
   "Placement": {
     "AvailabilityZone": "us-east-1f"
   },
-  "TagSpecifications": [
-    {
-      "ResourceType": "instance",
-      "Tags": [
-        {
-          "Key": "owner",
-          "Value": "kaloian.manassiev"
-        }
-      ]
-    },
-    {
-      "ResourceType": "volume",
-      "Tags": [
-        {
-          "Key": "owner",
-          "Value": "kaloian.manassiev"
-        }
-      ]
-    }
-  ],
   "SecurityGroupIds": [
     "sg-094dda33ff3d0bab9"
   ]

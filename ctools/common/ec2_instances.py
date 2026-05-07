@@ -128,7 +128,7 @@ echo "Completed configuration for {clustertag} !"
 '''
 
 
-def make_instance_tag_specifications(clustertag, role):
+def make_instance_tag_specifications(clustertag, role, user):
     '''Instantiates an AWS instance tag specification for the specified cluster node'''
 
     return [{
@@ -146,6 +146,9 @@ def make_instance_tag_specifications(clustertag, role):
         }, {
             'Key': 'noreap',
             'Value': 'true'
+        }, {
+            'Key': 'owner',
+            'Value': user
         }]
     }]
 
@@ -193,12 +196,12 @@ def wait_for_instances(ec2, instances):
     waiter.wait(InstanceIds=instance_ids)
 
 
-def describe_all_instances(ec2, clustertag):
+def describe_all_instances(ec2, clustertag, user):
     '''Issues a query to describe all running instances with the specified cluster tag'''
 
     filters = [{
         'Name': 'tag:owner',
-        'Values': ['kaloian.manassiev']
+        'Values': [user]
     }, {
         'Name': 'instance-state-name',
         'Values': ['running']
@@ -283,7 +286,8 @@ def extract_data_volumes_from_template(template):
     return modified, data_volumes
 
 
-def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_volume_id=None):
+def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, user,
+                              source_volume_id=None):
     '''Creates (or copies) data volumes and attaches them to the given instances.
 
     For each entry in data_volumes and each instance, either creates a new volume from the
@@ -295,7 +299,7 @@ def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, source_v
         'Value': clustertag
     }, {
         'Key': 'owner',
-        'Value': 'kaloian.manassiev'
+        'Value': user
     }, {
         'Key': 'mongo_ctools_cluster',
         'Value': clustertag

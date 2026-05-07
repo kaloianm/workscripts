@@ -38,8 +38,8 @@ if (sys.version_info[0] < 3):
     raise Exception("Must be using Python 3")
 
 
-def describe_cluster(ec2, clustertag):
-    all_instances = describe_all_instances(ec2, clustertag)
+def describe_cluster(ec2, clustertag, user):
+    all_instances = describe_all_instances(ec2, clustertag, user)
 
     cluster_json = {
         "Name":
@@ -74,6 +74,8 @@ def main_launch(args, ec2):
 
     template = load_template(args.template)
     client_template = load_template(CLIENT_HOST_TEMPLATE)
+    template['KeyName'] = args.user
+    client_template['KeyName'] = args.user
 
     use_volume_copy = getattr(args, 'use_volume_copy', None)
     template, data_volumes = extract_data_volumes_from_template(template)
@@ -86,7 +88,7 @@ def main_launch(args, ec2):
     client_driver_instances = launch_instances(
         ec2,
         client_template,
-        tag_specs=make_instance_tag_specifications(args.clustertag, 'driver'),
+        tag_specs=make_instance_tag_specifications(args.clustertag, 'driver', args.user),
         user_data=make_client_driver_host_configuration(args.clustertag),
         count=1,
     )
@@ -98,7 +100,7 @@ def main_launch(args, ec2):
     config_instances = launch_instances(
         ec2,
         template,
-        tag_specs=make_instance_tag_specifications(args.clustertag, 'config'),
+        tag_specs=make_instance_tag_specifications(args.clustertag, 'config', args.user),
         user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
                                                   skip_format=skip_format),
         count=3,
@@ -110,7 +112,7 @@ def main_launch(args, ec2):
         shard_instances += launch_instances(
             ec2,
             template,
-            tag_specs=make_instance_tag_specifications(args.clustertag, shard_id),
+            tag_specs=make_instance_tag_specifications(args.clustertag, shard_id, args.user),
             user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
                                                       skip_format=skip_format),
             count=args.shard_repl_set_nodes,
@@ -119,10 +121,10 @@ def main_launch(args, ec2):
     all_cluster_instances = config_instances + shard_instances
     wait_for_instances(ec2, client_driver_instances + all_cluster_instances)
 
-    create_and_attach_volumes(ec2, data_volumes, all_cluster_instances, args.clustertag,
+    create_and_attach_volumes(ec2, data_volumes, all_cluster_instances, args.clustertag, args.user,
                               source_volume_id=use_volume_copy)
 
-    cluster_desc = describe_cluster(ec2, args.clustertag)
+    cluster_desc = describe_cluster(ec2, args.clustertag, args.user)
     output_dir = args.clustertag
     output_file = os.path.join(output_dir, 'deployment_description.json')
     os.makedirs(output_dir, exist_ok=True)
@@ -146,7 +148,7 @@ def main_terminate(args, ec2):
 
 def main_describe(args, ec2):
     '''Implementation of the describe command'''
-    cluster_desc = describe_cluster(ec2, args.clustertag)
+    cluster_desc = describe_cluster(ec2, args.clustertag, args.user)
     print(cluster_desc)
 
 
@@ -159,6 +161,12 @@ if __name__ == "__main__":
         ('String with which to tag all the instances which will be spawned for this cluster so they '
          'can easily be identified. For example 5.0, 6.0 etc. There must not be any existing '
          'instances with that tag.'), type=str)
+
+    argsParser.add_argument(
+        '--user', required=True, help=
+        ('Your AWS key pair name and owner tag (e.g. firstname.lastname). The key pair must '
+         'exist in the target AWS account and the private key must be at ~/.ssh/mongodb-aws-kernel-test.'
+         ), type=str)
 
     subparsers = argsParser.add_subparsers(title='subcommands')
 
