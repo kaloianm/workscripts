@@ -19,7 +19,7 @@
 #   ./remote_control_replicaset.py <Run Name> deploy-binaries
 #   ./remote_control_replicaset.py <Run Name> init
 #
-#   nohup locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_500GB.json --auto-execute [deleteMany_10_pct, fastBulkDelete_10_pct] --host mongodb:// > locust_results_nohup.log 2>&1 &
+#   nohup locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_1TB.json --auto-execute [deleteMany_10_pct, fastBulkDelete_10_pct] --host mongodb:// > locust_results_nohup.log 2>&1 &
 #
 #   # Curl commands
 #   curl -sX POST http://localhost:8090/custom_actions/deleteMany_10_pct | jq -r .command
