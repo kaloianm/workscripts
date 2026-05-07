@@ -54,6 +54,9 @@ sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscri
 sudo -u ubuntu -i python3 -m venv workscripts/python3-venv
 sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/ctools/requirements.txt
 
+sudo -u ubuntu bash -c 'echo "less /var/log/cloud-init-output.log" >> /home/ubuntu/.bash_history'
+sudo -u ubuntu bash -c 'echo "source python3-venv/bin/activate" >> /home/ubuntu/.bash_history'
+
 curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
 '''
 
@@ -77,10 +80,10 @@ sudo vgchange -ay datavg
 while [ ! -e "{data_device}" ]; do sleep 1; done
 '''
     else:
-        # Thin pool consumes 95% of the VG, leaving headroom for LVM metadata growth.
-        # The thin LV's virtual size equals the pool's data size: snapshot copy-on-write
-        # writes share this same pool, so the underlying EBS volume must be sized to fit
-        # both the dataset and the divergence between origin and snapshot during experiments.
+        # Thin pool consumes 95% of the VG, leaving headroom for LVM metadata growth. The thin LV's
+        # virtual size equals the pool's data size: snapshot copy-on-write writes share this same
+        # pool, so the underlying EBS volume must be sized to fit both the dataset and the
+        # divergence between origin and snapshot during experiments.
         setup_script = f'''
 echo "Setting up LVM thin pool on /dev/nvme1n1 ..."
 sudo pvcreate /dev/nvme1n1
