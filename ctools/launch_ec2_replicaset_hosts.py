@@ -9,7 +9,7 @@ parameters should be specified either in the same config file or as environment 
 To monitor the progress of the host initialization scripts, follow /var/log/cloud-init-output.log.
 
 To allow traffic from your current IP to the security group used by the instances, run:
-  aws ec2 authorize-security-group-ingress --group-id sg-094dda33ff3d0bab9 --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
+  aws ec2 authorize-security-group-ingress --group-name <your_user> --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
 
 To start MongoD in standalone mode (for example for faster bulk loading) use:
   ./mongod --dbpath /mnt/data/mongod --logpath /mnt/data/mongod/mongod.log --wiredTigerCacheSizeGB 18 --port 27017 --bind_ip_all --fork
@@ -30,7 +30,8 @@ from common.ec2_instances import (CLIENT_HOST_TEMPLATE, create_and_attach_volume
                                   filter_instances_by_role, launch_instances, load_template,
                                   make_client_driver_host_configuration,
                                   make_cluster_host_configuration, make_instance_tag_specifications,
-                                  terminate_cluster_resources, wait_for_instances)
+                                  resolve_security_group_id, terminate_cluster_resources,
+                                  wait_for_instances)
 from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
@@ -68,6 +69,9 @@ def main_launch(args, ec2):
     client_template = load_template(CLIENT_HOST_TEMPLATE)
     template['KeyName'] = args.user
     client_template['KeyName'] = args.user
+    sg_id = resolve_security_group_id(ec2, args.user)
+    template['SecurityGroupIds'] = [sg_id]
+    client_template['SecurityGroupIds'] = [sg_id]
 
     use_volume_copy = getattr(args, 'use_volume_copy', None)
     template, data_volumes = extract_data_volumes_from_template(template)
@@ -107,7 +111,7 @@ def main_launch(args, ec2):
 def main_terminate(args, ec2):
     '''Implementation of the terminate command'''
     yes_no(f'About to terminate all resources for cluster tag {args.clustertag}')
-    total = terminate_cluster_resources(ec2, args.clustertag)
+    total = terminate_cluster_resources(ec2, args.clustertag, args.user)
     if total == 0:
         logging.warning(f'No resources found with cluster tag {args.clustertag}')
 

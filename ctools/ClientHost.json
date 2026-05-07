@@ -15,8 +15,5 @@
         "DeleteOnTermination": true
       }
     }
-  ],
-  "SecurityGroupIds": [
-    "sg-094dda33ff3d0bab9"
   ]
 }
