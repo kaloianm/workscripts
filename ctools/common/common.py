@@ -27,8 +27,9 @@ class CToolsException(Exception):
 
 
 def yes_no(answer):
-    '''Function for a Yes/No result based on the answer provided as an argument'''
-
+    """
+    Function for a Yes/No result based on the answer provided as an argument
+    """
     yes = set(['yes', 'y', 'y'])
     no = set(['no', 'n', ''])
 
@@ -43,8 +44,9 @@ def yes_no(answer):
 
 
 def exe_name(name):
-    '''Abstracts constructing the name of an executable on POSIX vs Windows platforms'''
-
+    """
+    Abstracts constructing the name of an executable on POSIX vs Windows platforms
+    """
     if (sys.platform == 'win32'):
         return name + '.exe'
     return name
@@ -54,7 +56,6 @@ async def async_start_shell_command(command, logging_prefix):
     """
     Asynchronously starts a shell command and logs its stdin/stderr to the logging subsystem.
     """
-
     logging.info(f'[{logging_prefix}]: {command}')
 
     async with aiofiles.tempfile.TemporaryFile() as temp_file:

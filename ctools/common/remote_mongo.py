@@ -1,6 +1,6 @@
-'''
+"""
 Common MongoDB remote host management and cluster operations.
-'''
+"""
 
 import asyncio
 import copy
@@ -11,20 +11,19 @@ from common.remote_common import RemoteSSHHost
 
 
 class RemoteMongoHost(RemoteSSHHost):
-    '''
+    """
     Specialisation of 'RemoteSSHHost' which will be running MongoDB services (mongod/mongos, etc)
-    '''
+    """
 
     def __init__(self, host_desc):
-        '''
+        """
         Constructs a cluster host object from host description, which is a superset of the
         description required by 'RemoteSSHHost' above. The additional fields are:
           RemoteMongoDPath: Path on the host to serve as a root for the MongoD service's data and
             logs. Defaulted to ~/mongod_data.
           RemoteMongoSPath: Path on the host to serve as a root for the MongoS service's data and
             logs. Defaulted to ~/mongos_data.
-        '''
-
+        """
         RemoteSSHHost.__init__(self, host_desc)
 
         # Populate parameter defaults
@@ -32,11 +31,11 @@ class RemoteMongoHost(RemoteSSHHost):
             self.host_desc['RemoteMongoDPath'] = '~/mongod_data'
 
     async def start_mongod_instance(self, port, repl_set_name, extra_args=None):
-        '''
+        """
         Starts a single MongoD instance on this host, as part of a replica set called 'repl_set_name',
         listening on 'port'. The 'extra_args' is a list of additional command line arguments to
         specify to the mongod command line.
-        '''
+        """
 
         if extra_args is None:
             extra_args = []
@@ -52,12 +51,11 @@ class RemoteMongoHost(RemoteSSHHost):
              f'--fork '))
 
     async def start_mongos_instance(self, port, config_hosts, extra_args=None):
-        '''
+        """
         Starts a single MongoS instance on this host, listening on 'port', pointing to
         'config_hosts'. The 'extra_args' is a list of additional command line arguments to specify
         to the mongos command line.
-        '''
-
+        """
         if extra_args is None:
             extra_args = []
 
@@ -73,7 +71,9 @@ class RemoteMongoHost(RemoteSSHHost):
 
 
 def make_remote_mongo_host(host_info, config, role):
-    '''Constructs a RemoteMongoHost from host info, applying global config defaults'''
+    """
+    Constructs a RemoteMongoHost from host info, applying global config defaults
+    """
 
     if isinstance(host_info, str):
         host_info = {'host': host_info}
@@ -91,7 +91,9 @@ def make_remote_mongo_host(host_info, config, role):
 
 
 async def stop_mongo_processes(hosts, signal, shard=None):
-    '''Stops processes that might have been left over from a previous run'''
+    """
+    Stops processes that might have been left over from a previous run
+    """
 
     logging.info(f"Stopping mongo processes for {shard if shard else 'all hosts'}")
     tasks = []
@@ -107,7 +109,9 @@ async def stop_mongo_processes(hosts, signal, shard=None):
 
 
 async def cleanup_mongo_directories(hosts, shard=None):
-    '''Cleanup directories that might have been left over from a previous run'''
+    """
+    Cleanup directories that might have been left over from a previous run
+    """
 
     logging.info(f"Cleaning leftover directories for {shard if shard else 'all hosts'}")
     tasks = []
@@ -128,10 +132,10 @@ async def cleanup_mongo_directories(hosts, shard=None):
 
 
 async def start_mongod_as_replica_set(hosts, port, repl_set_name, extra_args):
-    '''
+    """
     Starts the mongod processes on the specified 'hosts', where each host will be listening on
     'port' and will be initiated as part of 'repl_set_name'.
-    '''
+    """
 
     tasks = []
     for host in hosts:
@@ -141,11 +145,11 @@ async def start_mongod_as_replica_set(hosts, port, repl_set_name, extra_args):
 
 
 async def initiate_replica_set(hosts, port, repl_set_name):
-    '''
+    """
     Initiates 'hosts' as a replica set with a name of 'repl_set_name' and 'hosts':'port' as members
-    '''
-
+    """
     connection_string = f'mongodb://{hosts[0].host}:{port}'
+
     replica_set_members = list(
         map(
             lambda id_and_host: {
@@ -168,25 +172,32 @@ async def initiate_replica_set(hosts, port, repl_set_name):
 
 
 async def rsync_to_hosts(hosts, local_pattern, remote_path, shard=None):
-    '''Rsyncs all the files that match 'local_pattern' to the 'remote_path' on specified hosts'''
-
+    """
+    Rsyncs all the files that match 'local_pattern' to the 'remote_path' on specified hosts
+    """
     tasks = []
+
     for host in hosts:
         if shard and host.host_desc['shard'] != shard:
             continue
         tasks.append(asyncio.create_task(host.rsync_files_to_remote(local_pattern, remote_path)))
+
     await asyncio.gather(*tasks)
 
 
 async def deploy_binaries(hosts, mongo_bin_path, shard=None):
-    '''Deploys MongoDB binaries to the specified hosts'''
-
+    """
+    Deploys MongoDB binaries to the specified hosts
+    """
     await rsync_to_hosts(hosts, f'{mongo_bin_path}/mongo*', '~/binaries', shard)
 
 
 async def gather_logs(hosts, driver_hosts, local_path, shard=None):
-    '''Compresses and rsyncs logs from the hosts to a local directory'''
+    """
+    Compresses and rsyncs logs from the hosts to a local directory
+    """
 
+    # Constructs a name for the archive files
     def make_host_suffix(host, process_name):
         return f'{process_name}-{host.host_desc["shard"]}-{host.host}'
 

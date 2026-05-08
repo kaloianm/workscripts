@@ -1,6 +1,6 @@
-'''
+"""
 Common EC2 instance launching and management utilities.
-'''
+"""
 
 import copy
 import json
@@ -148,9 +148,9 @@ echo "Completed configuration for {clustertag} !"
 
 
 def make_instance_tag_specifications(clustertag, role, user):
-    '''
+    """
     Instantiates an AWS instance tag specification for the specified cluster node
-    '''
+    """
     return [{
         'ResourceType':
             'instance',
@@ -174,9 +174,9 @@ def make_instance_tag_specifications(clustertag, role, user):
 
 
 def resolve_security_group_id(ec2, name):
-    '''
+    """
     Resolves a security group name to its ID
-    '''
+    """
     response = ec2.describe_security_groups(Filters=[{'Name': 'group-name', 'Values': [name]}])
     groups = response['SecurityGroups']
     if not groups:
@@ -185,9 +185,9 @@ def resolve_security_group_id(ec2, name):
 
 
 def load_template(template_path):
-    '''
+    """
     Loads a JSON template file and returns its contents as kwargs for run_instances
-    '''
+    """
     with open(template_path) as f:
         template = json.load(f)
 
@@ -199,9 +199,9 @@ def load_template(template_path):
 
 
 def launch_instances(ec2, template, tag_specs, user_data, count):
-    '''
+    """
     Launches EC2 instances using the template as base parameters
-    '''
+    """
 
     # Merge tag specifications from the template with the caller's tags
     merged_tag_specs = list(template.get('TagSpecifications', []))
@@ -224,9 +224,9 @@ def launch_instances(ec2, template, tag_specs, user_data, count):
 
 
 def wait_for_instances(ec2, instances):
-    '''
+    """
     Waits for the given instances to reach the running state
-    '''
+    """
     instance_ids = [i['InstanceId'] for i in instances]
     logging.info(f'Waiting for {len(instance_ids)} instances to start running ...')
     waiter = ec2.get_waiter('instance_running')
@@ -234,9 +234,9 @@ def wait_for_instances(ec2, instances):
 
 
 def describe_all_instances(ec2, clustertag, user):
-    '''
+    """
     Issues a query to describe all running instances with the specified cluster tag
-    '''
+    """
     filters = [{
         'Name': 'tag:owner',
         'Values': [user]
@@ -259,9 +259,9 @@ def describe_all_instances(ec2, clustertag, user):
 
 
 def filter_instances_by_role(instances, role):
-    '''
+    """
     Filters a list of instances by their mongorole tag
-    '''
+    """
     return list(filter(lambda x: {
         'Key': 'mongorole',
         'Value': role,
@@ -269,9 +269,9 @@ def filter_instances_by_role(instances, role):
 
 
 def terminate_cluster_resources(ec2, clustertag, user):
-    '''
+    """
     Terminates all instances and deletes all EBS volumes tagged with the given cluster tag
-    '''
+    """
     tag_filter = [{
         'Name': 'tag:mongo_ctools_cluster',
         'Values': [clustertag]
@@ -313,12 +313,12 @@ def terminate_cluster_resources(ec2, clustertag, user):
 
 
 def extract_data_volumes_from_template(template):
-    '''
+    """
     Removes non-root block device mappings from the template and returns them separately.
 
     Returns a tuple of (modified_template, data_volumes) where data_volumes is a list of
     dicts with 'DeviceName' and 'Ebs' keys extracted from the template.
-    '''
+    """
     modified = copy.deepcopy(template)
     root_device = '/dev/sda1'
     data_volumes = []
@@ -336,13 +336,12 @@ def extract_data_volumes_from_template(template):
 
 def create_and_attach_volumes(ec2, data_volumes, instances, clustertag, user,
                               source_volume_id=None):
-    '''
+    """
     Creates (or copies) data volumes and attaches them to the given instances.
 
     For each entry in data_volumes and each instance, either creates a new volume from the
     EBS configuration in the template, or copies from source_volume_id if provided.
-    '''
-
+    """
     volume_tags = [{
         'Key': 'Name',
         'Value': clustertag

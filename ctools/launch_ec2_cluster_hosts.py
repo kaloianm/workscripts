@@ -71,8 +71,9 @@ def describe_cluster(ec2, clustertag, user):
 
 
 def main_launch(args, ec2):
-    '''Implementation of the launch command'''
-
+    """
+    Implementation of the launch command
+    """
     template = load_template(args.template)
     client_template = load_template(CLIENT_HOST_TEMPLATE)
     template['KeyName'] = args.user
@@ -143,15 +144,20 @@ def main_launch(args, ec2):
 
 
 def main_terminate(args, ec2):
-    '''Implementation of the terminate command'''
+    """
+    Implementation of the terminate command
+    """
     yes_no(f'About to terminate all resources for cluster tag {args.clustertag}')
+
     total = terminate_cluster_resources(ec2, args.clustertag, args.user)
     if total == 0:
         logging.warning(f'No resources found with cluster tag {args.clustertag}')
 
 
 def main_describe(args, ec2):
-    '''Implementation of the describe command'''
+    """
+    Implementation of the describe command
+    """
     cluster_desc = describe_cluster(ec2, args.clustertag, args.user)
     print(cluster_desc)
 
