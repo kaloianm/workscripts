@@ -28,6 +28,15 @@ sudo bash -c 'echo "vm.max_map_count = 262144" >> /etc/sysctl.conf'
 sudo sysctl -p
 
 ###################################################################################################
+echo "Generating aliases and scripts"
+###################################################################################################
+
+sudo -u ubuntu -i bash -c 'echo "less /var/log/cloud-init-output.log" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "source python3-venv/bin/activate" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "iostat -s 1 --human nvme1n1" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "dstat -cdnmgy" >> $HOME/.bash_history'
+
+###################################################################################################
 echo "Configuring required packages ..."
 ###################################################################################################
 
@@ -61,15 +70,6 @@ sudo -u ubuntu -i python3 -m venv workscripts/python3-venv
 sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/ctools/requirements.txt
 
 curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
-
-###################################################################################################
-echo "Generating aliases and scripts"
-###################################################################################################
-
-sudo -u ubuntu -i bash -c 'echo "less /var/log/cloud-init-output.log" >> $HOME/.bash_history'
-sudo -u ubuntu -i bash -c 'echo "source python3-venv/bin/activate" >> $HOME/.bash_history'
-sudo -u ubuntu -i bash -c 'echo "iostat -s 1 --human nvme1n1" >> $HOME/.bash_history'
-sudo -u ubuntu -i bash -c 'echo "dstat -cdnmgy" >> $HOME/.bash_history'
 
 ###################################################################################################
 echo "Done!"
