@@ -28,36 +28,52 @@ sudo bash -c 'echo "vm.max_map_count = 262144" >> /etc/sysctl.conf'
 sudo sysctl -p
 
 ###################################################################################################
-echo "Configuring required packages"
+echo "Configuring required packages ..."
 ###################################################################################################
 
 sudo apt update -y
 sudo apt install -y vim build-essential dstat sysstat lvm2
 
-sudo -u ubuntu \
-    NONINTERACTIVE=1 \
-    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+###################################################################################################
+echo "Installing Homebrew ..."
+###################################################################################################
 
-sudo -u ubuntu bash -c 'echo >> /home/ubuntu/.bashrc'
-sudo -u ubuntu bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> /home/ubuntu/.bashrc'
+sudo -u ubuntu -i bash -c 'curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 bash'
 
-sudo -u ubuntu bash -c 'echo >> /home/ubuntu/.bash_profile'
-sudo -u ubuntu bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> /home/ubuntu/.bash_profile'
+sudo -u ubuntu -i bash -c 'echo >> $HOME/.bashrc'
+sudo -u ubuntu -i bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> $HOME/.bashrc'
+
+sudo -u ubuntu -i bash -c 'echo >> $HOME/.bash_profile'
+sudo -u ubuntu -i bash -c 'echo '"'"'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"'"'"' >> $HOME/.bash_profile'
 
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 sudo -u ubuntu -i brew update
 sudo -u ubuntu -i brew install python3 mongosh htop
 
-sudo -u ubuntu -i git clone --single-branch https://github.com/kaloianm/workscripts.git /home/ubuntu/workscripts
+###################################################################################################
+echo "Cloning required repositories and tools ..."
+###################################################################################################
+
+sudo -u ubuntu -i bash -c 'git clone --single-branch https://github.com/kaloianm/workscripts.git $HOME/workscripts'
 
 sudo -u ubuntu -i python3 -m venv workscripts/python3-venv
 sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/ctools/requirements.txt
 
-sudo -u ubuntu bash -c 'echo "less /var/log/cloud-init-output.log" >> /home/ubuntu/.bash_history'
-sudo -u ubuntu bash -c 'echo "source python3-venv/bin/activate" >> /home/ubuntu/.bash_history'
-
 curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
+
+###################################################################################################
+echo "Generating aliases and scripts"
+###################################################################################################
+
+sudo -u ubuntu -i bash -c 'echo "less /var/log/cloud-init-output.log" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "source python3-venv/bin/activate" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "iostat -s 1 --human nvme1n1" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "dstat -cdnmgy" >> $HOME/.bash_history'
+
+###################################################################################################
+echo "Done!"
+###################################################################################################
 '''
 
 CLIENT_HOST_TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'ClientHost.json')
