@@ -16,7 +16,8 @@ import sys
 import time
 import pickle
 
-from common.common import Cluster, yes_no
+from common.cluster import Cluster
+from common.common import yes_no
 from common.version import CTOOLS_VERSION
 from pymongo import errors as pymongo_errors
 from tqdm import tqdm
@@ -977,7 +978,6 @@ async def main(args):
     else:
         logging.info("Skipping Phase II")
         total_moved_data_kb = 0
-
     '''
     for each chunk C in the shard:
         - No split if chunk size < 133% target chunk size

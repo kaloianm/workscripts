@@ -16,7 +16,8 @@ import math
 import random
 import uuid
 
-from common.common import Cluster, CToolsException, ShardCollectionUtil
+from common.cluster import Cluster
+from common.common import CToolsException, ShardCollectionUtil
 from common.version import CTOOLS_VERSION
 from pymongo.write_concern import WriteConcern
 from tqdm import tqdm

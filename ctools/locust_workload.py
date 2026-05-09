@@ -80,9 +80,9 @@ SECONDARY_KEY_LENGTH = 120
 
 
 def compute_avg_doc_bytes(content):
-    '''
+    """
     Estimate average BSON document size from a mgodatagen content spec.
-    '''
+    """
     # BSON document: 4-byte size prefix + fields + 1-byte null terminator
     total = 5
     # _id is always present as ObjectId (12 bytes): type + "_id" + null + value

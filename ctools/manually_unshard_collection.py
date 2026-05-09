@@ -12,7 +12,7 @@ import bson
 import logging
 import sys
 
-from common.common import Cluster
+from common.cluster import Cluster
 from common.version import CTOOLS_VERSION
 
 # Ensure that the caller is using python 3
