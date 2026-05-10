@@ -8,9 +8,9 @@
 		"pylint.args": [
 			"\"--disable=logging-fstring-interpolation\""
 		],
-		"python.defaultInterpreterPath": "${workspaceFolder}/ctools/python3-venv/bin/python3",
+		"python.defaultInterpreterPath": "${workspaceFolder}/python3-venv/bin/python3",
 		"yapf.path": ["${workspaceFolder}/python3-venv/bin/yapf"],
-		"yapf.args": ["--style", "${workspaceFolder}/ctools/.style.yapf"],
+		"yapf.args": ["--style", "${workspaceFolder}/.style.yapf"],
 		"[python]": {
 			"editor.formatOnSaveMode": "file",
 			"editor.formatOnSave": true,

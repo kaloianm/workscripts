@@ -8,11 +8,21 @@
             "name": "Python Debugger: launch_ec2_replica_set_hosts.py",
             "type": "debugpy",
             "request": "launch",
-            "envFile": "${workspaceFolder}/ctools/.env",
-            "program": "${workspaceFolder}/ctools/launch_ec2_replicaset_hosts.py",
-            "cwd": "${workspaceFolder}/ctools",
+            "envFile": "${workspaceFolder}/.env",
+            "program": "${workspaceFolder}/launch_ec2_replicaset_hosts.py",
+            "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "args": "${command:pickArgs}"
-        }
+        },
+        {
+            "name": "Python Debugger: launch_ec2_cluster_set_hosts.py",
+            "type": "debugpy",
+            "request": "launch",
+            "envFile": "${workspaceFolder}/.env",
+            "program": "${workspaceFolder}/launch_ec2_cluster_hosts.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": "${command:pickArgs}"
+        },
     ]
 }

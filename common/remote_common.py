@@ -1,5 +1,5 @@
 """
-Module providing common networking-related functionality for the ctools set of scripts.
+Module providing common networking-related functionality for the workscripts set of scripts.
 """
 
 from common.common import async_start_shell_command

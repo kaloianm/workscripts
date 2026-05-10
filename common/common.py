@@ -1,5 +1,5 @@
 """
-Module providing common functionality for the ctools set of scripts.
+Module providing common functionality for the workscripts set of scripts.
 """
 
 import asyncio
@@ -14,7 +14,7 @@ from bson.objectid import ObjectId
 
 class CToolsException(Exception):
     """
-    Exception which serves as a common base for all exceptions thrown by the ctools suite.
+    Exception which serves as a common base for all exceptions thrown by the workscripts suite.
     """
 
     def __init__(self, *args, **kwargs):

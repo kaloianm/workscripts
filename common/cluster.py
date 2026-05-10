@@ -1,5 +1,5 @@
 """
-Module providing the Cluster abstraction for the ctools set of scripts.
+Module providing the Cluster abstraction for the workscripts set of scripts.
 """
 
 import asyncio
@@ -14,7 +14,7 @@ from pymongo import uri_parser
 class Cluster:
     """
     Abstracts the connection to and some administrative operations against a MongoDB cluster. This
-    class is highly tailored to the usage in the ctools scripts in the same directory and is not a
+    class is highly tailored to the usage in the workscripts scripts in the same directory and is not a
     generic utility.
     """
 
