@@ -244,7 +244,7 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
         archive = f'locust-{host.host}'
         tasks.append(
             asyncio.create_task(
-                host.exec_remote_ssh_command((f'cd ~/workscripts/ctools && '
+                host.exec_remote_ssh_command((f'cd ~/workscripts && '
                                               f'tar zcvf ~/{archive}.tar.gz '
                                               f'--transform "s,^,{archive}/," '
                                               f'locust_results_*'))))

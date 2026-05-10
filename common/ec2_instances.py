@@ -67,7 +67,7 @@ echo "Cloning required repositories and tools ..."
 sudo -u ubuntu -i bash -c 'git clone --single-branch https://github.com/kaloianm/workscripts.git $HOME/workscripts'
 
 sudo -u ubuntu -i python3 -m venv workscripts/python3-venv
-sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/ctools/requirements.txt
+sudo -u ubuntu -i workscripts/python3-venv/bin/python3 -m pip install -r workscripts/requirements.txt
 
 curl -fsSL https://github.com/feliixx/mgodatagen/releases/download/v0.12.0/mgodatagen_0.12.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin
 
