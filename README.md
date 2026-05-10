@@ -1,24 +1,23 @@
 # workscripts
 Repository of miscellaneous scripts to improve my MongoDB work productivity. Tailored specifically for my workflow, so might not be suitable for other engineers.
 
-# CTools: Set of Python tools for manipulating sharded clusters
+# Set of Python tools for manipulating sharded clusters
 The CTools package is a set of command-line tools for manipulating sharded clusters. All the tools are built on a common Python framework and use asyncio in order to achieve parallelism.
 
 Click on the links below or run the respective tool with `--help` for more information on how to use it.
 
 ### [defragment_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/defragment_sharded_collection.py#L3)
-### [generate_fragmented_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/generate_fragmented_sharded_collection.py#L3)
-### [manually_unshard_collection](https://github.com/kaloianm/workscripts/blob/master/manually_unshard_collection.py#L3)
 ### [reconstruct_cluster_from_config_dump](https://github.com/kaloianm/workscripts/blob/master/reconstruct_cluster_from_config_dump.py#L3)
 
-## Locust performance experiments
+# Set of Python tools to run Locust performance experiments
 
 ### [launch_ec2_replicaset_hosts](https://github.com/kaloianm/workscripts/blob/master/launch_ec2_replicaset_hosts.py#L3)
 ### [launch_ec2_cluster_hosts](https://github.com/kaloianm/workscripts/blob/master/launch_ec2_cluster_hosts.py#L3)
 ### [remote_control_cluster](https://github.com/kaloianm/workscripts/blob/master/remote_control_cluster.py#L3)
+### [generate_fragmented_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/generate_fragmented_sharded_collection.py#L3)
 ### [locust_workload](https://github.com/kaloianm/workscripts/blob/master/locust_workload.py#L3)
 
-### Data generation configs (mgodatagen)
+## Data generation configs (mgodatagen)
 
 Use the following commands to execute them:
 ```
@@ -37,7 +36,7 @@ All configs share the same document structure: a 2,700-byte non-indexed `payload
 - **locust_workload_mgodatagen_1TB.json** — Generates a ~1TB dataset (200M docs). Approximate breakdown: ~812GB data + ~240GB indexes. Requires instances with 1.5TB+ data volume.
 - **locust_workload_mgodatagen_4TB.json** — Generates a ~4TB dataset (800M docs). Approximate breakdown: ~3.25TB data + ~960GB indexes. Requires instances with 5TB+ data volume.
 
-#### Document size breakdown
+### Document size breakdown
 
 Every document has the following layout (all string fields contain random ASCII characters):
 
