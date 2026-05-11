@@ -215,7 +215,8 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
                                               f'tar zcvf ~/{archive}.tar.gz '
                                               f'--transform "s,^,{archive}/," '
                                               f'mongod.log* '
-                                              f'diagnostic.data'))))
+                                              f'diagnostic.data'
+                                              f'; rc=$?; [ $rc -le 1 ]'))))
     await asyncio.gather(*tasks)
 
     # Compress MongoS logs and FTDC
@@ -234,7 +235,8 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
                                               f'tar zcvf ~/{archive}.tar.gz '
                                               f'--transform "s,^,{archive}/," '
                                               f'mongos.log* '
-                                              f'mongos.diagnostic.data'))))
+                                              f'mongos.diagnostic.data'
+                                              f'; rc=$?; [ $rc -le 1 ]'))))
     await asyncio.gather(*tasks)
 
     # Compress locust results on driver hosts
@@ -245,9 +247,10 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
         tasks.append(
             asyncio.create_task(
                 host.exec_remote_ssh_command((f'cd ~/workscripts && '
+                                              f'ls locust_results_* 2>/dev/null && '
                                               f'tar zcvf ~/{archive}.tar.gz '
                                               f'--transform "s,^,{archive}/," '
-                                              f'locust_results_*'))))
+                                              f'locust_results_* || true'))))
     await asyncio.gather(*tasks)
 
     # Rsync files locally (do not rsync more than 3 at a time)
@@ -263,7 +266,12 @@ async def gather_logs(hosts, driver_hosts, local_path, shard=None):
 
     async def rsync_driver_with_semaphore(host):
         async with sem_max_concurrent_rsync:
-            await host.rsync_files_to_local(f'~/locust-{host.host}.tar.gz', f'{local_path}/logs/')
+            archive = f'~/locust-{host.host}.tar.gz'
+            try:
+                await host.exec_remote_ssh_command(f'test -f {archive}')
+                await host.rsync_files_to_local(archive, f'{local_path}/logs/')
+            except Exception:
+                logging.warning(f'[{host.host}]: No locust archive found, skipping rsync')
 
     tasks = []
     for host in hosts:

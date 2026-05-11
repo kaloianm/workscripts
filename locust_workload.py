@@ -10,15 +10,15 @@
 #   mgodatagen --seed 1777546439 -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
 #   mgodatagen --seed 1777546439 -f locust_workload_mgodatagen_100GB_autoinc.json --uri mongodb://localhost
 #
-#   # Then, run the workload:
-#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
-#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
-#
 #   # For collection population against a standalone server (faster), use the following command to start MongoD in standalone mode:
 #   ./mongod --dbpath /mnt/data/mongod --logpath /mnt/data/mongod/mongod.log --wiredTigerCacheSizeGB 18 --port 27017 --bind_ip_all --fork
 #   mgodatagen --seed 1777546439 --indexfirst -f locust_workload_mgodatagen_1TB.json --uri mongodb://localhost
 #
-#   # Unattended run on AWS hosts
+#   # Then, run the workload:
+#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB.json --host mongodb://localhost
+#   locust -f locust_workload.py --csv=locust_results --csv-full-history --html=locust_results_report.html --print-stats --mgodatagen-config locust_workload_mgodatagen_100GB_autoinc.json --host mongodb://localhost
+#
+#   # Unattended workload run on AWS hosts
 #   ./launch_ec2_replicaset_hosts.py <Run Name> launch
 #   ./remote_control_replicaset.py <Run Name> deploy-binaries
 #   ./remote_control_replicaset.py <Run Name> init
