@@ -122,8 +122,6 @@ def nanos_to_millis(nanos):
     return round(nanos / 1000000.0, 2)
 
 
-# Warm-up window after startup before the auto-execute action fires, to let the workload reach steady state.
-_AUTO_EXECUTE_DELAY_SECS = 3600
 # Cool-down after the auto-execute action completes before the runner quits, so final stats can flush.
 _AUTO_EXECUTE_QUIT_DELAY_SECS = 3600
 
@@ -141,8 +139,14 @@ def on_locust_init_command_line_parser(parser):
         '--auto-execute',
         choices=('deleteMany_10_pct', 'fastBulkDelete_10_pct'),
         default=None,
-        help=
-        f'Automatically execute the specified action after {_AUTO_EXECUTE_DELAY_SECS // 60} minutes',
+        help='Automatically execute the specified action after --auto-execute-delay seconds',
+    )
+    parser.add_argument(
+        '--auto-execute-delay',
+        type=int,
+        default=3600,
+        metavar='SECONDS',
+        help='Warm-up delay before auto-execute fires (default: 3600s)',
     )
     parser.add_argument(
         '--warm-up',
@@ -646,9 +650,10 @@ def _register_custom_actions(app, environment):
             logging.error(f'auto-execute {action_name}: failed to start: {data.get("error")}')
 
     if environment.parsed_options.auto_execute:
-        logging.info(f'Scheduling auto-execute of {environment.parsed_options.auto_execute} '
-                     f'in {_AUTO_EXECUTE_DELAY_SECS}s')
-        _auto_execute_timer = threading.Timer(_AUTO_EXECUTE_DELAY_SECS, _auto_execute_action)
+        delay = environment.parsed_options.auto_execute_delay
+        logging.info(
+            f'Scheduling auto-execute of {environment.parsed_options.auto_execute} in {delay}s')
+        _auto_execute_timer = threading.Timer(delay, _auto_execute_action)
         _auto_execute_timer.daemon = True
         _auto_execute_timer.start()
 
