@@ -31,7 +31,7 @@ mgodatagen -f locust_workload_mgodatagen_4TB.json --uri mongodb://localhost
 All configs share the same document structure: a 2,700-byte non-indexed `payload` field, ten 120-byte indexed string fields (`idx0`–`idx9`), a 16-byte random string `shardKey` (non-unique index), and `_id`. This yields approximately **4KB per document** (~4,077 bytes raw). The storage split is roughly **77% data / 23% indexes** (see [Document size breakdown](#document-size-breakdown) below).
 
 - **locust_workload_mgodatagen_10GB.json** — Generates a ~10GB dataset (2M docs). Approximate breakdown: ~8GB data + ~2.4GB indexes. Good for quick local testing.
-- **locust_workload_mgodatagen_100GB.json** — Generates a ~100GB dataset (20M docs). Approximate breakdown: ~81GB data + ~24GB indexes.
+- **locust_workload_mgodatagen_100GB.json** — Generates a ~100GB dataset (20M docs). Approximate breakdown: ~81GB data + ~24GB indexes. Good for slightly more realistic local testing.
 - **locust_workload_mgodatagen_500GB.json** — Generates a ~500GB dataset (100M docs). Approximate breakdown: ~406GB data + ~120GB indexes. Suitable for M50 instances with 1TB data volume.
 - **locust_workload_mgodatagen_1TB.json** — Generates a ~1TB dataset (200M docs). Approximate breakdown: ~812GB data + ~240GB indexes. Requires instances with 1.5TB+ data volume.
 - **locust_workload_mgodatagen_4TB.json** — Generates a ~4TB dataset (800M docs). Approximate breakdown: ~3.25TB data + ~960GB indexes. Requires instances with 5TB+ data volume.

@@ -11,9 +11,6 @@ To monitor the progress of the host initialization scripts, follow /var/log/clou
 To allow traffic from your current IP to the security group used by the instances, run:
   aws ec2 authorize-security-group-ingress --group-name <your_user> --protocol all --cidr "$(curl -s https://ipv4.wtfismyip.com/text)/32"
 
-To start MongoD in standalone mode (for example for faster bulk loading) use:
-  ./mongod --dbpath /mnt/data/mongod --logpath /mnt/data/mongod/mongod.log --wiredTigerCacheSizeGB 18 --port 27017 --bind_ip_all --fork
-
 Use --help for more information on the supported commands.
 '''
 
