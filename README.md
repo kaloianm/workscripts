@@ -57,3 +57,61 @@ Every document has the following layout (all string fields contain random ASCII 
 Each of the 10 secondary indexes stores a copy of its 120-byte key per document, so index storage ≈ `10 × 120 × N` bytes. For a collection of N documents:
 - Collection (data): `N × 4,077 bytes` ≈ **77%** of total on-disk footprint
 - Indexes (all 10 secondary + shardKey): `N × 1,200 bytes` ≈ **23%** of total on-disk footprint
+
+---
+
+## LVM thin-pool volume for COW snapshot experiments
+
+The data volume on each EC2 instance is provisioned as an **LVM thin-pool** on the attached EBS
+volume. This lets you take a near-instant copy-on-write (COW) snapshot of the fully-loaded dataset
+so that experiments can be run against it and the volume reverted to a known-clean state without
+re-loading data.
+
+The thin-pool is sized to occupy 95% of the EBS volume. Because both the origin volume and its
+snapshot share the same pool, the EBS volume must be large enough to hold the dataset **plus** the
+cumulative divergence (writes) that occur during an experiment. The pool fill level can be
+monitored at any time with:
+
+```bash
+sudo lvs -o+data_percent,metadata_percent datavg/datapool
+```
+
+### Snapshot the clean state (run once, after data load)
+
+```bash
+sudo lvcreate -s -kn --name data_clean datavg/data
+```
+
+### Roll back to the clean state (near-instant)
+
+Stop MongoDB gracefully before unmounting:
+
+```bash
+sudo pkill -SIGTERM mongod mongos
+```
+
+Then revert the volume:
+
+```bash
+sudo umount /mnt/data
+sudo lvremove -f datavg/data
+sudo lvcreate -s -kn --name data datavg/data_clean
+sudo mount /dev/datavg/data /mnt/data
+```
+
+### Permanently drop the snapshot and promote clean state as the primary volume
+
+Stop MongoDB gracefully before unmounting:
+
+```bash
+sudo pkill -SIGTERM mongod mongos
+```
+
+Then promote the clean snapshot:
+
+```bash
+sudo umount /mnt/data
+sudo lvremove -f datavg/data
+sudo lvrename datavg/data_clean datavg/data
+sudo mount /dev/datavg/data /mnt/data
+```
