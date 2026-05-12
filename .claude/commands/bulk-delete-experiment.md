@@ -26,7 +26,7 @@ Key scripts in this directory — **always prefer these over rolling your own SS
 | `./launch_ec2_replicaset_hosts.py` | Launch / describe / terminate EC2 instances |
 | `./remote_control_replicaset.py` | Deploy binaries, init RS, gather logs, stop |
 | `./analyze_locust_run.py` | Phase-split latency analysis + HTML |
-| `~/llm-ftdc-analysis/ftdc_compare_fast.py` | FTDC summary and comparison (if installed) |
+| `./llm-ftdc-analysis/ftdc_compare_fast.py` | FTDC summary and comparison. If not found, stop and ask the user to add it. |
 
 Experiment metadata is stored in `<ExperimentName>/experiment_metadata.json`. Gathered logs land in `<ExperimentName>/logs/`.
 
