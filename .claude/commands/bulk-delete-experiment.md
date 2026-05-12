@@ -14,15 +14,28 @@ Every run has this shape:
               → delete runs to completion → Locust auto-quits 60 min after delete ends
 ```
 
-Key scripts in this directory:
-- `./launch_ec2_replicaset_hosts.py` — launches EC2 instances
-- `./remote_control_replicaset.py` — deploys binaries, inits RS, gathers logs, stops
-- `./locust_workload_start_remote.sh` — starts Locust non-interactively on the driver host
-- `./locust_workload_report.sh` — downloads the live HTML report from the driver
-- `./analyze_locust_run.py` — generates phase-split latency analysis + HTML
-- `~/llm-ftdc-analysis/ftdc_compare_fast.py` — FTDC summary and comparison (if installed)
+Key scripts in this directory — **always prefer these over rolling your own SSH/mongosh commands**:
+
+| Script | Purpose |
+|--------|---------|
+| `./locust_workload_mongosh.sh <Deployment>` | Open mongosh on the RS primary. Pipe commands for non-interactive use: `echo 'db.runCommand(...)' \| ./locust_workload_mongosh.sh <Deployment>` |
+| `./locust_workload_report.sh <Deployment>` | Download the live HTML Locust report from the driver |
+| `./locust_workload_ssh_driver.sh <Deployment>` | Interactive SSH to the driver host |
+| `./locust_workload_ssh_server.sh <Deployment>` | Interactive SSH to the RS host |
+| `./locust_workload_start_remote.sh <Deployment> <config> <action> <delay>` | Start Locust non-interactively on the driver |
+| `./launch_ec2_replicaset_hosts.py` | Launch / describe / terminate EC2 instances |
+| `./remote_control_replicaset.py` | Deploy binaries, init RS, gather logs, stop |
+| `./analyze_locust_run.py` | Phase-split latency analysis + HTML |
+| `~/llm-ftdc-analysis/ftdc_compare_fast.py` | FTDC summary and comparison (if installed) |
 
 Experiment metadata is stored in `<ExperimentName>/experiment_metadata.json`. Gathered logs land in `<ExperimentName>/logs/`.
+
+To check Locust state without SSH, use the driver's HTTP API:
+```bash
+DRIVER=$(jq -r .DriverHosts[0] <ExperimentName>/deployment_description.json)
+curl -s "http://$DRIVER:8090/stats/requests" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print('state:', d['state'], '| users:', d['user_count'])"
+```
 
 ---
 
@@ -42,6 +55,9 @@ Ask the user to confirm these (show defaults, accept Enter to keep):
 | `nodes` | `1` | Number of RS nodes |
 | `mgodatagen_config` | `locust_workload_mgodatagen_1TB.json` | Dataset config |
 | `user` | `kaloian.manassiev` | AWS key pair name / owner tag |
+| `AWS_ACCESS_KEY_ID` | (optional) | Required only for launch and terminate |
+| `AWS_SECRET_ACCESS_KEY` | (optional) | Required only for launch and terminate |
+| `AWS_SESSION_TOKEN` | (optional) | Required only for launch and terminate |
 
 ### Step 2 — Pre-flight checks (checkpoint — stop here for confirmation)
 
@@ -53,7 +69,7 @@ Run these checks, report findings, and ask the user to confirm before proceeding
 [[ -n "$AWS_SECRET_ACCESS_KEY" ]] && echo "AWS_SECRET_ACCESS_KEY: set" || echo "AWS_SECRET_ACCESS_KEY: MISSING"
 [[ -n "$AWS_SESSION_TOKEN" ]] && echo "AWS_SESSION_TOKEN: set" || echo "AWS_SESSION_TOKEN: MISSING"
 
-# SSH key
+# SSH key (used by all .sh scripts)
 ls -la ~/.ssh/mongodb-aws-kernel-test 2>/dev/null || echo "SSH KEY MISSING: ~/.ssh/mongodb-aws-kernel-test"
 
 # No existing cluster with same name
@@ -79,7 +95,11 @@ This creates `<ExperimentName>/deployment_description.json`. Report the RS hosts
 ./remote_control_replicaset.py <ExperimentName> init
 ```
 
-**Checkpoint**: Show the RS connection string from `deployment_description.json`. Tell the user they can `mongosh` to verify the RS is healthy. Ask for confirmation before starting the workload.
+**Checkpoint**: Show the RS connection string from `deployment_description.json`. The user can verify RS health with:
+```bash
+echo 'rs.status()' | ./locust_workload_mongosh.sh <ExperimentName>
+```
+Ask for confirmation before starting the workload.
 
 ### Step 5 — Start the workload (automated)
 
@@ -111,35 +131,39 @@ You can now wait, or the user can ask "how is it doing?" at any time.
 
 When the user asks "how is it doing?" or similar:
 
-1. Fetch the live HTML report (opens in browser):
+1. Check Locust state and current throughput via its HTTP API (no SSH needed):
+   ```bash
+   DRIVER=$(jq -r .DriverHosts[0] <ExperimentName>/deployment_description.json)
+   curl -s "http://$DRIVER:8090/stats/requests" | python3 -c \
+     "import sys,json; d=json.load(sys.stdin); print('state:', d['state'], '| users:', d['user_count']); \
+      [print(f'  {s[\"name\"]}: rps={s[\"current_rps\"]:.0f} p50={s[\"median_response_time\"]}ms') for s in d['stats']]"
+   ```
+
+2. Fetch the live HTML report:
    ```bash
    ./locust_workload_report.sh <ExperimentName>
-   # opens locust_results_report_<ExperimentName>.html
+   # saves locust_results_report_<ExperimentName>.html
    ```
 
-2. Download the current CSV from the driver host:
+3. Check whether the delete is still running on the server (`deleteMany` shows as op `remove`; `fastBulkDelete` shows as op `command`):
    ```bash
-   DRIVER=$(jq -r .driver_host <ExperimentName>/experiment_metadata.json)
-   scp -i ~/.ssh/mongodb-aws-kernel-test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-     ubuntu@$DRIVER:workscripts/locust_results_stats_history.csv \
-     <ExperimentName>/locust_results_stats_history_live.csv
+   echo 'db.currentOp({"ns": /locust_read_write_load/})' | ./locust_workload_mongosh.sh <ExperimentName>
    ```
 
-3. Run the analysis on the live CSV:
-   ```bash
-   python3 analyze_locust_run.py <ExperimentName> \
-     --csv <ExperimentName>/locust_results_stats_history_live.csv \
-     --output-html <ExperimentName>_live_analysis.html
-   ```
-
-4. Read the output and give the user a narrative:
+4. Give the user a narrative based on the HTTP API output and the HTML report:
    - "Warmup (t=0 to t=Xmin): P50 was Y ms, P99 was Z ms — steady, WiredTiger cache warm"
    - "Since delete started (t=Xmin, N minutes ago): P50 has risen to Y ms (+X%), P99 is Z ms"
    - Note if P99 appears to improve — explain the cumulative-percentile artifact (see caveat below)
 
+For interactive investigation, use:
+```bash
+./locust_workload_ssh_driver.sh <ExperimentName>   # SSH to driver
+./locust_workload_ssh_server.sh <ExperimentName>   # SSH to RS host
+```
+
 ### Step 7 — Gather results (automated, then checkpoint)
 
-After Locust self-terminates (you'll know because `workload-status` returns "not running", or the user tells you):
+After Locust self-terminates, confirm by checking state via the HTTP API (should show `"stopped"` and `user_count: 0`), or the user tells you it's done.
 
 ```bash
 ./locust_workload_report.sh <ExperimentName>         # final HTML
@@ -175,6 +199,11 @@ Read the output and report:
 - Which transaction types were most affected
 
 If `experiment_metadata.json` is missing for an older run, ask the user for `locust_start_unix` and `delete_start_unix` (Unix timestamps), or help them create the file.
+
+To check document counts, use:
+```bash
+echo 'db.load.estimatedDocumentCount()' | ./locust_workload_mongosh.sh <ExperimentName>
+```
 
 ---
 
