@@ -1,4 +1,4 @@
-# workscripts
+# Workscripts
 Repository of miscellaneous scripts to improve my MongoDB work productivity. Tailored specifically for my workflow, so might not be suitable for other engineers.
 
 # Set of Python tools for manipulating sharded clusters
@@ -17,9 +17,15 @@ Click on the links below or run the respective tool with `--help` for more infor
 ### [generate_fragmented_sharded_collection](https://github.com/kaloianm/workscripts/blob/master/generate_fragmented_sharded_collection.py#L3)
 ### [locust_workload](https://github.com/kaloianm/workscripts/blob/master/locust_workload.py#L3)
 
-## Data generation configs (mgodatagen)
+---
 
-Use the following commands to execute them:
+# Locust performance experiments
+
+The [locust_workload](https://github.com/kaloianm/workscripts/blob/master/locust_workload.py#L3) script executes a customizable "OLTP-like" workload against a running cluster, preloaded with data that has schema like the one described in the following section.
+
+## Data generation (mgodatagen)
+
+Use the following commands to load a MongoDB server with data:
 ```
 mgodatagen -f locust_workload_mgodatagen_10GB.json --uri mongodb://localhost
 mgodatagen -f locust_workload_mgodatagen_100GB.json --uri mongodb://localhost
@@ -57,6 +63,58 @@ Every document has the following layout (all string fields contain random ASCII 
 Each of the 10 secondary indexes stores a copy of its 120-byte key per document, so index storage ≈ `10 × 120 × N` bytes. For a collection of N documents:
 - Collection (data): `N × 4,077 bytes` ≈ **77%** of total on-disk footprint
 - Indexes (all 10 secondary + shardKey): `N × 1,200 bytes` ≈ **23%** of total on-disk footprint
+
+---
+
+## Analyzing experiment results
+
+### [analyze_locust_run](https://github.com/kaloianm/workscripts/blob/master/analyze_locust_run.py)
+
+Reads `<ExperimentName>/experiment_metadata.json` for phase boundaries (`locust_start_unix`, `delete_start_unix`) and `<ExperimentName>/logs/locust/locust_results_stats_history.csv` for per-second latency data collected by Locust.
+
+#### Single-run latency summary
+
+Prints a terminal table and optionally an HTML report with a latency time-series chart. Three phases are analysed: warm-up (from Locust start until 5 minutes before the delete fires), baseline (the last 5 minutes before the delete), and during-delete. The primary signal is the % change in P50 from baseline to during-delete.
+
+> **P99 caveat:** Locust reports *cumulative* percentiles since launch, not rolling. P99 can appear to improve during the delete (growing denominator). P50 is the most reliable degradation signal.
+
+```bash
+python3 analyze_locust_run.py DeleteMany1TB-String
+python3 analyze_locust_run.py DeleteMany1TB-String --output-html report.html
+
+# Override phase boundaries if experiment_metadata.json is missing
+python3 analyze_locust_run.py OldRun --locust-start-unix 1234567890 --delete-start-unix 1234571490
+
+# Point at a live CSV (e.g. while the experiment is still running)
+python3 analyze_locust_run.py MyRun --csv path/to/locust_results_stats_history.csv
+```
+
+#### Multi-run Locust latency comparison (`--compare-locust-latencies`)
+
+Generates `comparison_locust.png`: a three-panel (P50 / P90 / P99) time-series plot with 15-minute max buckets, log Y scale, and time normalised so all runs start at t = 0. The red dashed vertical line marks t = 1 h (when the delete fires). Runs that have already completed are drawn solid up to the completion marker and dotted after it.
+
+```bash
+python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
+    --compare-locust-latencies
+```
+
+#### Multi-run FTDC cache metrics comparison (`--compare-ftdc`)
+
+Generates `comparison_ftdc.png`: a three-panel plot of the most discriminating server-level WiredTiger cache metrics (dirty bytes, pages read from disk/s, app-thread eviction pressure, etc.) over the first 24 hours of each run. Uses the same time-normalised and completion-marker style as the Locust plot.
+
+Requires `llm-ftdc-analysis` to be installed at `~/workspace/llm-ftdc-analysis/`. Only the FTDC metric files that fall within the requested time window are read, keeping peak memory well below the full-archive size.
+
+```bash
+python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
+    --compare-ftdc
+
+# Extend or shorten the FTDC window (default 24 h)
+python3 analyze_locust_run.py ... --compare-ftdc --ftdc-hours 48
+
+# Both plots in one invocation
+python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
+    --compare-locust-latencies --compare-ftdc
+```
 
 ---
 
