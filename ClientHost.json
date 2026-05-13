@@ -1,6 +1,6 @@
 {
   "ImageId": "ami-06683ebc6ba468d04",
-  "InstanceType": "m8g.2xlarge",
+  "InstanceType": "m8g.xlarge",
   "MinCount": 1,
   "MaxCount": 1,
   "BlockDeviceMappings": [
