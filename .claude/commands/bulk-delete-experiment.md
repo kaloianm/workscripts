@@ -1,41 +1,48 @@
 # MongoDB Performance Experiment Runner
 
-You are helping run and analyze MongoDB bulk-delete performance experiments on AWS EC2. Each experiment measures how a large delete operation (`deleteMany` or `fastBulkDelete`) degrades a concurrent OLTP workload under Locust.
+You are helping run, manage and analyze MongoDB bulk-delete performance experiments on AWS EC2. Each experiment measures the throughput of a large delete operation (`deleteMany` or `fastBulkDelete`) and how does it impact a concurrent OLTP workload under Locust.
 
-The user invokes this skill as: `/run-experiment <ExperimentName>`
+The user invokes this skill as: `/bulk-delete-experiment <ExperimentName>`
 
 ---
 
 ## What you know about the experiment structure
 
-Every run has this shape:
-```
-[Locust start] → warm-up period (default 60 min) → [delete command auto-executes]
-              → delete runs to completion → Locust auto-quits 60 min after delete ends
-```
+Every Locust run has this shape:
+1. Locust start and user ramp-up
+2. Warm-up period (default 60 min)
+3. Execute a delete command
+4. Wait for the delete command to run to completion
+5. Locust auto-quits 60 min after delete ends
 
-Key scripts in this directory — **always prefer these over rolling your own SSH/mongosh commands**:
+---
 
-| Script | Purpose |
-|--------|---------|
-| `./locust_workload_mongosh.sh <Deployment>` | Open mongosh on the RS primary. Pipe commands for non-interactive use: `echo 'db.runCommand(...)' \| ./locust_workload_mongosh.sh <Deployment>` |
-| `./locust_workload_report.sh <Deployment>` | Download the live HTML Locust report from the driver |
-| `./locust_workload_ssh_driver.sh <Deployment>` | Interactive SSH to the driver host |
-| `./locust_workload_ssh_server.sh <Deployment>` | Interactive SSH to the RS host |
-| `./locust_workload_start_remote.sh <Deployment> <config> <action> <delay>` | Start Locust non-interactively on the driver |
-| `./launch_ec2_replicaset_hosts.py` | Launch / describe / terminate EC2 instances |
-| `./remote_control_replicaset.py` | Deploy binaries, init RS, gather logs, stop |
-| `./analyze_locust_run.py` | Phase-split latency analysis + HTML |
-| `./llm-ftdc-analysis/ftdc_compare_fast.py` | FTDC summary and comparison. If not found, stop and ask the user to add it. |
+## Key scripts in this directory
 
-Experiment metadata is stored in `<ExperimentName>/experiment_metadata.json`. Gathered logs land in `<ExperimentName>/logs/`.
+**Always prefer these over rolling your own SSH/mongosh commands**:
 
-To check Locust state without SSH, use the driver's HTTP API:
-```bash
-DRIVER=$(jq -r .DriverHosts[0] <ExperimentName>/deployment_description.json)
-curl -s "http://$DRIVER:8090/stats/requests" | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print('state:', d['state'], '| users:', d['user_count'])"
-```
+1. `./locust_workload_mongosh.sh <Deployment>`: Open mongosh on the RS primary. Pipe commands for non-interactive use: `echo 'db.runCommand(...)' \| ./locust_workload_mongosh.sh <Deployment>`
+2. `./locust_workload_report.sh <Deployment>`: Download the live HTML Locust report from the driver (for a quick status check)
+3. `./locust_workload_stats_history_report.sh <Deployment>`: Download the live CSV Locust stats history from the driver (for a quick status check)
+4. `./locust_workload_ssh_driver.sh <Deployment>`: Interactive SSH to the driver host. Use this to run SSH commands on the driver: `./locust_workload_ssh_driver.sh <Deployment> 'command text'`
+5. `./locust_workload_ssh_server.sh <Deployment>` : Interactive SSH to the RS host. Use this to run SSH commands on the server: `./locust_workload_ssh_server.sh <Deployment> 'command text'`
+6. `./locust_workload_start_remote.sh <Deployment> <config> <action> <delay>`: Start Locust non-interactively on the driver
+7. `./launch_ec2_replicaset_hosts.py`: Launch / describe / terminate EC2 instances for a deployment
+8. `./remote_control_replicaset.py`: Deploy binaries, create/init, gather logs, start/stop replica set
+9. `./remote_control_cluster.py`: Deploy binaries, create/init, gather logs, start/stop cluster
+
+---
+
+## Key external tools
+
+**Always ask for where they are located instead of bailing out if you can't find them**:
+
+1. Python 3 virtual enviroment: It must exist and be located at `./python3-venv`. Always use Python from there and nowhere else.
+2. The `llm-ftdc-analysis` MCP server: MCP server, which exposes tools like `ftdc_summary` and `ftdc_compare`. Use these for exploring and comparing FTDC runs.
+
+Experiment metadata is stored in `<ExperimentName>/experiment_metadata.json`.
+Gathered logs from Locust (driver) land in `<ExperimentName>/logs/locust*` (could be a tar archive or an already untarred directory)
+Gathered logs from Locust (driver) land in `<ExperimentName>/logs/mongod*` (could be a tar archive or an already untarred directory)
 
 ---
 
@@ -82,8 +89,7 @@ Show the complete parameter table and wait for the user to say "go" or "proceed"
 ### Step 3 — Launch EC2 (automated)
 
 ```bash
-./launch_ec2_replicaset_hosts.py --user <user> <ExperimentName> launch \
-  --template <template> --nodes <nodes> --use-volume-copy <vol_id>
+./launch_ec2_replicaset_hosts.py --user <user> <ExperimentName> launch --template <template> --nodes <nodes> --use-volume-copy <vol_id>
 ```
 
 This creates `<ExperimentName>/deployment_description.json`. Report the RS hosts once done.
@@ -129,49 +135,17 @@ You can now wait, or the user can ask "how is it doing?" at any time.
 
 ### Step 6 — Monitor during the run (on user request)
 
-When the user asks "how is it doing?" or similar:
-
-1. Check Locust state and current throughput via its HTTP API (no SSH needed):
-   ```bash
-   DRIVER=$(jq -r .DriverHosts[0] <ExperimentName>/deployment_description.json)
-   curl -s "http://$DRIVER:8090/stats/requests" | python3 -c \
-     "import sys,json; d=json.load(sys.stdin); print('state:', d['state'], '| users:', d['user_count']); \
-      [print(f'  {s[\"name\"]}: rps={s[\"current_rps\"]:.0f} p50={s[\"median_response_time\"]}ms') for s in d['stats']]"
-   ```
-
-2. Fetch the live HTML report:
-   ```bash
-   ./locust_workload_report.sh <ExperimentName>
-   # saves locust_results_report_<ExperimentName>.html
-   ```
-
-3. Check whether the delete is still running on the server (`deleteMany` shows as op `remove`; `fastBulkDelete` shows as op `command`):
-   ```bash
-   echo 'db.currentOp({"ns": /locust_read_write_load/})' | ./locust_workload_mongosh.sh <ExperimentName>
-   ```
-
-4. Give the user a narrative based on the HTTP API output and the HTML report:
-   - "Warmup (t=0 to t=Xmin): P50 was Y ms, P99 was Z ms — steady, WiredTiger cache warm"
-   - "Since delete started (t=Xmin, N minutes ago): P50 has risen to Y ms (+X%), P99 is Z ms"
-   - Note if P99 appears to improve — explain the cumulative-percentile artifact (see caveat below)
-
-For interactive investigation, use:
-```bash
-./locust_workload_ssh_driver.sh <ExperimentName>   # SSH to driver
-./locust_workload_ssh_server.sh <ExperimentName>   # SSH to RS host
-```
+When the user asks "How is it doing?" or similar, jump to the "How to check the client side of an experiment" section below and follow the instructions there.
 
 ### Step 7 — Gather results (automated, then checkpoint)
 
 After Locust self-terminates, confirm by checking state via the HTTP API (should show `"stopped"` and `user_count: 0`), or the user tells you it's done.
 
 ```bash
-./locust_workload_report.sh <ExperimentName>         # final HTML
+./locust_workload_report.sh <ExperimentName>
+./locust_workload_stats_history_report.sh <ExperimentName>
 ./remote_control_replicaset.py <ExperimentName> gather-logs
-python3 analyze_locust_run.py <ExperimentName> --output-html <ExperimentName>_analysis.html
 ```
-
-Run the analysis and show the user the summary table. Tell them the HTML report is at `<ExperimentName>_analysis.html`.
 
 **Checkpoint**: Ask the user to confirm before terminating the cluster (they may want to SSH in).
 
@@ -184,26 +158,53 @@ Run the analysis and show the user the summary table. Tell them the HTML report 
 
 ---
 
-## How to analyze an existing experiment
+## How to check the client side of an experiment
 
-When the user asks about a completed experiment (e.g. "how did DeleteMany1TB-String go?"):
-
+Check whether the delete is still running on the server (`deleteMany` shows as op `remove`; `fastBulkDelete` shows as op `command`):
 ```bash
-python3 analyze_locust_run.py <ExperimentName> --output-html <ExperimentName>_analysis.html
+echo 'db.currentOp({"ns": /locust_read_write_load/})' | ./locust_workload_mongosh.sh <ExperimentName>
 ```
 
-Read the output and report:
-- Delete operation duration (from metadata or ask the user)
-- Baseline P50/P99 (last 5 min before delete)
-- During-delete P50/P99 and percentage change
-- Which transaction types were most affected
-
-If `experiment_metadata.json` is missing for an older run, ask the user for `locust_start_unix` and `delete_start_unix` (Unix timestamps), or help them create the file.
-
-To check document counts, use:
+Fetch the live HTML report and provide a clickable link *and* scp command for the downloaded file:
 ```bash
-echo 'db.load.estimatedDocumentCount()' | ./locust_workload_mongosh.sh <ExperimentName>
+./locust_workload_report.sh <ExperimentName>
+# saves locust_results_report_<ExperimentName>.html
 ```
+
+Fetch the live CSV request stats history report:
+```bash
+./locust_workload_stats_history_report.sh <ExperimentName>
+# saves locust_workload_stats_history_<ExperimentName>.csv
+```
+
+Give the user a narrative based on the CSV report:
+  - "Warmup (t=0 to t=Xmin): P50 was Y ms, P99 was Z ms — steady, WiredTiger cache warm"
+  - "Since delete started (t=Xmin, N minutes ago): P50 has risen to Y ms (+X%), P99 is Z ms"
+  - Note if P99 appears to improve — explain the cumulative-percentile artifact (see caveat below)
+
+--
+
+## How to analyze an experiment in detail
+
+When the user asks about an experiment (e.g. "Please analyze ExperimentName" or "How is ExperimentName going"), this might mean an already completed or a still running experiment, so please clarify.
+
+If the experiment is still running, fetch the following information:
+
+The live HTML report:
+```bash
+./locust_workload_report.sh <ExperimentName>
+# saves locust_results_report_<ExperimentName>.html
+```
+
+The live CSV request stats history report:
+```bash
+./locust_workload_stats_history_report.sh <ExperimentName>
+# saves locust_workload_stats_history_<ExperimentName>.csv
+```
+
+The MongoDB server logs:
+
+
 
 ---
 
