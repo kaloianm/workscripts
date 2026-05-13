@@ -1,5 +1,5 @@
 {
-  "ImageId": "ami-028f4acf86df833a8",
+  "ImageId": "ami-06683ebc6ba468d04",
   "InstanceType": "m8g.2xlarge",
   "MinCount": 1,
   "MaxCount": 1,
@@ -8,8 +8,8 @@
       "DeviceName": "/dev/sda1",
       "Ebs": {
         "VolumeType": "gp3",
-        "VolumeSize": 100,
-        "Iops": 3000,
+        "VolumeSize": 32,
+        "Iops": 3072,
         "Throughput": 125,
         "Encrypted": true,
         "DeleteOnTermination": true
