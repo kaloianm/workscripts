@@ -1,5 +1,7 @@
 aiofiles == 25.1.0
 argparse == 1.4.0
+matplotlib == 3.10.3
+pandas == 2.2.3
 boto3 == 1.43.6
 motor == 3.7.1
 locust == 2.43.4

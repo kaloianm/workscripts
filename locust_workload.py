@@ -41,6 +41,9 @@
 #   # Download a visual (html) report from a running instance
 #   curl -L -o locust_results_report.html "http://localhost:8090/stats/report?download=1&theme=dark"
 #
+#   # Download the full request statistics history (csv) from a running instance
+#   curl -L -o locust_results_stats_history.csv "http://localhost:8090/stats/requests_full_history/csv?download=1"
+#
 
 import json
 import logging
