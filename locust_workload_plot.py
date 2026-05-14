@@ -31,6 +31,7 @@ import sys
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
+from scipy.stats import gaussian_kde
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
@@ -183,23 +184,30 @@ def main():
         '(requires $FTDC_TOOL). Each matched metric gets its own chart.')
     parser.add_argument('--ftdc-workers', type=int, default=4, metavar='N',
                         help='Parallel workers for FTDC decoding (default: 4)')
+    parser.add_argument('--histogram', action='store_true',
+                        help='Plot latency distributions grouped by phase instead of time series')
     args = parser.parse_args()
 
+    if args.histogram and args.ftdc:
+        parser.error('--histogram and --ftdc are mutually exclusive')
+
     ftdc_substrings = [s.strip() for s in args.ftdc.split(',')] if args.ftdc else []
-    ftdc_mod = _import_ftdc_tools() if ftdc_substrings else None
+    ftdc_mod = _import_ftdc_tools() if ftdc_substrings and not args.histogram else None
 
     experiments = {}
+    experiments_raw = {}
     experiment_t0s = {}
     for exp_dir in args.experiments:
         name = os.path.basename(exp_dir.rstrip('/\\'))
         print(f'Loading {name} ...')
         df, t0 = load_experiment(exp_dir, args.request_name)
+        experiments_raw[name] = df
         experiments[name] = bucket_data(df, args.bucket_minutes)
         experiment_t0s[name] = t0
 
     # Load FTDC data per experiment: {exp_name: {metric_key: {...}}}
     ftdc_by_exp = {}
-    if ftdc_substrings:
+    if ftdc_substrings and not args.histogram:
         for exp_dir in args.experiments:
             name = os.path.basename(exp_dir.rstrip('/\\'))
             print(f'Loading FTDC for {name} ...')
@@ -311,6 +319,92 @@ def main():
         fig.tight_layout()
         return fig
 
+    def _make_histogram_figure():
+        percentiles = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
+
+        # Build (subset_df, exp_name, phase) groups, skipping empty subsets
+        groups = []
+        for exp_name, df_raw in experiments_raw.items():
+            times = experiment_delete_times.get(exp_name)
+            if times is None:
+                groups.append((df_raw, exp_name, None))
+            else:
+                start_min = times[0] * 60
+                end_min = times[1] * 60 if times[1] is not None else None
+                m0 = df_raw['elapsed_min'] < start_min
+                m1 = (~m0) if end_min is None else ((df_raw['elapsed_min'] >= start_min) &
+                                                    (df_raw['elapsed_min'] <= end_min))
+                candidates = [(df_raw[m0], 0), (df_raw[m1], 1)]
+                if end_min is not None:
+                    candidates.append((df_raw[df_raw['elapsed_min'] > end_min], 2))
+                for subset, phase in candidates:
+                    if not subset.empty:
+                        groups.append((subset, exp_name, phase))
+
+        x_threshold = 500
+        shared_x = {}
+        for col, _ in percentiles:
+            all_vals = pd.concat([g[0][col].dropna() for g in groups])
+            if all_vals.empty:
+                shared_x[col] = np.linspace(0, 1, 500)
+                continue
+            lo, hi = max(0.0, float(all_vals.min())), float(all_vals.max())
+            x_lin = np.linspace(lo, min(x_threshold, hi), 300)
+            x_log = np.logspace(np.log10(x_threshold), np.log10(hi),
+                                200) if hi > x_threshold else np.array([])
+            shared_x[col] = np.unique(np.concatenate([x_lin, x_log]))
+
+        # One color per experiment, consistent across all subplots
+        exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(experiments_raw)}
+
+        all_phases = sorted({phase
+                             for _, _, phase in groups}, key=lambda p: 999 if p is None else p)
+        phase_label = lambda p: 'All data' if p is None else f'Phase {p}'
+
+        # One subplot per row: P50/Phase0, P50/Phase1, ..., P90/Phase0, ...
+        subplot_order = [(col, pct_label, phase) for col, pct_label in percentiles
+                         for phase in all_phases]
+        n_subplots = len(subplot_order)
+        fig, axes = plt.subplots(n_subplots, 1, figsize=(16, 5 * n_subplots))
+        axes = np.array(axes).reshape(n_subplots)
+
+        y_threshold = 500
+        for ax, (col, pct_label, phase) in zip(axes, subplot_order):
+            for subset, exp_name, p in groups:
+                if p != phase:
+                    continue
+                vals = subset[col].dropna()
+                if vals.nunique() < 2:
+                    continue
+                kde = gaussian_kde(vals)
+                ax.plot(shared_x[col],
+                        kde(shared_x[col]) * len(vals), color=exp_colors[exp_name], linewidth=1.0,
+                        label=exp_name)
+            ax.set_title(f'{pct_label} — {phase_label(phase)}', fontsize=12)
+            ax.set_xlabel('Latency (ms)', fontsize=11)
+            ax.set_ylabel('Samples per ms', fontsize=11)
+            ax.grid(True, alpha=0.3)
+            ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
+            ax.set_xlim(left=0)
+            ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+            ax.set_yscale('symlog', linthresh=y_threshold, linscale=1)
+            ax.set_ylim(bottom=0)
+            ax.axhline(y_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+            ax.legend(fontsize=8)
+
+        fig.canvas.draw()
+        for ax in axes:
+            xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
+            ax.xaxis.set_major_locator(FixedLocator(xticks))
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
+            yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(y_threshold)})
+            ax.yaxis.set_major_locator(FixedLocator(yticks))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
+
+        fig.suptitle(f'Latency Histograms by Phase — {args.request_name}', fontsize=13)
+        fig.tight_layout()
+        return fig
+
     def _build_csv_dataframe():
         series = {}
         for col, label in metrics:
@@ -358,6 +452,19 @@ def main():
         out_path = 'locust_latency.csv'
         df.to_csv(out_path)
         print(f'Saved: {out_path} ({len(df)} rows, {len(df.columns)} data columns)')
+        return
+
+    if args.histogram:
+        fig = _make_histogram_figure()
+        if args.fmt == 'pdf':
+            out_path = 'locust_latency_histogram.pdf'
+            with PdfPages(out_path) as pdf:
+                pdf.savefig(fig, dpi=150)
+        else:
+            out_path = f'locust_latency_histogram.{args.fmt}'
+            fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        print(f'Saved: {out_path}')
         return
 
     if args.fmt == 'pdf':
