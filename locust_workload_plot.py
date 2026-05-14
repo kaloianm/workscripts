@@ -21,16 +21,14 @@
 #     locust_latency_p50.<fmt> — one file per percentile (non-PDF formats)
 #
 # Example:
-#   python3 locust_workload_plot.py \
-#       DeleteMany1TB-String-1000-Users \
-#       FastBulkDelete1TB-String-1000-Users \
-#       --bucket-minutes 15 --format pdf \
-#       --ftdc "wiredTiger.cache"
+#   python3 locust_workload_plot.py ExperimentName --bucket-minutes 15 --format pdf --ftdc "wiredTiger"
 
 import argparse
 import glob
 import os
+import re
 import sys
+from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -133,6 +131,33 @@ def load_ftdc_data(exp_dir, t0_unix, substrings, ftdc_mod, max_workers=4):
     return result
 
 
+_LOG_TS_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+) \w+ (START|END)')
+_LOG_FILES = ['locust_results_delete_many.log', 'locust_results_fast_bulk_delete.log']
+
+
+def parse_delete_log(exp_dir):
+    """Return (start_unix, end_unix) from the non-empty delete log, or None if not found."""
+    for name in _LOG_FILES:
+        path = os.path.join(exp_dir, 'logs', 'locust', name)
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            continue
+        start_ts = end_ts = None
+        with open(path) as f:
+            for line in f:
+                m = _LOG_TS_RE.match(line)
+                if not m:
+                    continue
+                ts = datetime.strptime(
+                    m.group(1), '%Y-%m-%d %H:%M:%S,%f').replace(tzinfo=timezone.utc).timestamp()
+                if m.group(2) == 'START':
+                    start_ts = ts
+                elif m.group(2) == 'END':
+                    end_ts = ts
+        if start_ts is not None:
+            return start_ts, end_ts
+    return None
+
+
 def bucket_ftdc_metric(ts, values, bucket_minutes):
     if len(ts) == 0:
         return np.array([]), np.array([])
@@ -185,6 +210,20 @@ def main():
                 print(f'  Warning: {e}', file=sys.stderr)
                 ftdc_by_exp[name] = {}
 
+    # Parse delete start/end times from operation logs
+    experiment_delete_times = {}
+    for exp_dir in args.experiments:
+        name = os.path.basename(exp_dir.rstrip('/\\'))
+        result = parse_delete_log(exp_dir)
+        if result:
+            start_unix, end_unix = result
+            t0 = experiment_t0s[name]
+            start_h = (start_unix - t0) / 3600.0
+            end_h = (end_unix - t0) / 3600.0 if end_unix is not None else None
+            experiment_delete_times[name] = (start_h, end_h)
+        else:
+            experiment_delete_times[name] = None
+
     # Collect all FTDC metric keys seen across any experiment
     all_ftdc_keys = sorted({k for exp_data in ftdc_by_exp.values() for k in exp_data})
     if ftdc_substrings and not all_ftdc_keys:
@@ -224,6 +263,20 @@ def main():
         yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(linear_threshold)})
         ax.yaxis.set_major_locator(FixedLocator(yticks))
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
+
+        max_elapsed_h = max(d['bucket'].max() for d in experiments.values()) / 60
+        # Shift each experiment's lines by ~3 px so overlapping lines remain visible
+        px_in_data_h = max_elapsed_h / (16 * 150)  # 1 px in data units (16" fig, 150 dpi)
+        for i, exp_name in enumerate(experiments):
+            times = experiment_delete_times.get(exp_name)
+            if not times:
+                continue
+            color = colors[i % len(colors)]
+            shift = i * 3 * px_in_data_h
+            start_h, end_h = times
+            ax.axvline(start_h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
+            if end_h is not None:
+                ax.axvline(end_h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
 
         _x_axis(ax)
         fig.tight_layout()
@@ -278,6 +331,26 @@ def main():
         df = pd.DataFrame(series)
         df.index = df.index / 60
         df.index.name = 'elapsed_hours'
+
+        # Phase columns: 0 = before delete, 1 = during delete, 2 = after delete
+        phase_cols = {}
+        for exp_name in experiments:
+            times = experiment_delete_times.get(exp_name)
+            if times is None:
+                phase_cols[f'Phase / {exp_name}'] = pd.Series(np.nan, index=df.index)
+            else:
+                start_h, end_h = times
+
+                def _phase(h, s=start_h, e=end_h):
+                    if h < s:
+                        return 0
+                    if e is not None and h > e:
+                        return 2
+                    return 1
+
+                phase_cols[f'Phase / {exp_name}'] = pd.Series([_phase(h) for h in df.index],
+                                                              index=df.index, dtype='Int8')
+        df = pd.concat([pd.DataFrame(phase_cols, index=df.index), df], axis=1)
         return df
 
     if args.fmt == 'csv':
