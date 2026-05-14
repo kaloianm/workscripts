@@ -41,7 +41,7 @@ echo "Configuring required packages ..."
 ###################################################################################################
 
 sudo apt update -y
-sudo apt install -y vim build-essential dstat sysstat lvm2
+sudo apt install -y build-essential dstat lvm2 sysstat vim
 
 ###################################################################################################
 echo "Installing Homebrew ..."
