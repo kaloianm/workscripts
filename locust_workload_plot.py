@@ -17,8 +17,12 @@
 #
 # Output:
 #   Written to the current working directory:
-#     locust_latency.pdf       — all charts as separate pages (PDF only)
-#     locust_latency_p50.<fmt> — one file per percentile (non-PDF formats)
+#     locust_latency.csv           — bucketed source data for all time-series charts
+#     locust_latency.pdf           — all charts as separate pages (PDF only)
+#     locust_latency_p50.<fmt>     — one file per percentile (non-PDF formats)
+#
+#     locust_latency_histogram.csv — pre-computed KDE curves for histogram charts
+#     locust_latency_histogram.pdf — histogram charts (--histogram mode)
 #
 # Example:
 #   python3 locust_workload_plot.py ExperimentName --bucket-minutes 15 --format pdf --ftdc "wiredTiger"
@@ -176,7 +180,7 @@ def main():
                         help='Value of the Name column to plot (default: Aggregated)')
     parser.add_argument('--bucket-minutes', type=int, default=15,
                         help='Bucket width in minutes, max aggregation (default: 15)')
-    parser.add_argument('--format', choices=['pdf', 'png', 'jpg', 'csv'], default='pdf', dest='fmt',
+    parser.add_argument('--format', choices=['pdf', 'png', 'jpg'], default='pdf', dest='fmt',
                         help='Output format (default: pdf)')
     parser.add_argument(
         '--ftdc', default=None, metavar='SUBSTRINGS',
@@ -240,8 +244,7 @@ def main():
     metrics = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
-    def _x_axis(ax):
-        max_elapsed_h = max(d['bucket'].max() for d in experiments.values()) / 60
+    def _x_axis(ax, max_elapsed_h):
         bucket_h = args.bucket_minutes / 60
         major_h = max(bucket_h, round(max_elapsed_h / 10 / bucket_h + 0.5) * bucket_h)
         ax.set_xlim(left=0)
@@ -250,162 +253,7 @@ def main():
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:g}h'))
         ax.set_xlabel('Elapsed time (hours)', fontsize=12)
 
-    def _make_latency_figure(col, label):
-        fig, ax = plt.subplots(figsize=(16, 6))
-        for i, (exp_name, data) in enumerate(experiments.items()):
-            ax.plot(data['bucket'] / 60, data[col], label=exp_name, color=colors[i % len(colors)],
-                    linewidth=1.5, marker='o', markersize=3)
-        ax.set_ylabel(f'{label} Latency (ms)', fontsize=12)
-        ax.set_title(
-            f'{label} Request Latency — {args.request_name}\n'
-            f'({args.bucket_minutes}-min buckets, max within bucket)', fontsize=13)
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-
-        linear_threshold = 250
-        ax.set_yscale('symlog', linthresh=linear_threshold, linscale=1)
-        ax.set_ylim(bottom=0)
-        ax.axhline(linear_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
-
-        fig.canvas.draw()
-        yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(linear_threshold)})
-        ax.yaxis.set_major_locator(FixedLocator(yticks))
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
-
-        max_elapsed_h = max(d['bucket'].max() for d in experiments.values()) / 60
-        # Shift each experiment's lines by ~3 px so overlapping lines remain visible
-        px_in_data_h = max_elapsed_h / (16 * 150)  # 1 px in data units (16" fig, 150 dpi)
-        for i, exp_name in enumerate(experiments):
-            times = experiment_delete_times.get(exp_name)
-            if not times:
-                continue
-            color = colors[i % len(colors)]
-            shift = i * 3 * px_in_data_h
-            start_h, end_h = times
-            ax.axvline(start_h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
-            if end_h is not None:
-                ax.axvline(end_h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
-
-        _x_axis(ax)
-        fig.tight_layout()
-        return fig
-
-    def _make_ftdc_figure(metric_key):
-        is_rate = any(ftdc_by_exp[n][metric_key]['is_rate'] for n in ftdc_by_exp
-                      if metric_key in ftdc_by_exp[n])
-        fig, ax = plt.subplots(figsize=(16, 6))
-        for i, exp_name in enumerate(experiments):
-            exp_data = ftdc_by_exp.get(exp_name, {})
-            if metric_key not in exp_data:
-                continue
-            entry = exp_data[metric_key]
-            bx, by = bucket_ftdc_metric(entry['ts'], entry['values'], args.bucket_minutes)
-            if len(bx) == 0:
-                continue
-            ax.plot(bx / 60, by, label=exp_name, color=colors[i % len(colors)], linewidth=1.5,
-                    marker='o', markersize=3)
-
-        ylabel = f'{metric_key}\n(per-second rate)' if is_rate else metric_key
-        ax.set_ylabel(ylabel, fontsize=10)
-        ax.set_title(
-            f'FTDC: {metric_key}\n'
-            f'({args.bucket_minutes}-min buckets, max within bucket)', fontsize=13)
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(bottom=0)
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:,.0f}'))
-
-        _x_axis(ax)
-        fig.tight_layout()
-        return fig
-
-    def _make_histogram_figure():
-        percentiles = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
-
-        # Build (subset_df, exp_name, phase) groups, skipping empty subsets
-        groups = []
-        for exp_name, df_raw in experiments_raw.items():
-            times = experiment_delete_times.get(exp_name)
-            if times is None:
-                groups.append((df_raw, exp_name, None))
-            else:
-                start_min = times[0] * 60
-                end_min = times[1] * 60 if times[1] is not None else None
-                m0 = df_raw['elapsed_min'] < start_min
-                m1 = (~m0) if end_min is None else ((df_raw['elapsed_min'] >= start_min) &
-                                                    (df_raw['elapsed_min'] <= end_min))
-                candidates = [(df_raw[m0], 0), (df_raw[m1], 1)]
-                if end_min is not None:
-                    candidates.append((df_raw[df_raw['elapsed_min'] > end_min], 2))
-                for subset, phase in candidates:
-                    if not subset.empty:
-                        groups.append((subset, exp_name, phase))
-
-        x_threshold = 500
-        shared_x = {}
-        for col, _ in percentiles:
-            all_vals = pd.concat([g[0][col].dropna() for g in groups])
-            if all_vals.empty:
-                shared_x[col] = np.linspace(0, 1, 500)
-                continue
-            lo, hi = max(0.0, float(all_vals.min())), float(all_vals.max())
-            x_lin = np.linspace(lo, min(x_threshold, hi), 300)
-            x_log = np.logspace(np.log10(x_threshold), np.log10(hi),
-                                200) if hi > x_threshold else np.array([])
-            shared_x[col] = np.unique(np.concatenate([x_lin, x_log]))
-
-        # One color per experiment, consistent across all subplots
-        exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(experiments_raw)}
-
-        all_phases = sorted({phase
-                             for _, _, phase in groups}, key=lambda p: 999 if p is None else p)
-        phase_label = lambda p: 'All data' if p is None else f'Phase {p}'
-
-        # One subplot per row: P50/Phase0, P50/Phase1, ..., P90/Phase0, ...
-        subplot_order = [(col, pct_label, phase) for col, pct_label in percentiles
-                         for phase in all_phases]
-        n_subplots = len(subplot_order)
-        fig, axes = plt.subplots(n_subplots, 1, figsize=(16, 5 * n_subplots))
-        axes = np.array(axes).reshape(n_subplots)
-
-        y_threshold = 500
-        for ax, (col, pct_label, phase) in zip(axes, subplot_order):
-            for subset, exp_name, p in groups:
-                if p != phase:
-                    continue
-                vals = subset[col].dropna()
-                if vals.nunique() < 2:
-                    continue
-                kde = gaussian_kde(vals)
-                ax.plot(shared_x[col],
-                        kde(shared_x[col]) * len(vals), color=exp_colors[exp_name], linewidth=1.0,
-                        label=exp_name)
-            ax.set_title(f'{pct_label} — {phase_label(phase)}', fontsize=12)
-            ax.set_xlabel('Latency (ms)', fontsize=11)
-            ax.set_ylabel('Samples per ms', fontsize=11)
-            ax.grid(True, alpha=0.3)
-            ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
-            ax.set_xlim(left=0)
-            ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
-            ax.set_yscale('symlog', linthresh=y_threshold, linscale=1)
-            ax.set_ylim(bottom=0)
-            ax.axhline(y_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
-            ax.legend(fontsize=8)
-
-        fig.canvas.draw()
-        for ax in axes:
-            xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
-            ax.xaxis.set_major_locator(FixedLocator(xticks))
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
-            yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(y_threshold)})
-            ax.yaxis.set_major_locator(FixedLocator(yticks))
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
-
-        fig.suptitle(f'Latency Histograms by Phase — {args.request_name}', fontsize=13)
-        fig.tight_layout()
-        return fig
-
-    def _build_csv_dataframe():
+    def _build_timeseries_dataframe():
         series = {}
         for col, label in metrics:
             for exp_name, data in experiments.items():
@@ -447,15 +295,200 @@ def main():
         df = pd.concat([pd.DataFrame(phase_cols, index=df.index), df], axis=1)
         return df
 
-    if args.fmt == 'csv':
-        df = _build_csv_dataframe()
-        out_path = 'locust_latency.csv'
-        df.to_csv(out_path)
-        print(f'Saved: {out_path} ({len(df)} rows, {len(df.columns)} data columns)')
-        return
+    def _build_histogram_dataframe():
+        """Compute KDE curves for each (percentile, phase, experiment) and return as long-format
+        DataFrame with columns [percentile, phase, experiment, x, y].
 
+        phase=-1 means no phase info (all data combined). x/y are the exact values plotted.
+        """
+        percentiles = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
+
+        groups = []
+        for exp_name, df_raw in experiments_raw.items():
+            times = experiment_delete_times.get(exp_name)
+            if times is None:
+                groups.append((df_raw, exp_name, None))
+            else:
+                start_min = times[0] * 60
+                end_min = times[1] * 60 if times[1] is not None else None
+                m0 = df_raw['elapsed_min'] < start_min
+                m1 = (~m0) if end_min is None else ((df_raw['elapsed_min'] >= start_min) &
+                                                    (df_raw['elapsed_min'] <= end_min))
+                candidates = [(df_raw[m0], 0), (df_raw[m1], 1)]
+                if end_min is not None:
+                    candidates.append((df_raw[df_raw['elapsed_min'] > end_min], 2))
+                for subset, phase in candidates:
+                    if not subset.empty:
+                        groups.append((subset, exp_name, phase))
+
+        x_threshold = 500
+        shared_x = {}
+        for col, _ in percentiles:
+            all_vals = pd.concat([g[0][col].dropna() for g in groups])
+            if all_vals.empty:
+                shared_x[col] = np.linspace(0, 1, 500)
+                continue
+            lo, hi = max(0.0, float(all_vals.min())), float(all_vals.max())
+            x_lin = np.linspace(lo, min(x_threshold, hi), 300)
+            x_log = (np.logspace(np.log10(x_threshold), np.log10(hi), 200)
+                     if hi > x_threshold else np.array([]))
+            shared_x[col] = np.unique(np.concatenate([x_lin, x_log]))
+
+        rows = []
+        for col, pct_label in percentiles:
+            xs = shared_x[col]
+            for subset, exp_name, phase in groups:
+                vals = subset[col].dropna()
+                if vals.nunique() < 2:
+                    continue
+                kde = gaussian_kde(vals)
+                ys = kde(xs) * len(vals)
+                phase_val = -1 if phase is None else phase
+                for x, y in zip(xs, ys):
+                    rows.append({
+                        'percentile': pct_label,
+                        'phase': phase_val,
+                        'experiment': exp_name,
+                        'x': x,
+                        'y': y,
+                    })
+
+        return pd.DataFrame(rows, columns=['percentile', 'phase', 'experiment', 'x', 'y'])
+
+    def _make_latency_figure(label, df):
+        exp_names = [c.split(' / ', 1)[1] for c in df.columns if c.startswith(f'{label} /')]
+
+        fig, ax = plt.subplots(figsize=(16, 6))
+        for i, exp_name in enumerate(exp_names):
+            series = df[f'{label} / {exp_name}'].dropna()
+            ax.plot(series.index, series.values, label=exp_name, color=colors[i % len(colors)],
+                    linewidth=1.5, marker='o', markersize=3)
+        ax.set_ylabel(f'{label} Latency (ms)', fontsize=12)
+        ax.set_title(
+            f'{label} Request Latency — {args.request_name}\n'
+            f'({args.bucket_minutes}-min buckets, max within bucket)', fontsize=13)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+        linear_threshold = 250
+        ax.set_yscale('symlog', linthresh=linear_threshold, linscale=1)
+        ax.set_ylim(bottom=0)
+        ax.axhline(linear_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+
+        fig.canvas.draw()
+        yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(linear_threshold)})
+        ax.yaxis.set_major_locator(FixedLocator(yticks))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
+
+        max_elapsed_h = df.index.max()
+        px_in_data_h = max_elapsed_h / (16 * 150)
+        for i, exp_name in enumerate(exp_names):
+            phase_col = f'Phase / {exp_name}'
+            if phase_col not in df.columns:
+                continue
+            phase = df[phase_col]
+            in_delete = phase == 1
+            if not in_delete.any():
+                continue
+            color = colors[i % len(colors)]
+            shift = i * 3 * px_in_data_h
+            start_h = df.index[in_delete].min()
+            ax.axvline(start_h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
+            post_delete = phase == 2
+            if post_delete.any():
+                end_h = df.index[post_delete].min()
+                ax.axvline(end_h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
+
+        _x_axis(ax, max_elapsed_h)
+        fig.tight_layout()
+        return fig
+
+    def _make_ftdc_figure(metric_prefix, df):
+        is_rate = metric_prefix.endswith(' (rate/s)')
+        exp_names = [c.split(' / ', 1)[1] for c in df.columns if c.startswith(f'{metric_prefix} /')]
+
+        fig, ax = plt.subplots(figsize=(16, 6))
+        for i, exp_name in enumerate(exp_names):
+            series = df[f'{metric_prefix} / {exp_name}'].dropna()
+            ax.plot(series.index, series.values, label=exp_name, color=colors[i % len(colors)],
+                    linewidth=1.5, marker='o', markersize=3)
+
+        display_key = metric_prefix[:-len(' (rate/s)')] if is_rate else metric_prefix
+        ylabel = f'{display_key}\n(per-second rate)' if is_rate else metric_prefix
+        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_title(
+            f'FTDC: {display_key}\n'
+            f'({args.bucket_minutes}-min buckets, max within bucket)', fontsize=13)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:,.0f}'))
+
+        _x_axis(ax, df.index.max())
+        fig.tight_layout()
+        return fig
+
+    def _make_histogram_figure(df):
+        pct_order = ['P50', 'P90', 'P99']
+        phases = sorted(df['phase'].unique(), key=lambda p: 999 if p == -1 else p)
+        all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
+        exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
+
+        subplot_order = [(pct, phase) for pct in pct_order for phase in phases]
+        n_subplots = len(subplot_order)
+        fig, axes = plt.subplots(n_subplots, 1, figsize=(16, 5 * n_subplots))
+        axes = np.array(axes).reshape(n_subplots)
+
+        x_threshold = 500
+        y_threshold = 500
+
+        for ax, (pct, phase) in zip(axes, subplot_order):
+            subset = df[(df['percentile'] == pct) & (df['phase'] == phase)]
+            for exp_name, grp in subset.groupby('experiment', sort=False):
+                ax.plot(grp['x'].values, grp['y'].values, color=exp_colors.get(exp_name, 'gray'),
+                        linewidth=1.0, label=exp_name)
+            phase_label = 'All data' if phase == -1 else f'Phase {phase}'
+            ax.set_title(f'{pct} — {phase_label}', fontsize=12)
+            ax.set_xlabel('Latency (ms)', fontsize=11)
+            ax.set_ylabel('Samples per ms', fontsize=11)
+            ax.grid(True, alpha=0.3)
+            ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
+            ax.set_xlim(left=0)
+            ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+            ax.set_yscale('symlog', linthresh=y_threshold, linscale=1)
+            ax.set_ylim(bottom=0)
+            ax.axhline(y_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+            ax.legend(fontsize=8)
+
+        fig.canvas.draw()
+        for ax in axes:
+            xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
+            ax.xaxis.set_major_locator(FixedLocator(xticks))
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
+            yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(y_threshold)})
+            ax.yaxis.set_major_locator(FixedLocator(yticks))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
+
+        fig.suptitle(f'Latency Histograms by Phase — {args.request_name}', fontsize=13)
+        fig.tight_layout()
+        return fig
+
+    # Step 1: Build CSV (source of truth — exact values that will be plotted)
     if args.histogram:
-        fig = _make_histogram_figure()
+        df_csv = _build_histogram_dataframe()
+        csv_path = 'locust_latency_histogram.csv'
+        df_csv.to_csv(csv_path, index=False)
+        print(f'Saved: {csv_path} ({len(df_csv)} rows)')
+    else:
+        df_csv = _build_timeseries_dataframe()
+        csv_path = 'locust_latency.csv'
+        df_csv.to_csv(csv_path)
+        print(f'Saved: {csv_path} ({len(df_csv)} rows, {len(df_csv.columns)} data columns)')
+
+    # Step 2: Load from CSV and plot
+    if args.histogram:
+        df_plot = pd.read_csv(csv_path)
+        fig = _make_histogram_figure(df_plot)
         if args.fmt == 'pdf':
             out_path = 'locust_latency_histogram.pdf'
             with PdfPages(out_path) as pdf:
@@ -467,28 +500,42 @@ def main():
         print(f'Saved: {out_path}')
         return
 
+    df_plot = pd.read_csv(csv_path, index_col='elapsed_hours')
+
+    # Identify FTDC metric prefixes from CSV column names (preserving order)
+    skip_prefixes = ('Phase /', 'P50 /', 'P90 /', 'P99 /')
+    ftdc_prefixes = []
+    seen_prefixes = set()
+    for col in df_plot.columns:
+        if any(col.startswith(p) for p in skip_prefixes):
+            continue
+        parts = col.rsplit(' / ', 1)
+        if len(parts) == 2 and parts[0] not in seen_prefixes:
+            ftdc_prefixes.append(parts[0])
+            seen_prefixes.add(parts[0])
+
     if args.fmt == 'pdf':
         out_path = 'locust_latency.pdf'
         with PdfPages(out_path) as pdf:
-            for col, label in metrics:
-                fig = _make_latency_figure(col, label)
+            for _, label in metrics:
+                fig = _make_latency_figure(label, df_plot)
                 pdf.savefig(fig, dpi=150)
                 plt.close(fig)
-            for metric_key in all_ftdc_keys:
-                fig = _make_ftdc_figure(metric_key)
+            for metric_prefix in ftdc_prefixes:
+                fig = _make_ftdc_figure(metric_prefix, df_plot)
                 pdf.savefig(fig, dpi=150)
                 plt.close(fig)
         print(f'Saved: {out_path}')
     else:
-        for col, label in metrics:
-            fig = _make_latency_figure(col, label)
+        for _, label in metrics:
+            fig = _make_latency_figure(label, df_plot)
             out_path = f'locust_latency_{label.lower()}.{args.fmt}'
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
             print(f'Saved: {out_path}')
-        for i, metric_key in enumerate(all_ftdc_keys):
-            fig = _make_ftdc_figure(metric_key)
-            safe_name = metric_key.replace(' ', '_').replace('/', '_')[-60:]
+        for i, metric_prefix in enumerate(ftdc_prefixes):
+            fig = _make_ftdc_figure(metric_prefix, df_plot)
+            safe_name = metric_prefix.replace(' ', '_').replace('/', '_')[-60:]
             out_path = f'locust_ftdc_{i:02d}_{safe_name}.{args.fmt}'
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
