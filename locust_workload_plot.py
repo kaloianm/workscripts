@@ -4,12 +4,15 @@
 # overlaying all experiments on a shared elapsed-time x-axis.
 #
 # Usage:
-#   locust_workload_plot.py <ExperimentDir> [<ExperimentDir> ...] [options]
+#   locust_workload_plot.py compare <ExperimentDir> [<ExperimentDir> ...] [options]
+#   locust_workload_plot.py histogram <ExperimentDir> [<ExperimentDir> ...] [options]
 #
-# Options:
+# Common options (both modes):
 #   --request-name NAME    Name column value to filter on (default: Aggregated)
-#   --bucket-minutes N     Bucket width in minutes, max aggregation (default: 15)
 #   --format pdf|png|jpg   Output image format (default: pdf)
+#
+# compare options:
+#   --bucket-minutes N     Bucket width in minutes, max aggregation (default: 15)
 #   --ftdc SUBSTRINGS      Comma-separated substrings to match FTDC metric names.
 #                          Requires $FTDC_TOOL to point to the llm-ftdc-analysis directory.
 #                          Counter metrics (opcounters etc.) are automatically converted
@@ -24,8 +27,9 @@
 #     locust_latency_histogram.csv — pre-computed KDE curves for histogram charts
 #     locust_latency_histogram.pdf — histogram charts (--histogram mode)
 #
-# Example:
-#   python3 locust_workload_plot.py ExperimentName --bucket-minutes 15 --format pdf --ftdc "wiredTiger"
+# Examples:
+#   python3 locust_workload_plot.py compare Exp1 Exp2 --bucket-minutes 15 --format pdf --ftdc "wiredTiger"
+#   python3 locust_workload_plot.py histogram Exp1 Exp2 --format pdf
 
 import argparse
 import glob
@@ -136,20 +140,53 @@ def load_ftdc_data(exp_dir, t0_unix, substrings, ftdc_mod, max_workers=4):
     return result
 
 
-_LOG_TS_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+) \w+ (START|END)')
-_LOG_FILES = ['locust_results_delete_many.log', 'locust_results_fast_bulk_delete.log']
+_PHASES_LOG_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+) \w+ (START|END) (.+)')
+_LEGACY_LOG_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+) \w+ (START|END)')
+_LEGACY_LOG_FILES = {
+    'locust_results_delete_many.log': 'delete_many',
+    'locust_results_fast_bulk_delete.log': 'fastBulkDelete',
+}
 
 
-def parse_delete_log(exp_dir):
-    """Return (start_unix, end_unix) from the non-empty delete log, or None if not found."""
-    for name in _LOG_FILES:
-        path = os.path.join(exp_dir, 'logs', 'locust', name)
+def parse_phases_log(exp_dir):
+    """Return list of (phase_name, start_unix, end_unix_or_None) sorted by start time.
+    Reads locust_results_phases.log if present; falls back to legacy per-operation logs."""
+    phases_path = os.path.join(exp_dir, 'logs', 'locust', 'locust_results_phases.log')
+    if os.path.isfile(phases_path) and os.path.getsize(phases_path) > 0:
+        return _parse_new_phases_log(phases_path)
+    return _parse_legacy_phases_log(exp_dir)
+
+
+def _parse_new_phases_log(path):
+    open_starts = {}
+    result = []
+    with open(path) as f:
+        for line in f:
+            m = _PHASES_LOG_RE.match(line)
+            if not m:
+                continue
+            ts = datetime.strptime(m.group(1),
+                                   '%Y-%m-%d %H:%M:%S,%f').replace(tzinfo=timezone.utc).timestamp()
+            event, name = m.group(2), m.group(3).strip()
+            if event == 'START':
+                open_starts[name] = ts
+            elif event == 'END' and name in open_starts:
+                result.append((name, open_starts.pop(name), ts))
+    for name, start_ts in open_starts.items():
+        result.append((name, start_ts, None))
+    result.sort(key=lambda x: x[1])
+    return result
+
+
+def _parse_legacy_phases_log(exp_dir):
+    for filename, phase_name in _LEGACY_LOG_FILES.items():
+        path = os.path.join(exp_dir, 'logs', 'locust', filename)
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
             continue
         start_ts = end_ts = None
         with open(path) as f:
             for line in f:
-                m = _LOG_TS_RE.match(line)
+                m = _LEGACY_LOG_RE.match(line)
                 if not m:
                     continue
                 ts = datetime.strptime(
@@ -159,8 +196,8 @@ def parse_delete_log(exp_dir):
                 elif m.group(2) == 'END':
                     end_ts = ts
         if start_ts is not None:
-            return start_ts, end_ts
-    return None
+            return [(phase_name, start_ts, end_ts)]
+    return []
 
 
 def bucket_ftdc_metric(ts, values, bucket_minutes):
@@ -172,31 +209,40 @@ def bucket_ftdc_metric(ts, values, bucket_minutes):
 
 
 def main():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('experiments', nargs='+', metavar='ExperimentDir',
+                        help='One or more experiment directory paths')
+    common.add_argument('--request-name', default='Aggregated',
+                        help='Value of the Name column to plot (default: Aggregated)')
+    common.add_argument('--format', choices=['pdf', 'png', 'jpg'], default='pdf', dest='fmt',
+                        help='Output format (default: pdf)')
+
     parser = argparse.ArgumentParser(
         description='Plot Locust P50/P90/P99 latency across experiments')
-    parser.add_argument('experiments', nargs='+', metavar='ExperimentDir',
-                        help='One or more experiment directory paths')
-    parser.add_argument('--request-name', default='Aggregated',
-                        help='Value of the Name column to plot (default: Aggregated)')
-    parser.add_argument('--bucket-minutes', type=int, default=15,
-                        help='Bucket width in minutes, max aggregation (default: 15)')
-    parser.add_argument('--format', choices=['pdf', 'png', 'jpg'], default='pdf', dest='fmt',
-                        help='Output format (default: pdf)')
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest='mode', required=True)
+
+    compare_p = subparsers.add_parser('compare', parents=[common],
+                                      help='Plot P50/P90/P99 latency time series')
+    compare_p.add_argument('--bucket-minutes', type=int, default=15,
+                           help='Bucket width in minutes, max aggregation (default: 15)')
+    compare_p.add_argument(
         '--ftdc', default=None, metavar='SUBSTRINGS',
         help='Comma-separated substrings to match FTDC metric names '
         '(requires $FTDC_TOOL). Each matched metric gets its own chart.')
-    parser.add_argument('--ftdc-workers', type=int, default=4, metavar='N',
-                        help='Parallel workers for FTDC decoding (default: 4)')
-    parser.add_argument('--histogram', action='store_true',
-                        help='Plot latency distributions grouped by phase instead of time series')
+    compare_p.add_argument('--ftdc-workers', type=int, default=4, metavar='N',
+                           help='Parallel workers for FTDC decoding (default: 4)')
+
+    subparsers.add_parser('histogram', parents=[common],
+                          help='Plot latency distributions grouped by phase')
+
     args = parser.parse_args()
+    is_histogram = args.mode == 'histogram'
 
-    if args.histogram and args.ftdc:
-        parser.error('--histogram and --ftdc are mutually exclusive')
-
-    ftdc_substrings = [s.strip() for s in args.ftdc.split(',')] if args.ftdc else []
-    ftdc_mod = _import_ftdc_tools() if ftdc_substrings and not args.histogram else None
+    ftdc_substrings = []
+    ftdc_mod = None
+    if not is_histogram:
+        ftdc_substrings = [s.strip() for s in args.ftdc.split(',')] if args.ftdc else []
+        ftdc_mod = _import_ftdc_tools() if ftdc_substrings else None
 
     experiments = {}
     experiments_raw = {}
@@ -206,12 +252,13 @@ def main():
         print(f'Loading {name} ...')
         df, t0 = load_experiment(exp_dir, args.request_name)
         experiments_raw[name] = df
-        experiments[name] = bucket_data(df, args.bucket_minutes)
+        if not is_histogram:
+            experiments[name] = bucket_data(df, args.bucket_minutes)
         experiment_t0s[name] = t0
 
     # Load FTDC data per experiment: {exp_name: {metric_key: {...}}}
     ftdc_by_exp = {}
-    if ftdc_substrings and not args.histogram:
+    if ftdc_substrings:
         for exp_dir in args.experiments:
             name = os.path.basename(exp_dir.rstrip('/\\'))
             print(f'Loading FTDC for {name} ...')
@@ -222,19 +269,14 @@ def main():
                 print(f'  Warning: {e}', file=sys.stderr)
                 ftdc_by_exp[name] = {}
 
-    # Parse delete start/end times from operation logs
-    experiment_delete_times = {}
+    # Parse phase start/end times from operation logs
+    experiment_phases = {}
     for exp_dir in args.experiments:
         name = os.path.basename(exp_dir.rstrip('/\\'))
-        result = parse_delete_log(exp_dir)
-        if result:
-            start_unix, end_unix = result
-            t0 = experiment_t0s[name]
-            start_h = (start_unix - t0) / 3600.0
-            end_h = (end_unix - t0) / 3600.0 if end_unix is not None else None
-            experiment_delete_times[name] = (start_h, end_h)
-        else:
-            experiment_delete_times[name] = None
+        t0 = experiment_t0s[name]
+        experiment_phases[name] = [(pname, (s - t0) / 3600.0,
+                                    (e - t0) / 3600.0 if e is not None else None)
+                                   for pname, s, e in parse_phases_log(exp_dir)]
 
     # Collect all FTDC metric keys seen across any experiment
     all_ftdc_keys = sorted({k for exp_data in ftdc_by_exp.values() for k in exp_data})
@@ -274,24 +316,19 @@ def main():
         df.index = df.index / 60
         df.index.name = 'elapsed_hours'
 
-        # Phase columns: 0 = before delete, 1 = during delete, 2 = after delete
+        # Phase columns: string phase name at each time point, '' when outside all phases
         phase_cols = {}
         for exp_name in experiments:
-            times = experiment_delete_times.get(exp_name)
-            if times is None:
-                phase_cols[f'Phase / {exp_name}'] = pd.Series(np.nan, index=df.index)
-            else:
-                start_h, end_h = times
+            phases = experiment_phases.get(exp_name, [])
 
-                def _phase(h, s=start_h, e=end_h):
-                    if h < s:
-                        return 0
-                    if e is not None and h > e:
-                        return 2
-                    return 1
+            def _phase_name(h, phases=phases):
+                for pname, s, e in phases:
+                    if h >= s and (e is None or h <= e):
+                        return pname
+                return ''
 
-                phase_cols[f'Phase / {exp_name}'] = pd.Series([_phase(h) for h in df.index],
-                                                              index=df.index, dtype='Int8')
+            phase_cols[f'Phase / {exp_name}'] = pd.Series([_phase_name(h) for h in df.index],
+                                                          index=df.index, dtype='str')
         df = pd.concat([pd.DataFrame(phase_cols, index=df.index), df], axis=1)
         return df
 
@@ -305,45 +342,40 @@ def main():
 
         groups = []
         for exp_name, df_raw in experiments_raw.items():
-            times = experiment_delete_times.get(exp_name)
-            if times is None:
+            phases = experiment_phases.get(exp_name, [])
+            if not phases:
                 groups.append((df_raw, exp_name, None))
             else:
-                start_min = times[0] * 60
-                end_min = times[1] * 60 if times[1] is not None else None
-                m0 = df_raw['elapsed_min'] < start_min
-                m1 = (~m0) if end_min is None else ((df_raw['elapsed_min'] >= start_min) &
-                                                    (df_raw['elapsed_min'] <= end_min))
-                candidates = [(df_raw[m0], 0), (df_raw[m1], 1)]
-                if end_min is not None:
-                    candidates.append((df_raw[df_raw['elapsed_min'] > end_min], 2))
-                for subset, phase in candidates:
+                phase_subsets: dict[str, list] = {}
+                for pname, s, e in phases:
+                    s_min = s * 60
+                    e_min = e * 60 if e is not None else None
+                    mask = df_raw['elapsed_min'] >= s_min
+                    if e_min is not None:
+                        mask &= df_raw['elapsed_min'] <= e_min
+                    subset = df_raw[mask]
                     if not subset.empty:
-                        groups.append((subset, exp_name, phase))
+                        phase_subsets.setdefault(pname, []).append(subset)
+                for pname, subsets in phase_subsets.items():
+                    combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
+                    groups.append((combined, exp_name, pname))
 
         x_threshold = 500
-        shared_x = {}
-        for col, _ in percentiles:
-            all_vals = pd.concat([g[0][col].dropna() for g in groups])
-            if all_vals.empty:
-                shared_x[col] = np.linspace(0, 1, 500)
-                continue
-            lo, hi = max(0.0, float(all_vals.min())), float(all_vals.max())
-            x_lin = np.linspace(lo, min(x_threshold, hi), 300)
-            x_log = (np.logspace(np.log10(x_threshold), np.log10(hi), 200)
-                     if hi > x_threshold else np.array([]))
-            shared_x[col] = np.unique(np.concatenate([x_lin, x_log]))
 
         rows = []
         for col, pct_label in percentiles:
-            xs = shared_x[col]
             for subset, exp_name, phase in groups:
                 vals = subset[col].dropna()
                 if vals.nunique() < 2:
                     continue
+                lo, hi = max(0.0, float(vals.min())), float(vals.max())
+                x_lin = np.linspace(lo, min(x_threshold, hi), 300)
+                x_log = (np.logspace(np.log10(x_threshold), np.log10(hi), 200)
+                         if hi > x_threshold else np.array([]))
+                xs = np.unique(np.concatenate([x_lin, x_log]))
                 kde = gaussian_kde(vals)
                 ys = kde(xs) * len(vals)
-                phase_val = -1 if phase is None else phase
+                phase_val = 'all' if phase is None else phase
                 for x, y in zip(xs, ys):
                     rows.append({
                         'percentile': pct_label,
@@ -386,18 +418,16 @@ def main():
             phase_col = f'Phase / {exp_name}'
             if phase_col not in df.columns:
                 continue
-            phase = df[phase_col]
-            in_delete = phase == 1
-            if not in_delete.any():
-                continue
             color = colors[i % len(colors)]
             shift = i * 3 * px_in_data_h
-            start_h = df.index[in_delete].min()
-            ax.axvline(start_h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
-            post_delete = phase == 2
-            if post_delete.any():
-                end_h = df.index[post_delete].min()
-                ax.axvline(end_h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
+            prev = ''
+            for h, p in df[phase_col].fillna('').items():
+                if p != prev:
+                    if prev:
+                        ax.axvline(h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
+                    if p:
+                        ax.axvline(h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
+                    prev = p
 
         _x_axis(ax, max_elapsed_h)
         fig.tight_layout()
@@ -430,7 +460,7 @@ def main():
 
     def _make_histogram_figure(df):
         pct_order = ['P50', 'P90', 'P99']
-        phases = sorted(df['phase'].unique(), key=lambda p: 999 if p == -1 else p)
+        phases = sorted(df['phase'].unique(), key=lambda p: (0 if p == 'all' else 1, p))
         all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
 
@@ -447,7 +477,7 @@ def main():
             for exp_name, grp in subset.groupby('experiment', sort=False):
                 ax.plot(grp['x'].values, grp['y'].values, color=exp_colors.get(exp_name, 'gray'),
                         linewidth=1.0, label=exp_name)
-            phase_label = 'All data' if phase == -1 else f'Phase {phase}'
+            phase_label = 'All data' if phase == 'all' else phase
             ax.set_title(f'{pct} — {phase_label}', fontsize=12)
             ax.set_xlabel('Latency (ms)', fontsize=11)
             ax.set_ylabel('Samples per ms', fontsize=11)
@@ -474,7 +504,7 @@ def main():
         return fig
 
     # Step 1: Build CSV (source of truth — exact values that will be plotted)
-    if args.histogram:
+    if is_histogram:
         df_csv = _build_histogram_dataframe()
         csv_path = 'locust_latency_histogram.csv'
         df_csv.to_csv(csv_path, index=False)
@@ -486,7 +516,7 @@ def main():
         print(f'Saved: {csv_path} ({len(df_csv)} rows, {len(df_csv.columns)} data columns)')
 
     # Step 2: Load from CSV and plot
-    if args.histogram:
+    if is_histogram:
         df_plot = pd.read_csv(csv_path)
         fig = _make_histogram_figure(df_plot)
         if args.fmt == 'pdf':

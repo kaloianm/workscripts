@@ -437,10 +437,20 @@ def _register_custom_actions(app, environment):
         logger.addHandler(handler)
         return logger
 
-    delete_many_log = _make_action_logger('delete_many', 'locust_results_delete_many.log')
-    fast_bulk_delete_log = _make_action_logger('fast_bulk_delete',
-                                               'locust_results_fast_bulk_delete.log')
-    warm_up_log = _make_action_logger('warm_up', 'locust_results_warm_up.log')
+    phases_log = _make_action_logger('phases', 'locust_results_phases.log')
+    normal_run_ended = [False]
+    post_run_started = [False]
+    auto_execute_timer = [None]
+    phases_log.info('START Normal run')
+
+    def _end_normal_run_if_needed():
+        if not normal_run_ended[0]:
+            phases_log.info('END Normal run')
+            normal_run_ended[0] = True
+
+    def _start_post_run():
+        phases_log.info('START PostRun')
+        post_run_started[0] = True
 
     @app.route('/custom_actions', methods=['GET'])
     def custom_actions():
@@ -484,7 +494,9 @@ def _register_custom_actions(app, environment):
     # ---------------------------------------------------------------------------
 
     def _run_delete_many(coll_name, start_key, cutoff_key, command, on_complete=None):
-        delete_many_log.info(f'START command={command}')
+        _end_normal_run_if_needed()
+        phases_log.info('START delete_many')
+        phases_log.info(f'command={command}')
         try:
             result = collection.database.command(
                 'delete', coll_name, deletes=[{
@@ -496,11 +508,11 @@ def _register_custom_actions(app, environment):
                     },
                     'limit': 0
                 }])
-            delete_many_log.info(f'RESULT {result}')
+            phases_log.info(f'RESULT {result}')
         except Exception as exc:
-            delete_many_log.error(f'FAILED {exc}')
+            phases_log.error(f'FAILED {exc}')
         finally:
-            delete_many_log.info('END')
+            phases_log.info('END delete_many')
             action_lock_holder[0] = None
             action_lock.release()
             if on_complete:
@@ -544,17 +556,19 @@ def _register_custom_actions(app, environment):
     # ---------------------------------------------------------------------------
 
     def _run_fast_bulk_delete(coll_name, start_key, cutoff_key, command, on_complete=None):
-        fast_bulk_delete_log.info(f'START command={command}')
+        _end_normal_run_if_needed()
+        phases_log.info('START fastBulkDelete')
+        phases_log.info(f'command={command}')
         try:
             result = collection.database.command('fastBulkDelete', coll_name,
                                                  filterIndexName='shardKey',
                                                  lowerBound={'shardKey': start_key},
                                                  upperBound={'shardKey': cutoff_key})
-            fast_bulk_delete_log.info(f'RESULT {result}')
+            phases_log.info(f'RESULT {result}')
         except Exception as exc:
-            fast_bulk_delete_log.error(f'FAILED {exc}')
+            phases_log.error(f'FAILED {exc}')
         finally:
-            fast_bulk_delete_log.info('END')
+            phases_log.info('END fastBulkDelete')
             action_lock_holder[0] = None
             action_lock.release()
             if on_complete:
@@ -598,8 +612,9 @@ def _register_custom_actions(app, environment):
     # warm_up - covered index scan over every secondary index
     # ---------------------------------------------------------------------------
 
-    def _run_warm_up(on_complete=None):
-        warm_up_log.info(f'START fields={SECONDARY_INDEX_FIELDS}')
+    def _do_warm_up_work():
+        _end_normal_run_if_needed()
+        phases_log.info('START WarmUp')
         try:
             coll = collection.with_options(read_preference=ReadPreference.SECONDARY_PREFERRED)
             for field in SECONDARY_INDEX_FIELDS:
@@ -608,11 +623,16 @@ def _register_custom_actions(app, environment):
                 # server-side $count over the matched index entries (covered).
                 count = coll.count_documents({}, hint=[(field, 1)])
                 elapsed_s = (perf_counter_ns() - start) / 1e9
-                warm_up_log.info(f'index={field} count={count} elapsed={elapsed_s:.1f}s')
+                phases_log.info(f'index={field} count={count} elapsed={elapsed_s:.1f}s')
         except Exception as exc:
-            warm_up_log.error(f'FAILED {exc}')
+            phases_log.error(f'FAILED {exc}')
         finally:
-            warm_up_log.info('END')
+            phases_log.info('END WarmUp')
+
+    def _run_warm_up(on_complete=None):
+        try:
+            _do_warm_up_work()
+        finally:
             action_lock_holder[0] = None
             action_lock.release()
             if on_complete:
@@ -645,6 +665,7 @@ def _register_custom_actions(app, environment):
         logging.info(f'auto-execute: launching {action_name}')
 
         def _on_complete():
+            _start_post_run()
             logging.info(f'auto-execute: quitting in {_AUTO_EXECUTE_QUIT_DELAY_SECS}s')
             threading.Timer(_AUTO_EXECUTE_QUIT_DELAY_SECS, environment.runner.quit).start()
 
@@ -656,21 +677,35 @@ def _register_custom_actions(app, environment):
         if status != 200:
             logging.error(f'auto-execute {action_name}: failed to start: {data.get("error")}')
 
-    if environment.parsed_options.auto_execute:
+    def _start_auto_execute_timer():
         delay = environment.parsed_options.auto_execute_delay
         logging.info(
             f'Scheduling auto-execute of {environment.parsed_options.auto_execute} in {delay}s')
-        _auto_execute_timer = threading.Timer(delay, _auto_execute_action)
-        _auto_execute_timer.daemon = True
-        _auto_execute_timer.start()
+        t = threading.Timer(delay, _auto_execute_action)
+        t.daemon = True
+        t.start()
+        auto_execute_timer[0] = t
 
-        @events.quitting.add_listener
-        def on_quitting(**_):
-            _auto_execute_timer.cancel()
+    @events.spawning_complete.add_listener
+    def on_spawning_complete(**_):
+        if environment.parsed_options.warm_up:
 
-    if environment.parsed_options.warm_up:
-        logging.info(f'Starting background warm-up scan of secondary indexes: '
-                     f'{SECONDARY_INDEX_FIELDS}')
-        data, status = _warm_up()
-        if status != 200:
-            logging.error(f'warm-up failed to start: {data.get("error")}')
+            def _after_warm_up():
+                if environment.parsed_options.auto_execute:
+                    _start_auto_execute_timer()
+                else:
+                    _start_post_run()
+
+            data, status = _warm_up(on_complete=_after_warm_up)
+            if status != 200:
+                logging.error(f'warm-up failed to start: {data.get("error")}')
+        elif environment.parsed_options.auto_execute:
+            _start_auto_execute_timer()
+
+    @events.quitting.add_listener
+    def on_quitting(**_):
+        _end_normal_run_if_needed()
+        if post_run_started[0]:
+            phases_log.info('END PostRun')
+        if auto_execute_timer[0] is not None:
+            auto_execute_timer[0].cancel()
