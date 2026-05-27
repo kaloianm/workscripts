@@ -66,58 +66,6 @@ Each of the 10 secondary indexes stores a copy of its 120-byte key per document,
 
 ---
 
-## Analyzing experiment results
-
-### [analyze_locust_run](https://github.com/kaloianm/workscripts/blob/master/analyze_locust_run.py)
-
-Reads `<ExperimentName>/experiment_metadata.json` for phase boundaries (`locust_start_unix`, `delete_start_unix`) and `<ExperimentName>/logs/locust/locust_results_stats_history.csv` for per-second latency data collected by Locust.
-
-#### Single-run latency summary
-
-Prints a terminal table and optionally an HTML report with a latency time-series chart. Three phases are analysed: warm-up (from Locust start until 5 minutes before the delete fires), baseline (the last 5 minutes before the delete), and during-delete. The primary signal is the % change in P50 from baseline to during-delete.
-
-> **P99 caveat:** Locust reports *cumulative* percentiles since launch, not rolling. P99 can appear to improve during the delete (growing denominator). P50 is the most reliable degradation signal.
-
-```bash
-python3 analyze_locust_run.py DeleteMany1TB-String
-python3 analyze_locust_run.py DeleteMany1TB-String --output-html report.html
-
-# Override phase boundaries if experiment_metadata.json is missing
-python3 analyze_locust_run.py OldRun --locust-start-unix 1234567890 --delete-start-unix 1234571490
-
-# Point at a live CSV (e.g. while the experiment is still running)
-python3 analyze_locust_run.py MyRun --csv path/to/locust_results_stats_history.csv
-```
-
-#### Multi-run Locust latency comparison (`--compare-locust-latencies`)
-
-Generates `comparison_locust.png`: a three-panel (P50 / P90 / P99) time-series plot with 15-minute max buckets, log Y scale, and time normalised so all runs start at t = 0. The red dashed vertical line marks t = 1 h (when the delete fires). Runs that have already completed are drawn solid up to the completion marker and dotted after it.
-
-```bash
-python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
-    --compare-locust-latencies
-```
-
-#### Multi-run FTDC cache metrics comparison (`--compare-ftdc`)
-
-Generates `comparison_ftdc.png`: a three-panel plot of the most discriminating server-level WiredTiger cache metrics (dirty bytes, pages read from disk/s, app-thread eviction pressure, etc.) over the first 24 hours of each run. Uses the same time-normalised and completion-marker style as the Locust plot.
-
-Requires `llm-ftdc-analysis` to be installed at `~/workspace/llm-ftdc-analysis/`. Only the FTDC metric files that fall within the requested time window are read, keeping peak memory well below the full-archive size.
-
-```bash
-python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
-    --compare-ftdc
-
-# Extend or shorten the FTDC window (default 24 h)
-python3 analyze_locust_run.py ... --compare-ftdc --ftdc-hours 48
-
-# Both plots in one invocation
-python3 analyze_locust_run.py DeleteMany1TB-String DeleteMany1TB-String-ReadOnce FastBulkDelete1TB-String \
-    --compare-locust-latencies --compare-ftdc
-```
-
----
-
 ## LVM thin-pool volume for COW snapshot experiments
 
 The data volume on each EC2 instance is provisioned as an **LVM thin-pool** on the attached EBS

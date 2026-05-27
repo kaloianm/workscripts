@@ -413,21 +413,17 @@ def main():
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
 
         max_elapsed_h = df.index.max()
-        px_in_data_h = max_elapsed_h / (16 * 150)
+        end_marker_y = np.linspace(0.04, 0.96, 14)
         for i, exp_name in enumerate(exp_names):
-            phase_col = f'Phase / {exp_name}'
-            if phase_col not in df.columns:
-                continue
+            phases = experiment_phases.get(exp_name, [])
             color = colors[i % len(colors)]
-            shift = i * 3 * px_in_data_h
-            prev = ''
-            for h, p in df[phase_col].fillna('').items():
-                if p != prev:
-                    if prev:
-                        ax.axvline(h + shift, color=color, linestyle=':', linewidth=1.2, alpha=0.8)
-                    if p:
-                        ax.axvline(h + shift, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
-                    prev = p
+            for _, start_h, end_h in phases:
+                ax.axvline(start_h, color=color, linestyle='--', linewidth=1.2, alpha=0.8)
+                if end_h is not None:
+                    ax.plot([end_h] * len(end_marker_y), end_marker_y, color=color,
+                            linestyle='None', marker='+', markersize=5,
+                            markeredgewidth=1.2, alpha=0.9,
+                            transform=ax.get_xaxis_transform())
 
         _x_axis(ax, max_elapsed_h)
         fig.tight_layout()
