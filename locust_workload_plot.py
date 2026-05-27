@@ -467,7 +467,9 @@ def main():
 
     def _make_histogram_figure(df):
         pct_order = ['P50', 'P99']
-        phases = sorted(df['phase'].unique(), key=lambda p: (0 if p == 'all' else 1, p))
+        phase_order = ['RecordStore', 'Indexes', 'PostRun']
+        phases = sorted(df['phase'].unique(),
+                        key=lambda p: (phase_order.index(p) if p in phase_order else len(phase_order), p))
         all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
 
