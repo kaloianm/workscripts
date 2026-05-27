@@ -493,7 +493,8 @@ def main():
             ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
             ax.set_xlim(left=0)
             ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
-            ax.set_ylim(bottom=0)
+            ax.set_yscale('log')
+            ax.set_ylim(bottom=0.9)
             ax.legend(fontsize=8)
 
         fig.canvas.draw()
