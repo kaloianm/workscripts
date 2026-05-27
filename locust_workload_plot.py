@@ -336,7 +336,7 @@ def main():
         long-format DataFrame with columns [percentile, phase, experiment, bin_left, bin_right,
         count].  phase='all' means no phase info (all data combined).
         """
-        percentiles = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
+        percentiles = [('50%', 'P50'), ('99%', 'P99')]
 
         groups = []
         for exp_name, df_raw in experiments_raw.items():
@@ -355,6 +355,8 @@ def main():
                     if not subset.empty:
                         phase_subsets.setdefault(pname, []).append(subset)
                 for pname, subsets in phase_subsets.items():
+                    if pname.lower() == 'warmup':
+                        continue
                     combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
                     groups.append((combined, exp_name, pname))
 
@@ -464,7 +466,7 @@ def main():
         return fig
 
     def _make_histogram_figure(df):
-        pct_order = ['P50', 'P90', 'P99']
+        pct_order = ['P50', 'P99']
         phases = sorted(df['phase'].unique(), key=lambda p: (0 if p == 'all' else 1, p))
         all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
