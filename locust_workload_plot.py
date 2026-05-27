@@ -506,7 +506,6 @@ def main():
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
 
-        fig.suptitle(f'Latency Histograms by Phase — {args.request_name}', fontsize=13)
         fig.tight_layout()
         return fig
 
