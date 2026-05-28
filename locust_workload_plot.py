@@ -24,7 +24,7 @@
 #     locust_latency.pdf           — all charts as separate pages (PDF only)
 #     locust_latency_p50.<fmt>     — one file per percentile (non-PDF formats)
 #
-#     locust_latency_histogram.csv — pre-computed KDE curves for histogram charts
+#     locust_latency_histogram.csv — pre-computed histogram bins for histogram charts
 #     locust_latency_histogram.pdf — histogram charts (--histogram mode)
 #
 # Examples:
@@ -39,7 +39,6 @@ import sys
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
-from scipy.stats import gaussian_kde
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
@@ -333,12 +332,11 @@ def main():
         return df
 
     def _build_histogram_dataframe():
-        """Compute KDE curves for each (percentile, phase, experiment) and return as long-format
-        DataFrame with columns [percentile, phase, experiment, x, y].
-
-        phase=-1 means no phase info (all data combined). x/y are the exact values plotted.
+        """Compute histogram bins for each (percentile, phase, experiment) and return as
+        long-format DataFrame with columns [percentile, phase, experiment, bin_left, bin_right,
+        count].  phase='all' means no phase info (all data combined).
         """
-        percentiles = [('50%', 'P50'), ('90%', 'P90'), ('99%', 'P99')]
+        percentiles = [('50%', 'P50'), ('99%', 'P99')]
 
         groups = []
         for exp_name, df_raw in experiments_raw.items():
@@ -361,31 +359,38 @@ def main():
                     groups.append((combined, exp_name, pname))
 
         x_threshold = 500
+        n_lin, n_log = 50, 30
 
         rows = []
         for col, pct_label in percentiles:
             for subset, exp_name, phase in groups:
                 vals = subset[col].dropna()
-                if vals.nunique() < 2:
+                if vals.empty:
                     continue
                 lo, hi = max(0.0, float(vals.min())), float(vals.max())
-                x_lin = np.linspace(lo, min(x_threshold, hi), 300)
-                x_log = (np.logspace(np.log10(x_threshold), np.log10(hi), 200)
-                         if hi > x_threshold else np.array([]))
-                xs = np.unique(np.concatenate([x_lin, x_log]))
-                kde = gaussian_kde(vals)
-                ys = kde(xs) * len(vals)
+                if lo >= hi:
+                    continue
+                edges_lin = np.linspace(lo, min(x_threshold, hi), n_lin + 1)
+                if hi > x_threshold:
+                    edges_log = np.logspace(np.log10(x_threshold), np.log10(hi), n_log + 1)[1:]
+                    bin_edges = np.concatenate([edges_lin, edges_log])
+                else:
+                    bin_edges = edges_lin
+                counts, bin_edges = np.histogram(vals, bins=bin_edges)
                 phase_val = 'all' if phase is None else phase
-                for x, y in zip(xs, ys):
+                for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
                     rows.append({
                         'percentile': pct_label,
                         'phase': phase_val,
                         'experiment': exp_name,
-                        'x': x,
-                        'y': y,
+                        'bin_left': left,
+                        'bin_right': right,
+                        'count': count,
                     })
 
-        return pd.DataFrame(rows, columns=['percentile', 'phase', 'experiment', 'x', 'y'])
+        return pd.DataFrame(rows,
+                            columns=['percentile', 'phase', 'experiment', 'bin_left', 'bin_right',
+                                     'count'])
 
     def _make_latency_figure(label, df):
         exp_names = [c.split(' / ', 1)[1] for c in df.columns if c.startswith(f'{label} /')]
@@ -455,8 +460,10 @@ def main():
         return fig
 
     def _make_histogram_figure(df):
-        pct_order = ['P50', 'P90', 'P99']
-        phases = sorted(df['phase'].unique(), key=lambda p: (0 if p == 'all' else 1, p))
+        pct_order = ['P50', 'P99']
+        phase_order = ['RecordStore', 'Indexes', 'PostRun']
+        phases = sorted(df['phase'].unique(),
+                        key=lambda p: (phase_order.index(p) if p in phase_order else len(phase_order), p))
         all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
 
@@ -466,24 +473,24 @@ def main():
         axes = np.array(axes).reshape(n_subplots)
 
         x_threshold = 500
-        y_threshold = 500
 
         for ax, (pct, phase) in zip(axes, subplot_order):
             subset = df[(df['percentile'] == pct) & (df['phase'] == phase)]
             for exp_name, grp in subset.groupby('experiment', sort=False):
-                ax.plot(grp['x'].values, grp['y'].values, color=exp_colors.get(exp_name, 'gray'),
-                        linewidth=1.0, label=exp_name)
+                edges = np.append(grp['bin_left'].values, grp['bin_right'].values[-1])
+                ax.stairs(grp['count'].values, edges,
+                          color=exp_colors.get(exp_name, 'gray'),
+                          linewidth=1.2, label=exp_name)
             phase_label = 'All data' if phase == 'all' else phase
             ax.set_title(f'{pct} — {phase_label}', fontsize=12)
             ax.set_xlabel('Latency (ms)', fontsize=11)
-            ax.set_ylabel('Samples per ms', fontsize=11)
+            ax.set_ylabel('Count', fontsize=11)
             ax.grid(True, alpha=0.3)
             ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
             ax.set_xlim(left=0)
             ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
-            ax.set_yscale('symlog', linthresh=y_threshold, linscale=1)
-            ax.set_ylim(bottom=0)
-            ax.axhline(y_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+            ax.set_yscale('log')
+            ax.set_ylim(bottom=0.9)
             ax.legend(fontsize=8)
 
         fig.canvas.draw()
@@ -491,11 +498,8 @@ def main():
             xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
             ax.xaxis.set_major_locator(FixedLocator(xticks))
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
-            yticks = sorted(set(t for t in ax.get_yticks() if t >= 0) | {float(y_threshold)})
-            ax.yaxis.set_major_locator(FixedLocator(yticks))
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
 
-        fig.suptitle(f'Latency Histograms by Phase — {args.request_name}', fontsize=13)
         fig.tight_layout()
         return fig
 
