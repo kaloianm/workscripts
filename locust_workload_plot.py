@@ -355,8 +355,6 @@ def main():
                     if not subset.empty:
                         phase_subsets.setdefault(pname, []).append(subset)
                 for pname, subsets in phase_subsets.items():
-                    if pname.lower() == 'warmup':
-                        continue
                     combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
                     groups.append((combined, exp_name, pname))
 
