@@ -377,6 +377,8 @@ def main():
                 for pname, s, e in phases:
                     if pname == 'WarmUp':
                         continue  # never gets its own subplot
+                    if warmup_raw is not None and pname == 'Normal run':
+                        continue  # baseline overlay already represents the Normal run data
                     s_min = s * 60
                     e_min = e * 60 if e is not None else None
                     mask = df_raw['elapsed_min'] >= s_min
