@@ -387,9 +387,12 @@ def main():
                     subset = df_raw[mask]
                     if not subset.empty:
                         phase_subsets.setdefault(pname, []).append(subset)
+                _delete_phase_suffix = {'RecordStore': '-recordStore', 'Indexes': '-indexes'}
                 for pname, subsets in phase_subsets.items():
                     combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
-                    groups.append((combined, exp_name, pname))
+                    plot_phase = 'Delete' if pname in _delete_phase_suffix else pname
+                    plot_exp = exp_name + _delete_phase_suffix.get(pname, '')
+                    groups.append((combined, plot_exp, plot_phase))
 
         x_threshold = 500
         n_lin, n_log = 50, 30
@@ -524,7 +527,7 @@ def main():
 
     def _make_histogram_figure(df):
         pct_order = ['P50', 'P99']
-        phase_order = ['RecordStore', 'Indexes', 'PostRun']
+        phase_order = ['Delete', 'PostRun']
         phases = sorted(df['phase'].unique(),
                         key=lambda p: (phase_order.index(p) if p in phase_order else len(phase_order), p))
         all_exp_names = [n for n in dict.fromkeys(df['experiment']) if n != 'baseline']
