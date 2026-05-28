@@ -305,7 +305,7 @@ def main():
     def _x_axis(ax, max_elapsed_h):
         bucket_h = args.bucket_minutes / 60
         major_h = max(bucket_h, round(max_elapsed_h / 10 / bucket_h + 0.5) * bucket_h)
-        ax.set_xlim(left=0)
+        ax.set_xlim(left=0, right=max_elapsed_h)
         ax.xaxis.set_major_locator(plt.MultipleLocator(major_h))
         ax.xaxis.set_minor_locator(plt.MultipleLocator(bucket_h))
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:g}h'))
@@ -439,7 +439,7 @@ def main():
                             columns=['percentile', 'phase', 'experiment', 'bin_left', 'bin_right',
                                      'count'])
 
-    def _make_latency_figure(label, df):
+    def _make_latency_figure(label, df, y_max=None):
         exp_names = [c.split(' / ', 1)[1] for c in df.columns if c.startswith(f'{label} /')]
 
         fig, ax = plt.subplots(figsize=(16, 6))
@@ -456,7 +456,7 @@ def main():
 
         linear_threshold = 250
         ax.set_yscale('symlog', linthresh=linear_threshold, linscale=1)
-        ax.set_ylim(bottom=0)
+        ax.set_ylim(bottom=0, top=y_max)
         ax.axhline(linear_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
 
         fig.canvas.draw()
@@ -553,6 +553,13 @@ def main():
             ax.legend(fontsize=8)
 
         fig.canvas.draw()
+        global_xmax = max(ax.get_xlim()[1] for ax in axes)
+        global_ymax = max(ax.get_ylim()[1] for ax in axes)
+        for ax in axes:
+            ax.set_xlim(right=global_xmax)
+            ax.set_ylim(top=global_ymax)
+
+        fig.canvas.draw()
         for ax in axes:
             xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
             ax.xaxis.set_major_locator(FixedLocator(xticks))
@@ -603,11 +610,14 @@ def main():
             ftdc_prefixes.append(parts[0])
             seen_prefixes.add(parts[0])
 
+    lat_cols = [c for c in df_plot.columns if any(c.startswith(f'{lbl} /') for _, lbl in metrics)]
+    global_lat_ymax = float(df_plot[lat_cols].max().max()) if lat_cols else None
+
     if args.fmt == 'pdf':
         out_path = 'locust_latency.pdf'
         with PdfPages(out_path) as pdf:
             for _, label in metrics:
-                fig = _make_latency_figure(label, df_plot)
+                fig = _make_latency_figure(label, df_plot, y_max=global_lat_ymax)
                 pdf.savefig(fig, dpi=150)
                 plt.close(fig)
             for metric_prefix in ftdc_prefixes:
@@ -617,7 +627,7 @@ def main():
         print(f'Saved: {out_path}')
     else:
         for _, label in metrics:
-            fig = _make_latency_figure(label, df_plot)
+            fig = _make_latency_figure(label, df_plot, y_max=global_lat_ymax)
             out_path = f'locust_latency_{label.lower()}.{args.fmt}'
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
