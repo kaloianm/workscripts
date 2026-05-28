@@ -396,6 +396,7 @@ def main():
                 else:
                     bin_edges = edges_lin
                 counts, bin_edges = np.histogram(vals, bins=bin_edges)
+                n_total = len(vals)
                 phase_val = 'all' if phase is None else phase
                 for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
                     rows.append({
@@ -404,7 +405,7 @@ def main():
                         'experiment': exp_name,
                         'bin_left': left,
                         'bin_right': right,
-                        'count': count,
+                        'count': count / n_total,
                     })
 
         # Inject baseline (warmup) bins into every phase subplot
@@ -424,6 +425,7 @@ def main():
                 else:
                     bin_edges = edges_lin
                 counts, bin_edges = np.histogram(vals, bins=bin_edges)
+                n_total = len(vals)
                 for phase_val in all_phases:
                     for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
                         rows.append({
@@ -432,7 +434,7 @@ def main():
                             'experiment': 'baseline',
                             'bin_left': left,
                             'bin_right': right,
-                            'count': count,
+                            'count': count / n_total,
                         })
 
         return pd.DataFrame(rows,
@@ -539,13 +541,13 @@ def main():
             phase_label = 'All data' if phase == 'all' else phase
             ax.set_title(f'{pct} — {phase_label}', fontsize=12)
             ax.set_xlabel('Latency (ms)', fontsize=11)
-            ax.set_ylabel('Count', fontsize=11)
+            ax.set_ylabel('Fraction of samples', fontsize=11)
             ax.grid(True, alpha=0.3)
             ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
             ax.set_xlim(left=0)
             ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
             ax.set_yscale('log')
-            ax.set_ylim(bottom=0.9)
+            ax.set_ylim(bottom=1e-6)
             ax.legend(fontsize=8)
 
         fig.canvas.draw()
@@ -560,7 +562,7 @@ def main():
             xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
             ax.xaxis.set_major_locator(FixedLocator(xticks))
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.4g}'))
 
         fig.tight_layout()
         return fig
