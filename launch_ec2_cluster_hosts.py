@@ -186,7 +186,7 @@ if __name__ == "__main__":
         help='Path to a JSON file with EC2 instance parameters (e.g. Atlas-M60.json).')
     parser_launch.add_argument('--shard-repl-set-nodes',
                                help='Number of nodes to use for the shard replica sets.', type=int,
-                               default=3)
+                               default=1)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
     parser_launch.add_argument(

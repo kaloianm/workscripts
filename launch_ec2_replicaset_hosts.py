@@ -149,7 +149,7 @@ if __name__ == "__main__":
     parser_launch.add_argument(
         '--template', required=True,
         help='Path to a JSON file with EC2 instance parameters (e.g. Atlas-M60.json).')
-    parser_launch.add_argument('--nodes', help='Number of nodes in the replica set.', required=True,
+    parser_launch.add_argument('--nodes', help='Number of nodes in the replica set.', default=1,
                                type=int)
     parser_launch.add_argument('--filesystem', choices=['xfs', 'ext4'],
                                help='Filesystem to use for the data volume.', default='xfs')
