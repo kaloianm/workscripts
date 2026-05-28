@@ -248,12 +248,14 @@ def main():
     warmup_dir = getattr(args, 'warmup', None)
     warmup_dir_norm = os.path.normpath(warmup_dir) if warmup_dir else None
 
+    exp_dirs = list(args.experiments)
+    if warmup_dir_norm and not any(os.path.normpath(d) == warmup_dir_norm for d in exp_dirs):
+        exp_dirs.insert(0, warmup_dir)
+
     experiments = {}
     experiments_raw = {}
     experiment_t0s = {}
-    for exp_dir in args.experiments:
-        if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
-            continue  # loaded separately as baseline
+    for exp_dir in exp_dirs:
         name = os.path.basename(exp_dir.rstrip('/\\'))
         print(f'Loading {name} ...')
         df, t0 = load_experiment(exp_dir, args.request_name)
@@ -272,8 +274,6 @@ def main():
     ftdc_by_exp = {}
     if ftdc_substrings:
         for exp_dir in args.experiments:
-            if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
-                continue
             name = os.path.basename(exp_dir.rstrip('/\\'))
             print(f'Loading FTDC for {name} ...')
             try:
@@ -286,8 +286,6 @@ def main():
     # Parse phase start/end times from operation logs
     experiment_phases = {}
     for exp_dir in args.experiments:
-        if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
-            continue
         name = os.path.basename(exp_dir.rstrip('/\\'))
         t0 = experiment_t0s[name]
         experiment_phases[name] = [(pname, (s - t0) / 3600.0,
