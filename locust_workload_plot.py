@@ -231,8 +231,10 @@ def main():
     compare_p.add_argument('--ftdc-workers', type=int, default=4, metavar='N',
                            help='Parallel workers for FTDC decoding (default: 4)')
 
-    subparsers.add_parser('histogram', parents=[common],
-                          help='Plot latency distributions grouped by phase')
+    hist_p = subparsers.add_parser('histogram', parents=[common],
+                                   help='Plot latency distributions grouped by phase')
+    hist_p.add_argument('--warmup', metavar='DIR', default=None,
+                        help='Experiment dir whose data is overlaid on all subplots as "baseline"')
 
     args = parser.parse_args()
     is_histogram = args.mode == 'histogram'
@@ -243,10 +245,15 @@ def main():
         ftdc_substrings = [s.strip() for s in args.ftdc.split(',')] if args.ftdc else []
         ftdc_mod = _import_ftdc_tools() if ftdc_substrings else None
 
+    warmup_dir = getattr(args, 'warmup', None)
+    warmup_dir_norm = os.path.normpath(warmup_dir) if warmup_dir else None
+
     experiments = {}
     experiments_raw = {}
     experiment_t0s = {}
     for exp_dir in args.experiments:
+        if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
+            continue  # loaded separately as baseline
         name = os.path.basename(exp_dir.rstrip('/\\'))
         print(f'Loading {name} ...')
         df, t0 = load_experiment(exp_dir, args.request_name)
@@ -255,10 +262,18 @@ def main():
             experiments[name] = bucket_data(df, args.bucket_minutes)
         experiment_t0s[name] = t0
 
+    warmup_raw = None
+    if warmup_dir:
+        wname = os.path.basename(warmup_dir.rstrip('/\\'))
+        print(f'Loading warmup baseline from {wname} ...')
+        warmup_raw, _ = load_experiment(warmup_dir, args.request_name)
+
     # Load FTDC data per experiment: {exp_name: {metric_key: {...}}}
     ftdc_by_exp = {}
     if ftdc_substrings:
         for exp_dir in args.experiments:
+            if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
+                continue
             name = os.path.basename(exp_dir.rstrip('/\\'))
             print(f'Loading FTDC for {name} ...')
             try:
@@ -271,6 +286,8 @@ def main():
     # Parse phase start/end times from operation logs
     experiment_phases = {}
     for exp_dir in args.experiments:
+        if warmup_dir_norm and os.path.normpath(exp_dir) == warmup_dir_norm:
+            continue
         name = os.path.basename(exp_dir.rstrip('/\\'))
         t0 = experiment_t0s[name]
         experiment_phases[name] = [(pname, (s - t0) / 3600.0,
@@ -331,7 +348,7 @@ def main():
         df = pd.concat([pd.DataFrame(phase_cols, index=df.index), df], axis=1)
         return df
 
-    def _build_histogram_dataframe():
+    def _build_histogram_dataframe(warmup_raw=None):
         """Compute histogram bins for each (percentile, phase, experiment) and return as
         long-format DataFrame with columns [percentile, phase, experiment, bin_left, bin_right,
         count].  phase='all' means no phase info (all data combined).
@@ -346,6 +363,8 @@ def main():
             else:
                 phase_subsets: dict[str, list] = {}
                 for pname, s, e in phases:
+                    if pname == 'WarmUp':
+                        continue  # never gets its own subplot
                     s_min = s * 60
                     e_min = e * 60 if e is not None else None
                     mask = df_raw['elapsed_min'] >= s_min
@@ -387,6 +406,34 @@ def main():
                         'bin_right': right,
                         'count': count,
                     })
+
+        # Inject baseline (warmup) bins into every phase subplot
+        if warmup_raw is not None:
+            all_phases = sorted(set(g[2] if g[2] is not None else 'all' for g in groups))
+            for col, pct_label in percentiles:
+                vals = warmup_raw[col].dropna()
+                if vals.empty:
+                    continue
+                lo, hi = max(0.0, float(vals.min())), float(vals.max())
+                if lo >= hi:
+                    continue
+                edges_lin = np.linspace(lo, min(x_threshold, hi), n_lin + 1)
+                if hi > x_threshold:
+                    edges_log = np.logspace(np.log10(x_threshold), np.log10(hi), n_log + 1)[1:]
+                    bin_edges = np.concatenate([edges_lin, edges_log])
+                else:
+                    bin_edges = edges_lin
+                counts, bin_edges = np.histogram(vals, bins=bin_edges)
+                for phase_val in all_phases:
+                    for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
+                        rows.append({
+                            'percentile': pct_label,
+                            'phase': phase_val,
+                            'experiment': 'baseline',
+                            'bin_left': left,
+                            'bin_right': right,
+                            'count': count,
+                        })
 
         return pd.DataFrame(rows,
                             columns=['percentile', 'phase', 'experiment', 'bin_left', 'bin_right',
@@ -468,7 +515,7 @@ def main():
         phase_order = ['RecordStore', 'Indexes', 'PostRun']
         phases = sorted(df['phase'].unique(),
                         key=lambda p: (phase_order.index(p) if p in phase_order else len(phase_order), p))
-        all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
+        all_exp_names = [n for n in dict.fromkeys(df['experiment']) if n != 'baseline']
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
 
         subplot_order = [(pct, phase) for pct in pct_order for phase in phases]
@@ -480,11 +527,19 @@ def main():
 
         for ax, (pct, phase) in zip(axes, subplot_order):
             subset = df[(df['percentile'] == pct) & (df['phase'] == phase)]
-            for exp_name, grp in subset.groupby('experiment', sort=False):
+            baseline_grp = subset[subset['experiment'] == 'baseline']
+            main_grp = subset[subset['experiment'] != 'baseline']
+            for exp_name, grp in main_grp.groupby('experiment', sort=False):
                 edges = np.append(grp['bin_left'].values, grp['bin_right'].values[-1])
                 ax.stairs(grp['count'].values, edges,
                           color=exp_colors.get(exp_name, 'gray'),
                           linewidth=1.2, label=exp_name)
+            if not baseline_grp.empty:
+                edges = np.append(baseline_grp['bin_left'].values,
+                                  baseline_grp['bin_right'].values[-1])
+                ax.stairs(baseline_grp['count'].values, edges,
+                          color='gray', linewidth=1.5, linestyle='--', alpha=0.7,
+                          label='baseline')
             phase_label = 'All data' if phase == 'all' else phase
             ax.set_title(f'{pct} — {phase_label}', fontsize=12)
             ax.set_xlabel('Latency (ms)', fontsize=11)
@@ -509,7 +564,7 @@ def main():
 
     # Step 1: Build CSV (source of truth — exact values that will be plotted)
     if is_histogram:
-        df_csv = _build_histogram_dataframe()
+        df_csv = _build_histogram_dataframe(warmup_raw=warmup_raw)
         csv_path = 'locust_latency_histogram.csv'
         df_csv.to_csv(csv_path, index=False)
         print(f'Saved: {csv_path} ({len(df_csv)} rows)')
