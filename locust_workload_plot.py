@@ -268,7 +268,21 @@ def main():
     if warmup_dir:
         wname = os.path.basename(warmup_dir.rstrip('/\\'))
         print(f'Loading warmup baseline from {wname} ...')
-        warmup_raw, _ = load_experiment(warmup_dir, args.request_name)
+        warmup_raw, warmup_t0 = load_experiment(warmup_dir, args.request_name)
+        warmup_phases = parse_phases_log(warmup_dir)
+        target_phase = next((p for p in warmup_phases if p[0] == 'WarmUp'), None)
+        if target_phase is None:
+            target_phase = next((p for p in warmup_phases if p[0] == 'Normal run'), None)
+        if target_phase is not None:
+            pname_w, s_w, e_w = target_phase
+            s_min = (s_w - warmup_t0) / 60.0
+            e_min = (e_w - warmup_t0) / 60.0 if e_w is not None else None
+            mask = warmup_raw['elapsed_min'] >= s_min
+            if e_min is not None:
+                mask &= warmup_raw['elapsed_min'] <= e_min
+            warmup_raw = warmup_raw[mask]
+            if warmup_raw.empty:
+                print(f'  Warning: warmup phase "{pname_w}" yielded no data rows', file=sys.stderr)
 
     # Load FTDC data per experiment: {exp_name: {metric_key: {...}}}
     ftdc_by_exp = {}
