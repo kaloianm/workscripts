@@ -86,7 +86,7 @@ def main_launch(args, ec2):
         ec2,
         template,
         tag_specs=make_instance_tag_specifications(args.clustertag, 'rs', args.user),
-        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
+        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem, 'rs',
                                                   skip_format=bool(use_volume_copy)),
         count=args.nodes,
     )

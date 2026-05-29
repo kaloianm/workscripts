@@ -86,10 +86,13 @@ def make_client_driver_host_configuration(clustertag):
 ###################################################################################################
 echo "Configuring driver host workscripts for {clustertag}"
 ###################################################################################################
+
+echo "Setting hostname to {clustertag}-driver ..."
+sudo hostnamectl set-hostname "{clustertag}-driver"
 '''
 
 
-def make_cluster_host_configuration(clustertag, filesystem, skip_format=False):
+def make_cluster_host_configuration(clustertag, filesystem, repl_set_name, skip_format=False):
     data_device = '/dev/datavg/data'
     if skip_format:
         setup_script = f'''
@@ -119,6 +122,9 @@ sudo mkfs -t {filesystem} {data_device}
 ###################################################################################################
 echo "Configuring shard host volumes for {clustertag}"
 ###################################################################################################
+
+echo "Setting hostname to {clustertag}-server-{repl_set_name} ..."
+sudo hostnamectl set-hostname "{clustertag}-server-{repl_set_name}"
 
 echo "Waiting for volume to be attached ..."
 while [ ! -e "/dev/nvme1n1" ]; do sleep 1; done

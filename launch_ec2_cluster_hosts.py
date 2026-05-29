@@ -103,7 +103,7 @@ def main_launch(args, ec2):
         ec2,
         template,
         tag_specs=make_instance_tag_specifications(args.clustertag, 'config', args.user),
-        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
+        user_data=make_cluster_host_configuration(args.clustertag, args.filesystem, 'config',
                                                   skip_format=skip_format),
         count=3,
     )
@@ -115,7 +115,7 @@ def main_launch(args, ec2):
             ec2,
             template,
             tag_specs=make_instance_tag_specifications(args.clustertag, shard_id, args.user),
-            user_data=make_cluster_host_configuration(args.clustertag, args.filesystem,
+            user_data=make_cluster_host_configuration(args.clustertag, args.filesystem, shard_id,
                                                       skip_format=skip_format),
             count=args.shard_repl_set_nodes,
         )
