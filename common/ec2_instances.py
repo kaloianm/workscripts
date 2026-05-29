@@ -35,6 +35,8 @@ sudo -u ubuntu -i bash -c 'echo "less /var/log/cloud-init-output.log" >> $HOME/.
 sudo -u ubuntu -i bash -c 'echo "source python3-venv/bin/activate" >> $HOME/.bash_history'
 sudo -u ubuntu -i bash -c 'echo "iostat -s 1 --human nvme1n1" >> $HOME/.bash_history'
 sudo -u ubuntu -i bash -c 'echo "dstat -cdnmgy" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "aws s3 sync /mnt/data/mongod s3://kaloian.manassiev-579766882180-us-east-1-an/mongod/" >> $HOME/.bash_history'
+sudo -u ubuntu -i bash -c 'echo "aws s3 sync s3://kaloian.manassiev-579766882180-us-east-1-an/mongod/ /mnt/data/mongod" >> $HOME/.bash_history'
 
 ###################################################################################################
 echo "Configuring required packages ..."
