@@ -584,12 +584,55 @@ def main():
         fig.tight_layout()
         return fig
 
+    def _print_phase_summary():
+        rows = []
+        for exp_name, df_raw in experiments_raw.items():
+            phases = experiment_phases.get(exp_name, [])
+            if not phases:
+                rows.append((exp_name, 'all', df_raw))
+            else:
+                phase_subsets: dict[str, list] = {}
+                for pname, s, e in phases:
+                    if pname == 'WarmUp':
+                        continue
+                    if warmup_raw is not None and pname == 'Normal run':
+                        continue
+                    s_min = s * 60
+                    e_min = e * 60 if e is not None else None
+                    mask = df_raw['elapsed_min'] >= s_min
+                    if e_min is not None:
+                        mask &= df_raw['elapsed_min'] <= e_min
+                    subset = df_raw[mask]
+                    if not subset.empty:
+                        phase_subsets.setdefault(pname, []).append(subset)
+                _delete_phase_suffix = {'RecordStore': '-recordStore', 'Indexes': '-indexes'}
+                for pname, subsets in phase_subsets.items():
+                    combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
+                    plot_phase = 'Delete' if pname in _delete_phase_suffix else pname
+                    plot_exp = exp_name + _delete_phase_suffix.get(pname, '')
+                    rows.append((plot_exp, plot_phase, combined))
+        if warmup_raw is not None:
+            rows.append(('baseline', 'WarmUp/Normal', warmup_raw))
+        if not rows:
+            return
+        col_w = max(max(len(r[0]) for r in rows), 3)
+        phase_w = max(max(len(r[1]) for r in rows), 5)
+        print()
+        print(f"{'Run':<{col_w}}  {'Phase':<{phase_w}}  {'P50 (ms)':>10}  {'P99 (ms)':>10}")
+        print('-' * (col_w + phase_w + 28))
+        for exp_name, phase, subset in rows:
+            p50 = subset['50%'].median()
+            p99 = subset['99%'].median()
+            print(f"{exp_name:<{col_w}}  {phase:<{phase_w}}  {p50:>10.0f}  {p99:>10.0f}")
+        print()
+
     # Step 1: Build CSV (source of truth — exact values that will be plotted)
     if is_histogram:
         df_csv = _build_histogram_dataframe(warmup_raw=warmup_raw)
         csv_path = 'locust_latency_histogram.csv'
         df_csv.to_csv(csv_path, index=False)
         print(f'Saved: {csv_path} ({len(df_csv)} rows)')
+        _print_phase_summary()
     else:
         df_csv = _build_timeseries_dataframe()
         csv_path = 'locust_latency.csv'
