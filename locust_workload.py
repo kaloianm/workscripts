@@ -211,6 +211,9 @@ def on_locust_init(environment, **kwargs):
     logging.info(f'Secondary key length: {SECONDARY_KEY_LENGTH}')
     logging.info(f'Avg document size: {AVG_DOC_BYTES} bytes')
     logging.info(f'Secondary index fields: {SECONDARY_INDEX_FIELDS}')
+    if environment.parsed_options.auto_execute:
+        logging.info(f'Auto-execute action: {environment.parsed_options.auto_execute}')
+        logging.info(f'Auto-execute delay: {environment.parsed_options.auto_execute_delay}s')
 
     global collection
     mongo_client = MongoClient(connection_string, connectTimeoutMS=30000, maxPoolSize=150)
