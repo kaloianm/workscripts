@@ -287,6 +287,26 @@ def terminate_cluster_resources(ec2, clustertag, user):
             instance_ids.append(instance['InstanceId'])
 
     if instance_ids:
+        # terminate_instances triggers a graceful ACPI/OS shutdown, which can be slow. To get an
+        # immediate hard power-off we force-stop the instances first (skips the OS shutdown) and
+        # then terminate them from the stopped state. Only running instances can be force-stopped;
+        # already-stopped instances are terminated directly.
+        running_filter = tag_filter + [{'Name': 'instance-state-name', 'Values': ['running']}]
+        running_response = ec2.describe_instances(Filters=running_filter)
+        running_instance_ids = [
+            instance['InstanceId'] for reservation in running_response['Reservations']
+            for instance in reservation['Instances']
+        ]
+
+        if running_instance_ids:
+            logging.info(
+                f'Force-stopping {len(running_instance_ids)} instance(s) to skip OS shutdown: '
+                f'{running_instance_ids}')
+            ec2.stop_instances(InstanceIds=running_instance_ids, Force=True)
+
+            logging.info('Waiting for instances to stop ...')
+            ec2.get_waiter('instance_stopped').wait(InstanceIds=running_instance_ids)
+
         logging.info(f'Terminating {len(instance_ids)} instance(s): {instance_ids}')
         ec2.terminate_instances(InstanceIds=instance_ids)
 
