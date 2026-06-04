@@ -231,8 +231,10 @@ def main():
     compare_p.add_argument('--ftdc-workers', type=int, default=4, metavar='N',
                            help='Parallel workers for FTDC decoding (default: 4)')
 
-    subparsers.add_parser('histogram', parents=[common],
-                          help='Plot latency distributions grouped by phase')
+    hist_p = subparsers.add_parser('histogram', parents=[common],
+                                   help='Plot latency distributions grouped by phase')
+    hist_p.add_argument('--warmup', metavar='DIR', default=None,
+                        help='Experiment dir whose data is overlaid on all subplots as "baseline"')
 
     args = parser.parse_args()
     is_histogram = args.mode == 'histogram'
@@ -243,10 +245,17 @@ def main():
         ftdc_substrings = [s.strip() for s in args.ftdc.split(',')] if args.ftdc else []
         ftdc_mod = _import_ftdc_tools() if ftdc_substrings else None
 
+    warmup_dir = getattr(args, 'warmup', None)
+    warmup_dir_norm = os.path.normpath(warmup_dir) if warmup_dir else None
+
+    exp_dirs = list(args.experiments)
+    if warmup_dir_norm and not any(os.path.normpath(d) == warmup_dir_norm for d in exp_dirs):
+        exp_dirs.insert(0, warmup_dir)
+
     experiments = {}
     experiments_raw = {}
     experiment_t0s = {}
-    for exp_dir in args.experiments:
+    for exp_dir in exp_dirs:
         name = os.path.basename(exp_dir.rstrip('/\\'))
         print(f'Loading {name} ...')
         df, t0 = load_experiment(exp_dir, args.request_name)
@@ -254,6 +263,26 @@ def main():
         if not is_histogram:
             experiments[name] = bucket_data(df, args.bucket_minutes)
         experiment_t0s[name] = t0
+
+    warmup_raw = None
+    if warmup_dir:
+        wname = os.path.basename(warmup_dir.rstrip('/\\'))
+        print(f'Loading warmup baseline from {wname} ...')
+        warmup_raw, warmup_t0 = load_experiment(warmup_dir, args.request_name)
+        warmup_phases = parse_phases_log(warmup_dir)
+        target_phase = next((p for p in warmup_phases if p[0] == 'WarmUp'), None)
+        if target_phase is None:
+            target_phase = next((p for p in warmup_phases if p[0] == 'Normal run'), None)
+        if target_phase is not None:
+            pname_w, s_w, e_w = target_phase
+            s_min = (s_w - warmup_t0) / 60.0
+            e_min = (e_w - warmup_t0) / 60.0 if e_w is not None else None
+            mask = warmup_raw['elapsed_min'] >= s_min
+            if e_min is not None:
+                mask &= warmup_raw['elapsed_min'] <= e_min
+            warmup_raw = warmup_raw[mask]
+            if warmup_raw.empty:
+                print(f'  Warning: warmup phase "{pname_w}" yielded no data rows', file=sys.stderr)
 
     # Load FTDC data per experiment: {exp_name: {metric_key: {...}}}
     ftdc_by_exp = {}
@@ -288,7 +317,7 @@ def main():
     def _x_axis(ax, max_elapsed_h):
         bucket_h = args.bucket_minutes / 60
         major_h = max(bucket_h, round(max_elapsed_h / 10 / bucket_h + 0.5) * bucket_h)
-        ax.set_xlim(left=0)
+        ax.set_xlim(left=0, right=max_elapsed_h)
         ax.xaxis.set_major_locator(plt.MultipleLocator(major_h))
         ax.xaxis.set_minor_locator(plt.MultipleLocator(bucket_h))
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:g}h'))
@@ -331,7 +360,7 @@ def main():
         df = pd.concat([pd.DataFrame(phase_cols, index=df.index), df], axis=1)
         return df
 
-    def _build_histogram_dataframe():
+    def _build_histogram_dataframe(warmup_raw=None):
         """Compute histogram bins for each (percentile, phase, experiment) and return as
         long-format DataFrame with columns [percentile, phase, experiment, bin_left, bin_right,
         count].  phase='all' means no phase info (all data combined).
@@ -346,6 +375,10 @@ def main():
             else:
                 phase_subsets: dict[str, list] = {}
                 for pname, s, e in phases:
+                    if pname == 'WarmUp':
+                        continue  # never gets its own subplot
+                    if warmup_raw is not None and pname == 'Normal run':
+                        continue  # baseline overlay already represents the Normal run data
                     s_min = s * 60
                     e_min = e * 60 if e is not None else None
                     mask = df_raw['elapsed_min'] >= s_min
@@ -354,9 +387,12 @@ def main():
                     subset = df_raw[mask]
                     if not subset.empty:
                         phase_subsets.setdefault(pname, []).append(subset)
+                _delete_phase_suffix = {'RecordStore': '-recordStore', 'Indexes': '-indexes'}
                 for pname, subsets in phase_subsets.items():
                     combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
-                    groups.append((combined, exp_name, pname))
+                    plot_phase = 'Delete' if pname in _delete_phase_suffix else pname
+                    plot_exp = exp_name + _delete_phase_suffix.get(pname, '')
+                    groups.append((combined, plot_exp, plot_phase))
 
         x_threshold = 500
         n_lin, n_log = 50, 30
@@ -377,6 +413,7 @@ def main():
                 else:
                     bin_edges = edges_lin
                 counts, bin_edges = np.histogram(vals, bins=bin_edges)
+                n_total = len(vals)
                 phase_val = 'all' if phase is None else phase
                 for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
                     rows.append({
@@ -385,14 +422,43 @@ def main():
                         'experiment': exp_name,
                         'bin_left': left,
                         'bin_right': right,
-                        'count': count,
+                        'count': count / n_total,
                     })
+
+        # Inject baseline (warmup) bins into every phase subplot
+        if warmup_raw is not None:
+            all_phases = sorted(set(g[2] if g[2] is not None else 'all' for g in groups))
+            for col, pct_label in percentiles:
+                vals = warmup_raw[col].dropna()
+                if vals.empty:
+                    continue
+                lo, hi = max(0.0, float(vals.min())), float(vals.max())
+                if lo >= hi:
+                    continue
+                edges_lin = np.linspace(lo, min(x_threshold, hi), n_lin + 1)
+                if hi > x_threshold:
+                    edges_log = np.logspace(np.log10(x_threshold), np.log10(hi), n_log + 1)[1:]
+                    bin_edges = np.concatenate([edges_lin, edges_log])
+                else:
+                    bin_edges = edges_lin
+                counts, bin_edges = np.histogram(vals, bins=bin_edges)
+                n_total = len(vals)
+                for phase_val in all_phases:
+                    for left, right, count in zip(bin_edges[:-1], bin_edges[1:], counts):
+                        rows.append({
+                            'percentile': pct_label,
+                            'phase': phase_val,
+                            'experiment': 'baseline',
+                            'bin_left': left,
+                            'bin_right': right,
+                            'count': count / n_total,
+                        })
 
         return pd.DataFrame(rows,
                             columns=['percentile', 'phase', 'experiment', 'bin_left', 'bin_right',
                                      'count'])
 
-    def _make_latency_figure(label, df):
+    def _make_latency_figure(label, df, y_max=None):
         exp_names = [c.split(' / ', 1)[1] for c in df.columns if c.startswith(f'{label} /')]
 
         fig, ax = plt.subplots(figsize=(16, 6))
@@ -409,7 +475,7 @@ def main():
 
         linear_threshold = 250
         ax.set_yscale('symlog', linthresh=linear_threshold, linscale=1)
-        ax.set_ylim(bottom=0)
+        ax.set_ylim(bottom=0, top=y_max)
         ax.axhline(linear_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
 
         fig.canvas.draw()
@@ -461,10 +527,10 @@ def main():
 
     def _make_histogram_figure(df):
         pct_order = ['P50', 'P99']
-        phase_order = ['RecordStore', 'Indexes', 'PostRun']
+        phase_order = ['Delete', 'PostRun']
         phases = sorted(df['phase'].unique(),
                         key=lambda p: (phase_order.index(p) if p in phase_order else len(phase_order), p))
-        all_exp_names = list(dict.fromkeys(df['experiment']))  # first-occurrence order
+        all_exp_names = [n for n in dict.fromkeys(df['experiment']) if n != 'baseline']
         exp_colors = {name: colors[i % len(colors)] for i, name in enumerate(all_exp_names)}
 
         subplot_order = [(pct, phase) for pct in pct_order for phase in phases]
@@ -476,39 +542,97 @@ def main():
 
         for ax, (pct, phase) in zip(axes, subplot_order):
             subset = df[(df['percentile'] == pct) & (df['phase'] == phase)]
-            for exp_name, grp in subset.groupby('experiment', sort=False):
+            baseline_grp = subset[subset['experiment'] == 'baseline']
+            main_grp = subset[subset['experiment'] != 'baseline']
+            for exp_name, grp in main_grp.groupby('experiment', sort=False):
                 edges = np.append(grp['bin_left'].values, grp['bin_right'].values[-1])
                 ax.stairs(grp['count'].values, edges,
                           color=exp_colors.get(exp_name, 'gray'),
                           linewidth=1.2, label=exp_name)
+            if not baseline_grp.empty:
+                edges = np.append(baseline_grp['bin_left'].values,
+                                  baseline_grp['bin_right'].values[-1])
+                ax.stairs(baseline_grp['count'].values, edges,
+                          color='gray', linewidth=1.5, linestyle='--', alpha=0.7,
+                          label='baseline')
             phase_label = 'All data' if phase == 'all' else phase
             ax.set_title(f'{pct} — {phase_label}', fontsize=12)
             ax.set_xlabel('Latency (ms)', fontsize=11)
-            ax.set_ylabel('Count', fontsize=11)
+            ax.set_ylabel('Fraction of samples', fontsize=11)
             ax.grid(True, alpha=0.3)
             ax.set_xscale('symlog', linthresh=x_threshold, linscale=1)
             ax.set_xlim(left=0)
             ax.axvline(x_threshold, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
             ax.set_yscale('log')
-            ax.set_ylim(bottom=0.9)
+            ax.set_ylim(bottom=1e-6)
             ax.legend(fontsize=8)
+
+        fig.canvas.draw()
+        global_xmax = max(ax.get_xlim()[1] for ax in axes)
+        global_ymax = max(ax.get_ylim()[1] for ax in axes)
+        for ax in axes:
+            ax.set_xlim(right=global_xmax)
+            ax.set_ylim(top=global_ymax)
 
         fig.canvas.draw()
         for ax in axes:
             xticks = sorted(set(t for t in ax.get_xticks() if t >= 0) | {float(x_threshold)})
             ax.xaxis.set_major_locator(FixedLocator(xticks))
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x):,}'))
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{int(y):,}'))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.4g}'))
 
         fig.tight_layout()
         return fig
 
+    def _print_phase_summary():
+        rows = []
+        for exp_name, df_raw in experiments_raw.items():
+            phases = experiment_phases.get(exp_name, [])
+            if not phases:
+                rows.append((exp_name, 'all', df_raw))
+            else:
+                phase_subsets: dict[str, list] = {}
+                for pname, s, e in phases:
+                    if pname == 'WarmUp':
+                        continue
+                    if warmup_raw is not None and pname == 'Normal run':
+                        continue
+                    s_min = s * 60
+                    e_min = e * 60 if e is not None else None
+                    mask = df_raw['elapsed_min'] >= s_min
+                    if e_min is not None:
+                        mask &= df_raw['elapsed_min'] <= e_min
+                    subset = df_raw[mask]
+                    if not subset.empty:
+                        phase_subsets.setdefault(pname, []).append(subset)
+                _delete_phase_suffix = {'RecordStore': '-recordStore', 'Indexes': '-indexes'}
+                for pname, subsets in phase_subsets.items():
+                    combined = pd.concat(subsets) if len(subsets) > 1 else subsets[0]
+                    plot_phase = 'Delete' if pname in _delete_phase_suffix else pname
+                    plot_exp = exp_name + _delete_phase_suffix.get(pname, '')
+                    rows.append((plot_exp, plot_phase, combined))
+        if warmup_raw is not None:
+            rows.append(('baseline', 'WarmUp/Normal', warmup_raw))
+        if not rows:
+            return
+        col_w = max(max(len(r[0]) for r in rows), 3)
+        phase_w = max(max(len(r[1]) for r in rows), 5)
+        print()
+        print(f"{'Run':<{col_w}}  {'Phase':<{phase_w}}  {'P50 (ms)':>10}  {'P99 (ms)':>10}")
+        print('-' * (col_w + phase_w + 28))
+        for exp_name, phase, subset in rows:
+            p50 = subset['50%'].median()
+            p99 = subset['99%'].median()
+            print(f"{exp_name:<{col_w}}  {phase:<{phase_w}}  {p50:>10.0f}  {p99:>10.0f}")
+        print()
+
     # Step 1: Build CSV (source of truth — exact values that will be plotted)
     if is_histogram:
-        df_csv = _build_histogram_dataframe()
+        df_csv = _build_histogram_dataframe(warmup_raw=warmup_raw)
         csv_path = 'locust_latency_histogram.csv'
         df_csv.to_csv(csv_path, index=False)
         print(f'Saved: {csv_path} ({len(df_csv)} rows)')
+        _print_phase_summary()
     else:
         df_csv = _build_timeseries_dataframe()
         csv_path = 'locust_latency.csv'
@@ -544,11 +668,14 @@ def main():
             ftdc_prefixes.append(parts[0])
             seen_prefixes.add(parts[0])
 
+    lat_cols = [c for c in df_plot.columns if any(c.startswith(f'{lbl} /') for _, lbl in metrics)]
+    global_lat_ymax = float(df_plot[lat_cols].max().max()) if lat_cols else None
+
     if args.fmt == 'pdf':
         out_path = 'locust_latency.pdf'
         with PdfPages(out_path) as pdf:
             for _, label in metrics:
-                fig = _make_latency_figure(label, df_plot)
+                fig = _make_latency_figure(label, df_plot, y_max=global_lat_ymax)
                 pdf.savefig(fig, dpi=150)
                 plt.close(fig)
             for metric_prefix in ftdc_prefixes:
@@ -558,7 +685,7 @@ def main():
         print(f'Saved: {out_path}')
     else:
         for _, label in metrics:
-            fig = _make_latency_figure(label, df_plot)
+            fig = _make_latency_figure(label, df_plot, y_max=global_lat_ymax)
             out_path = f'locust_latency_{label.lower()}.{args.fmt}'
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
