@@ -38,6 +38,13 @@ def yes_no(answer):
             print("Please respond with 'yes' or 'no'\n")
 
 
+def normalize_clustertag(clustertag):
+    """
+    Normalize cluster tag arguments that may be shell-completed as directories.
+    """
+    return clustertag.rstrip('/\\')
+
+
 def exe_name(name):
     """
     Abstracts constructing the name of an executable on POSIX vs Windows platforms

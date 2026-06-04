@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 
-from common.common import yes_no
+from common.common import normalize_clustertag, yes_no
 from common.ec2_instances import (CLIENT_HOST_TEMPLATE, create_and_attach_volumes,
                                   describe_all_instances, extract_data_volumes_from_template,
                                   filter_instances_by_role, launch_instances, load_template,
@@ -167,7 +167,7 @@ if __name__ == "__main__":
         'clustertag', help=
         ('String with which to tag all the instances which will be spawned for this cluster so they '
          'can easily be identified. For example 5.0, 6.0 etc. There must not be any existing '
-         'instances with that tag.'), type=str)
+         'instances with that tag.'), type=normalize_clustertag)
 
     argsParser.add_argument(
         '--user', required=True, help=

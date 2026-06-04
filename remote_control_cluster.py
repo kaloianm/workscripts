@@ -25,7 +25,7 @@ import motor.motor_asyncio
 import os
 import sys
 
-from common.common import CToolsException, yes_no
+from common.common import CToolsException, normalize_clustertag, yes_no
 from common.remote_mongo import (cleanup_mongo_directories, deploy_binaries, gather_logs,
                                  initiate_replica_set, make_remote_mongo_host, rsync_to_hosts,
                                  start_mongod_as_replica_set, stop_mongo_processes)
@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
     argsParser.add_argument('clustertag',
                             help='Cluster tag directory containing deployment_description.json',
-                            type=str)
+                            type=normalize_clustertag)
     subparsers = argsParser.add_subparsers(title='subcommands')
 
     ###############################################################################################
